@@ -12,7 +12,8 @@ const adminTables = {
     },
   };
   let adminTab = "Users",
-    reportData = null;
+    reportData = null,
+    dailyReportData = null;
   function wireTextFilter(inputId, scopeSelector) {
     const input=$(inputId),scope=document.querySelector(scopeSelector);
     if(!input||!scope)return;
@@ -458,10 +459,313 @@ const adminTables = {
       error(e);
     }
   }
+  function dailyThaiDate(date){
+    try{
+      return new Date(date+"T12:00:00+07:00").toLocaleDateString("th-TH",{
+        weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"
+      });
+    }catch(e){return date;}
+  }
+  function dailySorted(items){
+    return [...items].sort((a,b)=>
+      String(a.ClassName||"").localeCompare(String(b.ClassName||""),"th") ||
+      String(a.AreaName||"").localeCompare(String(b.AreaName||""),"th")
+    );
+  }
+  function dailyGroups(d){
+    const done=(d.items||[]).filter(x=>x.Status==="ตรวจแล้ว");
+    return{
+      excellent:dailySorted(done.filter(x=>Number(x.Score)===3)),
+      medium:dailySorted(done.filter(x=>Number(x.Score)===2)),
+      improve:dailySorted(done.filter(x=>Number(x.Score)===1)),
+      pending:dailySorted((d.items||[]).filter(x=>x.Status!=="ตรวจแล้ว"))
+    };
+  }
+  function dailyItemText(x,withNote=true){
+    let line=String(x.ClassName||"—")+" — "+String(x.AreaName||"—");
+    if(withNote&&String(x.Notes||"").trim()){
+      const note=String(x.Notes).trim().replace(/\s+/g," ");
+      line+=" | หมายเหตุ: "+(note.length>180?note.slice(0,177)+"…":note);
+    }
+    return line;
+  }
+  function dailyReportText(d){
+    const g=dailyGroups(d),date=dailyThaiDate(d.date);
+    const lines=[
+      "📢 รายงานผลการตรวจเขตพื้นที่ประจำวัน",
+      "🏫 โรงเรียนรัษฎา",
+      "📅 "+date,
+      ""
+    ];
+    if(d.isHoliday){
+      lines.push("🏖️ "+(d.holidayReason||"วันหยุด / ไม่มีการตรวจ"));
+      lines.push("วันนี้ไม่นับเป็นวันขาดข้อมูล");
+      return lines.join("\n");
+    }
+    lines.push("สรุป: ตรวจแล้ว "+d.done+"/"+d.scheduled+" พื้นที่");
+    lines.push("🌟 ยอดเยี่ยม "+d.counts.excellent+" | 🙂 ปานกลาง "+d.counts.medium+" | 🔧 ปรับปรุง "+d.counts.improve+(d.pending?" | ⏳ รอตรวจ "+d.pending:""));
+    const sections=[
+      ["🌟 ยอดเยี่ยม",g.excellent],
+      ["🙂 ปานกลาง",g.medium],
+      ["🔧 ปรับปรุง",g.improve],
+      ["⏳ รอตรวจ",g.pending]
+    ];
+    sections.forEach(([title,rows])=>{
+      if(!rows.length)return;
+      lines.push("",title+" ("+rows.length+")");
+      rows.forEach(x=>lines.push("• "+dailyItemText(x,true)));
+    });
+    lines.push("","RSD Clean · โรงเรียนรัษฎา");
+    return lines.join("\n");
+  }
+  async function copyDailyReport(){
+    if(!dailyReportData)return;
+    const text=dailyReportText(dailyReportData);
+    try{
+      await navigator.clipboard.writeText(text);
+    }catch(e){
+      const ta=document.createElement("textarea");
+      ta.value=text;ta.style.position="fixed";ta.style.opacity="0";
+      document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();
+    }
+    toast("คัดลอกข้อความรายงานแล้ว");
+  }
+  async function loadDailyLogo(){
+    const urls=["https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"];
+    for(const url of urls){
+      try{
+        const res=await fetch(url,{mode:"cors",cache:"force-cache"});
+        if(!res.ok)continue;
+        const blob=await res.blob();
+        return await createImageBitmap(blob);
+      }catch(e){}
+    }
+    return null;
+  }
+  function canvasRoundRect(ctx,x,y,w,h,r,fill){
+    const rr=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();
+    if(fill){ctx.fillStyle=fill;ctx.fill();}
+  }
+  function canvasWrap(ctx,text,maxWidth){
+    const words=String(text||"").split(/\s+/),lines=[];let line="";
+    for(const word of words){
+      const test=line?line+" "+word:word;
+      if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=word;}
+      else line=test;
+    }
+    if(line)lines.push(line);
+    return lines.length?lines:[""];
+  }
+  async function dailyReportCanvasBlob(d){
+    await document.fonts?.ready?.catch?.(()=>{});
+    const g=dailyGroups(d);
+    const itemCount=(d.items||[]).length;
+    const noteCount=(d.items||[]).filter(x=>String(x.Notes||"").trim()).length;
+    const height=Math.max(1350,Math.min(7000,880+itemCount*76+noteCount*34+(d.isHoliday?0:260)));
+    const canvas=document.createElement("canvas");
+    canvas.width=1080;canvas.height=height;
+    const ctx=canvas.getContext("2d");
+    ctx.fillStyle="#eef8f7";ctx.fillRect(0,0,canvas.width,canvas.height);
+    canvasRoundRect(ctx,42,42,996,height-84,34,"#ffffff");
+
+    const grad=ctx.createLinearGradient(42,42,1038,330);
+    grad.addColorStop(0,"#0f766e");grad.addColorStop(1,"#0891b2");
+    canvasRoundRect(ctx,42,42,996,300,34,grad);
+
+    const logo=await loadDailyLogo();
+    if(logo){
+      ctx.fillStyle="#ffffff";ctx.beginPath();ctx.arc(150,152,72,0,Math.PI*2);ctx.fill();
+      ctx.drawImage(logo,92,94,116,116);
+    }
+    ctx.fillStyle="#ffffff";
+    ctx.font='700 46px "Kanit",sans-serif';
+    ctx.fillText("รายงานผลการตรวจเขตพื้นที่ประจำวัน",250,125);
+    ctx.font='500 31px "Kanit",sans-serif';ctx.fillText("โรงเรียนรัษฎา",250,178);
+    ctx.font='400 25px "Kanit",sans-serif';ctx.fillStyle="rgba(255,255,255,.9)";
+    ctx.fillText(dailyThaiDate(d.date),250,225);
+    ctx.font='400 20px "Kanit",sans-serif';
+    ctx.fillText("RSD Clean · School Cleanliness Inspection System",250,267);
+
+    let y=390;
+    if(d.isHoliday){
+      canvasRoundRect(ctx,86,y,908,180,24,"#f0fdfa");
+      ctx.fillStyle="#0f766e";ctx.font='700 40px "Kanit",sans-serif';ctx.textAlign="center";
+      ctx.fillText("วันหยุด / ไม่มีการตรวจ",540,y+70);
+      ctx.font='400 26px "Kanit",sans-serif';ctx.fillStyle="#56737a";
+      ctx.fillText(d.holidayReason||"วันนี้ไม่นับเป็นวันขาดข้อมูล",540,y+120);
+      ctx.textAlign="left";y+=230;
+    }else{
+      const stats=[
+        ["ตรวจแล้ว",d.done+"/"+d.scheduled,"#e8f7f3","#0f766e"],
+        ["ยอดเยี่ยม",d.counts.excellent,"#ecfdf5","#15803d"],
+        ["ปานกลาง",d.counts.medium,"#fff8e7","#a16207"],
+        ["ปรับปรุง",d.counts.improve,"#fff1f2","#be123c"]
+      ];
+      stats.forEach((x,i)=>{
+        const sx=86+i*226;
+        canvasRoundRect(ctx,sx,y,204,128,20,x[2]);
+        ctx.fillStyle=x[3];ctx.font='600 22px "Kanit",sans-serif';ctx.fillText(x[0],sx+18,y+38);
+        ctx.font='700 38px "Kanit",sans-serif';ctx.fillText(String(x[1]),sx+18,y+91);
+      });
+      y+=178;
+      if(d.pending){
+        canvasRoundRect(ctx,86,y,908,62,16,"#fff9e9");
+        ctx.fillStyle="#8a671b";ctx.font='500 22px "Kanit",sans-serif';
+        ctx.fillText("⏳ รอตรวจ "+d.pending+" พื้นที่",110,y+40);y+=90;
+      }
+      const sections=[
+        ["ยอดเยี่ยม",g.excellent,"#15803d","#ecfdf5"],
+        ["ปานกลาง",g.medium,"#a16207","#fff8e7"],
+        ["ปรับปรุง",g.improve,"#be123c","#fff1f2"],
+        ["รอตรวจ",g.pending,"#64748b","#f1f5f9"]
+      ];
+      for(const [title,rows,color,bg] of sections){
+        if(!rows.length)continue;
+        canvasRoundRect(ctx,86,y,908,56,15,bg);
+        ctx.fillStyle=color;ctx.font='700 25px "Kanit",sans-serif';
+        ctx.fillText(title+" ("+rows.length+")",108,y+37);y+=78;
+        for(const item of rows){
+          ctx.fillStyle="#17334b";ctx.font='600 22px "Kanit",sans-serif';
+          const main=canvasWrap(ctx,dailyItemText(item,false),840);
+          for(const line of main){ctx.fillText("• "+line,112,y);y+=31;}
+          if(String(item.Notes||"").trim()){
+            ctx.fillStyle="#718596";ctx.font='400 19px "Kanit",sans-serif';
+            const note=canvasWrap(ctx,"หมายเหตุ: "+String(item.Notes).trim().replace(/\s+/g," "),805);
+            for(const line of note){ctx.fillText(line,145,y);y+=27;}
+          }
+          y+=15;
+        }
+        y+=16;
+      }
+    }
+    ctx.strokeStyle="#dcebed";ctx.beginPath();ctx.moveTo(86,y);ctx.lineTo(994,y);ctx.stroke();y+=42;
+    ctx.fillStyle="#718596";ctx.font='400 19px "Kanit",sans-serif';
+    ctx.fillText("ข้อมูลจากระบบ RSD Clean · อัปเดต "+new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"})+" น.",86,y);
+    y+=50;
+
+    const finalHeight=Math.min(height,Math.max(650,y+70));
+    if(finalHeight===height){
+      return await new Promise(resolve=>canvas.toBlob(resolve,"image/png",0.95));
+    }
+    const cropped=document.createElement("canvas");cropped.width=1080;cropped.height=finalHeight;
+    cropped.getContext("2d").drawImage(canvas,0,0,1080,finalHeight,0,0,1080,finalHeight);
+    return await new Promise(resolve=>cropped.toBlob(resolve,"image/png",0.95));
+  }
+  async function downloadDailyReportImage(){
+    if(!dailyReportData)return;
+    busy(true,"กำลังสร้างภาพรายงาน…");
+    try{
+      const blob=await dailyReportCanvasBlob(dailyReportData);
+      if(!blob)throw Error("สร้างภาพไม่สำเร็จ");
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);
+      a.download="RSD-Clean-Daily-"+dailyReportData.date+".png";
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+      toast("ดาวน์โหลดภาพรายงานแล้ว");
+    }catch(e){error(e);}
+    finally{busy(false);}
+  }
+  async function shareDailyReport(){
+    if(!dailyReportData)return;
+    const text=dailyReportText(dailyReportData);
+    busy(true,"กำลังเตรียมรายงานสำหรับแชร์…");
+    try{
+      const blob=await dailyReportCanvasBlob(dailyReportData);
+      const file=blob?new File([blob],"RSD-Clean-Daily-"+dailyReportData.date+".png",{type:"image/png"}):null;
+      busy(false);
+      if(file&&navigator.share&&navigator.canShare?.({files:[file]})){
+        await navigator.share({title:"รายงานผลรายวัน RSD Clean",text,files:[file]});
+        return;
+      }
+      if(navigator.share){
+        await navigator.share({title:"รายงานผลรายวัน RSD Clean",text});
+        return;
+      }
+      await copyDailyReport();
+    }catch(e){
+      busy(false);
+      if(e?.name!=="AbortError")error(e);
+    }
+  }
+  function dailyResultRows(rows,labelClass){
+    if(!rows.length)return '<div class="daily-empty">ไม่มีรายการ</div>';
+    return '<div class="daily-result-list">'+rows.map(x=>
+      '<div class="daily-result-row">'+
+        '<div><b>'+esc(x.ClassName)+'</b><span>'+esc(x.AreaName)+'</span>'+
+        (x.Notes?'<small>หมายเหตุ: '+esc(x.Notes)+'</small>':'')+'</div>'+
+        '<span class="daily-dot '+labelClass+'"></span>'+
+      '</div>'
+    ).join("")+'</div>';
+  }
+  function drawDailyReport(){
+    const d=dailyReportData,g=dailyGroups(d),date=dailyThaiDate(d.date);
+    const content=$("daily-report-content");
+    if(!content)return;
+    content.innerHTML=
+      '<section class="daily-share-card" id="daily-share-card">'+
+        '<header class="daily-share-head">'+
+          '<div class="daily-logo-box"><img src="https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png" alt="ตราโรงเรียนรัษฎา" onerror="this.onerror=null;this.src=\'/icon-192.png\'"></div>'+
+          '<div><span>RSD CLEAN · โรงเรียนรัษฎา</span><h2>รายงานผลการตรวจเขตพื้นที่ประจำวัน</h2><p>'+esc(date)+'</p></div>'+
+        '</header>'+
+        (d.isHoliday
+          ? '<div class="daily-holiday"><i data-lucide="calendar-off"></i><h3>วันหยุด / ไม่มีการตรวจ</h3><p>'+esc(d.holidayReason||"วันนี้ไม่นับเป็นวันขาดข้อมูล")+'</p></div>'
+          : '<div class="daily-stat-grid">'+
+              '<div><span>ตรวจแล้ว</span><b>'+d.done+'/'+d.scheduled+'</b></div>'+
+              '<div class="excellent"><span>ยอดเยี่ยม</span><b>'+d.counts.excellent+'</b></div>'+
+              '<div class="medium"><span>ปานกลาง</span><b>'+d.counts.medium+'</b></div>'+
+              '<div class="improve"><span>ปรับปรุง</span><b>'+d.counts.improve+'</b></div>'+
+            '</div>'+
+            (d.pending?'<div class="daily-pending"><i data-lucide="clock-3"></i> ยังรอตรวจ '+d.pending+' พื้นที่</div>':'')+
+            '<div class="daily-section excellent"><h3><span></span>ยอดเยี่ยม <b>'+g.excellent.length+'</b></h3>'+dailyResultRows(g.excellent,"excellent")+'</div>'+
+            '<div class="daily-section medium"><h3><span></span>ปานกลาง <b>'+g.medium.length+'</b></h3>'+dailyResultRows(g.medium,"medium")+'</div>'+
+            '<div class="daily-section improve"><h3><span></span>ปรับปรุง <b>'+g.improve.length+'</b></h3>'+dailyResultRows(g.improve,"improve")+'</div>'+
+            (g.pending.length?'<div class="daily-section pending"><h3><span></span>รอตรวจ <b>'+g.pending.length+'</b></h3>'+dailyResultRows(g.pending,"pending")+'</div>':'')
+        )+
+        '<footer class="daily-share-footer">ข้อมูลจากระบบ RSD Clean · อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</footer>'+
+      '</section>';
+    $("daily-actions").classList.remove("hidden");
+    icons();
+  }
+  async function loadDailyReport(seq=S.seq){
+    const date=$("daily-date")?.value;
+    if(!date)return;
+    const d=await rpc("dailyReport",{date});
+    if(seq!==S.seq||$("daily-date")?.value!==date)return;
+    dailyReportData=d;
+    drawDailyReport();
+  }
+  async function renderDailyReport(seq){
+    const today=thaiDay();
+    $("app").innerHTML=
+      heading(
+        "รายงานผลรายวัน 📣",
+        "จัดรูปแบบสำหรับส่งในกลุ่มหัวหน้าห้อง สามารถแชร์ คัดลอกข้อความ หรือดาวน์โหลดเป็นภาพได้",
+        '<a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานหลัก</a>'
+      )+
+      '<form id="daily-filter" class="card daily-filter mb-4"><div class="field m-0"><label>วันที่รายงาน</label><input id="daily-date" type="date" value="'+today+'" max="'+today+'" required></div><button class="btn" type="submit"><i data-lucide="refresh-cw"></i> แสดงผล</button></form>'+
+      '<div id="daily-actions" class="daily-actions hidden mb-4">'+
+        '<button class="btn" id="daily-share"><i data-lucide="share-2"></i> แชร์</button>'+
+        '<button class="btn secondary" id="daily-copy"><i data-lucide="copy"></i> คัดลอกข้อความ</button>'+
+        '<button class="btn secondary" id="daily-image"><i data-lucide="image-down"></i> ดาวน์โหลดภาพ</button>'+
+      '</div>'+
+      '<div id="daily-report-content"><div class="card empty">กำลังโหลดรายงาน…</div></div>';
+    $("daily-filter").onsubmit=e=>{e.preventDefault();loadDailyReport().catch(error);};
+    $("daily-date").onchange=()=>loadDailyReport().catch(error);
+    $("daily-share").onclick=shareDailyReport;
+    $("daily-copy").onclick=copyDailyReport;
+    $("daily-image").onclick=downloadDailyReportImage;
+    icons();
+    await loadDailyReport(seq);
+  }
+
   async function renderReports(seq) {
     const today = thaiDay();
     $("app").innerHTML =
-      heading("รายงานและเกียรติบัตร", "วิเคราะห์ผลการดูแลพื้นที่และติดตามประสิทธิภาพการตรวจ") +
+      heading("รายงานและเกียรติบัตร", "วิเคราะห์ผลการดูแลพื้นที่และติดตามประสิทธิภาพการตรวจ", '<a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานผลรายวัน</a>') +
       '<form id="report-filter" class="card flex flex-wrap items-end gap-4 mb-6"><div class="field m-0"><label>ตั้งแต่วันที่</label><input type="date" name="start" value="' +
       today.slice(0, 8) +
       '01" required></div><div class="field m-0"><label>ถึงวันที่</label><input type="date" name="end" value="' +
