@@ -139,6 +139,7 @@ async function dispatch(env, action, p, token, request) {
     qrAdmin: async () => qrAdmin(env,u,p),
     master: async () => master(env,u),
     report: async () => report(env,u,validateDate(p.start),validateDate(p.end)),
+    dailyReport: async () => dailyReport(env,u,validateDate(p.date || thaiDay())),
     saveMaster: async () => saveMaster(env,u,p),
     bulkPreview: async () => bulkPreview(env,u,p),
     bulkCreate: async () => bulkCreate(env,u,p),
@@ -939,6 +940,49 @@ async function dashboard(env,u,d){
   return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,pending:selected.length-done.length,counts,feed:u?recent:[],leaders:leaderboard(ins).slice(0,5),updatedAt:nowIso()};
 }
 async function teacher(env,u){ role(u,["Teacher"]); await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins); const filtered=ins.filter(i=>metaOf(i).classId===u.linked_classroom_id&&(i.inspection_date===thaiDay()||ad.has(i.inspection_date))).sort((a,b)=>b.inspection_date.localeCompare(a.inspection_date)).slice(0,200); return{inspections:await Promise.all(filtered.map(i=>displayOne(env.DB,i))),rewards:(await all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=?",u.linked_classroom_id)).map(rewardRow),monthly:(await monthly(env,ins,thaiDay().slice(0,7))).filter(r=>r.id===u.linked_classroom_id)}; }
+async function dailyReport(env,u,date){
+  role(u,["Admin","Supervisor"]);
+  assert(date<=thaiDay(),"เลือกวันที่ในอนาคตไม่ได้");
+  if(date===thaiDay())await ensureToday(env);
+  const db=env.DB;
+  const [rows,isSchoolDay]=await Promise.all([
+    all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
+    schoolDay(env,date)
+  ]);
+  const items=rows.map(i=>{
+    const m=metaOf(i);
+    return{
+      InspectionID:String(i.inspection_id),
+      AreaName:String(m.areaName||"—"),
+      ClassName:String(m.className||"—"),
+      Status:String(i.status||"รอตรวจ"),
+      Score:Number(i.score||0),
+      Rating:String(i.rating||""),
+      Notes:String(i.note||m.note||""),
+      CompletedAt:String(i.completed_at||m.completedAt||"")
+    };
+  });
+  const done=items.filter(x=>x.Status==="ตรวจแล้ว");
+  const noInspectionHoliday=date<thaiDay()&&done.length===0;
+  const isHoliday=!isSchoolDay||noInspectionHoliday;
+  const counts={
+    excellent:done.filter(x=>x.Score===3).length,
+    medium:done.filter(x=>x.Score===2).length,
+    improve:done.filter(x=>x.Score===1).length
+  };
+  return{
+    date,
+    isHoliday,
+    holidayReason:!isSchoolDay?"วันหยุดตามปฏิทิน":noInspectionHoliday?"ไม่มีการตรวจในวันดังกล่าว":"",
+    scheduled:items.length,
+    done:done.length,
+    pending:isHoliday?0:items.filter(x=>x.Status!=="ตรวจแล้ว").length,
+    counts,
+    items,
+    updatedAt:nowIso()
+  };
+}
+
 async function report(env,u,start,end){
   role(u,["Admin","Supervisor"]); assert(start<=end&&end<=thaiDay(),"ช่วงวันที่ไม่ถูกต้อง"); assert((new Date(end)-new Date(start))<=366*86400000,"เลือกช่วงไม่เกิน 366 วัน");
   await ensureToday(env);
