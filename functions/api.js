@@ -25,6 +25,7 @@ let systemEventsReady = false;
 let systemEventsCleanupDay = "";
 const rateBuckets = new Map();
 const rateEventLast = new Map();
+const notificationCache = new Map();
 let rateSweepAt = 0;
 
 function clientAddress(request){
@@ -118,6 +119,7 @@ export async function onRequest(context) {
     enforceRateLimit(request,action,payload,token);
 
     const data = await dispatch(env, action, payload, token, request);
+    if(["saveInspection","reviewInspection","saveDutyOverride","deleteDutyOverride","setInspectionException","saveAppSettings","assign","setAssignmentDays","holidays","saveMaster","deleteMaster","restoreTrash","restoreBackup"].includes(action)) notificationCache.clear();
     const duration=Date.now()-started;
 
     if (!["challenge","login","publicDashboard"].includes(action)) {
@@ -912,7 +914,9 @@ async function purgeTrash(env,u,p){
 }
 
 async function notifications(env,u,skipEnsure=false){
-  const db=env.DB,items=[],cfg=await getAppSettings(db),today=thaiDay(),month=today.slice(0,7),monthStart=month+"-01",last30=shiftDate(today,-29);
+  const today=thaiDay(),cacheKey=String(u.role||"")+"|"+String(u.user_id||"")+"|"+today,cached=notificationCache.get(cacheKey);
+  if(cached&&Date.now()-cached.at<15000)return cached.data;
+  const db=env.DB,items=[],cfg=await getAppSettings(db),month=today.slice(0,7),monthStart=month+"-01",last30=shiftDate(today,-29);
   const add=(type,title,message,action="",count=0)=>items.push({type,title,message,action,count});
 
   if(u.role==="Inspector"){
@@ -979,7 +983,9 @@ async function notifications(env,u,skipEnsure=false){
     if(monthImprove>cfg.certificateBronzeMax)add("warning","เกินเกณฑ์เกียรติบัตรเดือนนี้","มีผลปรับปรุง "+monthImprove+" ครั้ง","history",1);
     else if(monthImprove>=cfg.certificateSilverMax+1)add("info","ติดตามเกณฑ์เกียรติบัตร","เดือนนี้มีผลปรับปรุง "+monthImprove+" ครั้ง","history",0);
   }
-  return{items,unread:items.filter(x=>x.type==="warning").reduce((n,x)=>n+Math.max(1,Number(x.count||0)),0),updatedAt:nowIso()};
+  const data={items,unread:items.filter(x=>x.type==="warning").reduce((n,x)=>n+Math.max(1,Number(x.count||0)),0),updatedAt:nowIso()};
+  notificationCache.set(cacheKey,{at:Date.now(),data});
+  return data;
 }
 function shiftClock(hhmm,minutes){
   const [h,m]=String(hhmm||"00:00").split(":").map(Number),total=(h*60+m+minutes+1440)%1440;
