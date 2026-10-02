@@ -442,11 +442,12 @@ tbody tr:hover td{background:#fbfefe}
   .brand-copy strong{font-size:19px}
   .brand-copy small{display:block;font-size:8.5px;max-width:165px;overflow:hidden;text-overflow:ellipsis}
   .mobile-menu-trigger{display:none!important}
-  .topbar nav{
+  #nav{
     position:fixed;
-    left:8px;right:8px;bottom:8px;
+    left:8px;
+    right:8px;
     bottom:max(8px,env(safe-area-inset-bottom));
-    z-index:55;
+    z-index:80;
     display:flex!important;
     justify-content:space-around;
     gap:4px;
@@ -455,7 +456,7 @@ tbody tr:hover td{background:#fbfefe}
     padding:7px;
     border:1px solid rgba(208,227,229,.95);
     border-radius:20px;
-    background:rgba(255,255,255,.94);
+    background:rgba(255,255,255,.96);
     box-shadow:0 14px 40px rgba(15,65,75,.18);
     backdrop-filter:blur(18px) saturate(160%);
     -webkit-backdrop-filter:blur(18px) saturate(160%);
@@ -564,4 +565,8 @@ tbody tr:hover td{background:#fbfefe}
   #modal .modal-card{width:100%;max-height:none;padding:0}
   #modal-title,#modal-close,.no-print{display:none!important}
   .certificate{margin:10mm}
+}
+
+@media (min-width:761px){
+  body > #nav{display:none!important}
 }
