@@ -322,6 +322,26 @@
       if (!silent) busy(false);
     }
   }
+  const clientErrorSeen=new Map();
+  async function reportBrowserError(message){
+    if(!S.user||!S.token||!navigator.onLine)return;
+    const msg=String(message||"Browser error").replace(/\s+/g," ").slice(0,300);
+    if(!msg)return;
+    const key=(S.route||"unknown")+"|"+msg,now=Date.now(),last=Number(clientErrorSeen.get(key)||0);
+    if(now-last<60000)return;
+    clientErrorSeen.set(key,now);
+    if(clientErrorSeen.size>100){
+      for(const [k,v] of clientErrorSeen){if(now-Number(v)>10*60000)clientErrorSeen.delete(k);}
+    }
+    try{await rpc("clientError",{message:msg,page:S.route||"unknown"},true);}catch(e){}
+  }
+  window.addEventListener("error",(e)=>{
+    reportBrowserError(e?.message||e?.error?.message||"JavaScript error");
+  });
+  window.addEventListener("unhandledrejection",(e)=>{
+    reportBrowserError(e?.reason?.message||String(e?.reason||"Unhandled promise rejection"));
+  });
+
   function error(e) {
     Swal.fire({
       icon: "error",
