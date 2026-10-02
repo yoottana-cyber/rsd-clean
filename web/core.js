@@ -383,7 +383,7 @@
       '<span class="pill ' +
       ({ 3: "green", 2: "yellow", 1: "red" }[score] || "gray") +
       '">' +
-      esc(text || { 3: "ยอดเยี่ยม", 2: "ปานกลาง", 1: "ปรับปรุง" }[score] || "รอตรวจ") +
+      esc(text || S.config?.scoreLabels?.[String(score)] || { 3: "ยอดเยี่ยม", 2: "ปานกลาง", 1: "ปรับปรุง" }[score] || "รอตรวจ") +
       "</span>"
     );
   }
