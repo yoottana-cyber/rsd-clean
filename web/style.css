@@ -782,3 +782,134 @@ tbody tr:hover td{background:#fbfefe}
   .notification-icon{width:38px;height:38px}
   .offline-work-notice{align-items:flex-start;flex-direction:column}
 }
+
+
+/* Search / filter controls */
+.search-box{
+  min-width:min(320px,100%);
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:0 12px;
+  border:1px solid #d8e7ea;
+  border-radius:13px;
+  background:#fff;
+  color:#7b8c98;
+}
+.search-box svg{width:17px;height:17px;flex:0 0 auto}
+.search-box input{
+  width:100%;
+  min-width:0;
+  height:40px;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#17334b;
+  outline:0;
+}
+.search-box:focus-within{
+  border-color:#57b8b1;
+  box-shadow:0 0 0 4px rgba(20,184,166,.10)
+}
+.task-filter-bar{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap
+}
+.task-filter-bar .search-box{flex:1 1 280px}
+.task-filter-bar select{width:170px}
+
+/* Onboarding */
+.onboarding-wrap{
+  text-align:center;
+  padding:8px 6px 2px;
+}
+.onboarding-step{
+  display:inline-flex;
+  padding:5px 10px;
+  border-radius:999px;
+  background:#eef8f7;
+  color:#0f766e;
+  font-size:11px;
+  font-weight:600;
+}
+.onboarding-icon{
+  width:86px;height:86px;
+  margin:22px auto 15px;
+  display:grid;place-items:center;
+  border-radius:26px;
+  background:linear-gradient(145deg,#ddf7f1,#e6f7fb);
+  color:#0f766e;
+  box-shadow:0 13px 30px rgba(15,118,110,.10)
+}
+.onboarding-icon svg{width:42px;height:42px;stroke-width:1.8}
+.onboarding-wrap h3{font-size:24px;margin:0;color:#17334b}
+.onboarding-wrap p{
+  max-width:520px;
+  margin:10px auto 0;
+  color:#718596;
+  line-height:1.7
+}
+.onboarding-dots{
+  display:flex;
+  justify-content:center;
+  gap:6px;
+  margin:22px 0
+}
+.onboarding-dots span{
+  width:7px;height:7px;border-radius:99px;background:#d8e4e7;transition:.18s
+}
+.onboarding-dots span.active{width:22px;background:#0f8b82}
+.onboarding-actions{
+  display:flex;
+  justify-content:center;
+  gap:10px
+}
+
+/* Signed-in device management */
+.device-list{display:grid;gap:10px}
+.device-card{
+  display:grid;
+  grid-template-columns:46px minmax(0,1fr) auto;
+  align-items:center;
+  gap:12px;
+  padding:13px;
+  border:1px solid #e0ecef;
+  border-radius:16px;
+  background:#fff
+}
+.device-card.current{border-color:#bfe5dc;background:#f5fcfa}
+.device-icon{
+  width:46px;height:46px;border-radius:14px;
+  display:grid;place-items:center;
+  background:#edf7f6;color:#0f766e
+}
+.device-icon svg{width:23px;height:23px}
+.device-copy{display:flex;flex-direction:column;gap:3px;min-width:0}
+.device-copy b{font-size:14px;color:#29495b}
+.device-copy small{font-size:11px;color:#80919d}
+
+/* Compact role home touch */
+.role-quick-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px
+}
+
+@media(max-width:760px){
+  .search-box{width:100%;min-width:0}
+  .task-filter-bar{display:grid;grid-template-columns:1fr}
+  .task-filter-bar select{width:100%}
+  .report-search-card{padding:12px}
+  .device-card{
+    grid-template-columns:42px minmax(0,1fr);
+  }
+  .device-card .btn{
+    grid-column:1 / -1;
+    width:100%
+  }
+  .device-icon{width:42px;height:42px}
+  .onboarding-wrap h3{font-size:21px}
+}
