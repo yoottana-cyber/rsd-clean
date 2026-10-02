@@ -5,6 +5,7 @@ const MAX_IMAGE = 100 * 1024 * 1024;
 const ITERATIONS = 600000;
 const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
 const enc = new TextEncoder();
+let sessionMetaReady = false;
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -153,6 +154,9 @@ async function dispatch(env, action, p, token, request) {
     recycleBin: async () => recycleBin(env,u),
     restoreTrash: async () => restoreTrash(env,u,p),
     purgeTrash: async () => purgeTrash(env,u,p),
+    sessions: async () => listSessions(env,u),
+    logoutSession: async () => logoutSession(env,u,p),
+    logoutOtherSessions: async () => logoutOtherSessions(env,u),
   };
   assert(handlers[action], "ไม่พบ API");
   const result = await handlers[action]();
@@ -163,29 +167,83 @@ async function dispatch(env, action, p, token, request) {
   return result;
 }
 
+async function ensureSessionMeta(db){
+  if(sessionMetaReady)return;
+  const cols=(await all(db,"PRAGMA table_info(sessions)")).map(x=>String(x.name));
+  const add=async(name,sql)=>{
+    if(cols.includes(name))return;
+    try{await db.prepare(sql).run();}catch(e){
+      if(!/duplicate column/i.test(String(e?.message||e)))throw e;
+    }
+  };
+  await add("device_id","ALTER TABLE sessions ADD COLUMN device_id TEXT NOT NULL DEFAULT ''");
+  await add("device_label","ALTER TABLE sessions ADD COLUMN device_label TEXT NOT NULL DEFAULT ''");
+  await add("last_seen","ALTER TABLE sessions ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0");
+  sessionMetaReady=true;
+}
+function cleanClient(p){
+  const c=p&&typeof p.client==="object"?p.client:{};
+  return{
+    id:text(c.id||"",120),
+    label:text(c.label||"",120)
+  };
+}
+async function listSessions(env,u){
+  const db=env.DB;await ensureSessionMeta(db);
+  const rows=await all(db,"SELECT token_hash,device_id,device_label,created_at,last_seen,expires_at FROM sessions WHERE user_id=? AND expires_at>? ORDER BY last_seen DESC,created_at DESC",u.user_id,Date.now());
+  return rows.map(r=>({
+    SessionID:String(r.token_hash),
+    DeviceID:String(r.device_id||""),
+    DeviceLabel:String(r.device_label||"อุปกรณ์เดิม"),
+    CreatedAt:Number(r.created_at||0),
+    LastSeen:Number(r.last_seen||r.created_at||0),
+    ExpiresAt:Number(r.expires_at||0),
+    Current:String(r.token_hash)===String(u.token_hash)
+  }));
+}
+async function logoutSession(env,u,p){
+  const db=env.DB;await ensureSessionMeta(db);
+  const id=text(p.sessionId,200);assert(id,"ไม่พบ Session");
+  const row=await db.prepare("SELECT token_hash,user_id FROM sessions WHERE token_hash=?").bind(id).first();
+  assert(row&&String(row.user_id)===String(u.user_id),"ไม่พบอุปกรณ์นี้");
+  assert(String(row.token_hash)!==String(u.token_hash),"ใช้งานปุ่มออกจากระบบสำหรับเครื่องปัจจุบัน");
+  await db.prepare("DELETE FROM sessions WHERE token_hash=? AND user_id=?").bind(id,u.user_id).run();
+  return true;
+}
+async function logoutOtherSessions(env,u){
+  await env.DB.prepare("DELETE FROM sessions WHERE user_id=? AND token_hash<>?").bind(u.user_id,u.token_hash).run();
+  return true;
+}
+
 async function login(env,p) {
   const db=env.DB, username=text(p.username,80).toLowerCase();
+  await ensureSessionMeta(db);
   const u=await db.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
   const c=parseJson(u?.password,{});
   assert(u && equalLoose(c.hash, await hmac(env,text(p.proof,200))), "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
   await db.prepare("DELETE FROM sessions WHERE expires_at<?").bind(Date.now()).run();
-  const token=uuid()+uuid(), th=await digest(token), exp=Date.now()+(p.remember===true?REMEMBER_SESSION_MS:SESSION_MS);
-  await db.prepare("INSERT INTO sessions(token_hash,user_id,expires_at,credential_hash,created_at) VALUES(?,?,?,?,?)")
-    .bind(th,u.user_id,exp,await digest(u.password),Date.now()).run();
+  const token=uuid()+uuid(), th=await digest(token), now=Date.now(), exp=now+(p.remember===true?REMEMBER_SESSION_MS:SESSION_MS),client=cleanClient(p);
+  await db.prepare("INSERT INTO sessions(token_hash,user_id,expires_at,credential_hash,created_at,device_id,device_label,last_seen) VALUES(?,?,?,?,?,?,?,?)")
+    .bind(th,u.user_id,exp,await digest(u.password),now,client.id,client.label,now).run();
   return { token, user:publicUser(u), mustChange:c.scheme === "bootstrap" };
 }
 async function auth(env, token) {
   assert(token,"SESSION_EXPIRED"); const db=env.DB, th=await digest(token);
+  await ensureSessionMeta(db);
   const s=await db.prepare("SELECT s.*,u.* FROM sessions s JOIN users u ON u.user_id=s.user_id WHERE s.token_hash=?").bind(th).first();
   if (!s || Number(s.expires_at)<Date.now() || !equalLoose(s.credential_hash,await digest(s.password))) {
     await db.prepare("DELETE FROM sessions WHERE token_hash=?").bind(th).run(); throw Error("SESSION_EXPIRED");
   }
-  const remembered = Number(s.expires_at) - Number(s.created_at) > SESSION_MS * 2;
+  const now=Date.now(), remembered = Number(s.expires_at) - Number(s.created_at) > SESSION_MS * 2;
   const renewBefore = 30 * 24 * 3600000;
-  if (remembered && Number(s.expires_at) - Date.now() < renewBefore) {
-    const next = Date.now() + REMEMBER_SESSION_MS;
+  if (remembered && Number(s.expires_at) - now < renewBefore) {
+    const next = now + REMEMBER_SESSION_MS;
     await db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").bind(next,th).run();
     s.expires_at = next;
+  }
+  if(now-Number(s.last_seen||0)>15*60000){
+    await db.prepare("UPDATE sessions SET last_seen=? WHERE token_hash=?").bind(now,th).run();
+    s.last_seen=now;
   }
   return s;
 }
