@@ -175,6 +175,109 @@
       month: "2-digit",
       day: "2-digit",
     }).format(new Date());
+  const OFFLINE_DB_NAME = "rsd-clean-offline";
+  const OFFLINE_DB_VERSION = 1;
+  function openOfflineDb() {
+    return new Promise((resolve,reject)=>{
+      if(!("indexedDB" in window)) return reject(Error("อุปกรณ์นี้ไม่รองรับ Offline Storage"));
+      const req=indexedDB.open(OFFLINE_DB_NAME,OFFLINE_DB_VERSION);
+      req.onupgradeneeded=()=>{
+        const db=req.result;
+        if(!db.objectStoreNames.contains("inspectionQueue")){
+          const store=db.createObjectStore("inspectionQueue",{keyPath:"key"});
+          store.createIndex("userId","userId",{unique:false});
+          store.createIndex("createdAt","createdAt",{unique:false});
+        }
+      };
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error||Error("เปิด Offline Storage ไม่สำเร็จ"));
+    });
+  }
+  async function offlineStore(mode,fn){
+    const db=await openOfflineDb();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction("inspectionQueue",mode),store=tx.objectStore("inspectionQueue");
+      let result;
+      try{result=fn(store);}catch(e){db.close();reject(e);return;}
+      tx.oncomplete=()=>{db.close();resolve(result?.result);};
+      tx.onerror=()=>{db.close();reject(tx.error||Error("Offline Storage ผิดพลาด"));};
+      tx.onabort=()=>{db.close();reject(tx.error||Error("Offline Storage ถูกยกเลิก"));};
+    });
+  }
+  async function queueOfflineInspection(record){
+    await offlineStore("readwrite",store=>store.put(record));
+    window.dispatchEvent(new CustomEvent("rsd-offline-queue-change"));
+    return true;
+  }
+  async function listOfflineInspections(userId=""){
+    const db=await openOfflineDb();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction("inspectionQueue","readonly"),store=tx.objectStore("inspectionQueue"),req=store.getAll();
+      req.onsuccess=()=>resolve((req.result||[]).filter(x=>!userId||x.userId===userId).sort((a,b)=>a.createdAt-b.createdAt));
+      req.onerror=()=>reject(req.error||Error("อ่าน Offline Queue ไม่สำเร็จ"));
+      tx.oncomplete=()=>db.close();
+    });
+  }
+  async function removeOfflineInspection(key){
+    await offlineStore("readwrite",store=>store.delete(key));
+    window.dispatchEvent(new CustomEvent("rsd-offline-queue-change"));
+  }
+  window.rsdOfflineQueue={queue:queueOfflineInspection,list:listOfflineInspections,remove:removeOfflineInspection};
+
+  async function notificationCenterModal(){
+    if(!S.user) return;
+    openModal("ศูนย์แจ้งเตือน",'<div id="notification-center-body"><div class="muted">กำลังโหลดแจ้งเตือน…</div></div>');
+    const box=$("notification-center-body");
+    try{
+      const [server,offline]=await Promise.all([
+        rpc("notifications",{},true),
+        S.user.Role==="Inspector" ? listOfflineInspections(S.user.UserID).catch(()=>[]) : Promise.resolve([])
+      ]);
+      if(!box?.isConnected)return;
+      const items=[...(server?.items||[])];
+      if(offline.length)items.unshift({type:"warning",title:"มีผลตรวจรอซิงก์",message:offline.length+" รายการถูกเก็บไว้ในเครื่อง และจะส่งอัตโนมัติเมื่อออนไลน์",action:"tasks",count:offline.length,offline:true});
+      const icon={warning:"triangle-alert",success:"circle-check",info:"info"}; 
+      box.innerHTML=items.length
+        ? '<div class="notification-list">'+items.map((x,i)=>
+            '<button class="notification-card notification-'+esc(x.type||"info")+'" data-index="'+i+'">'+
+              '<span class="notification-icon"><i data-lucide="'+(icon[x.type]||"bell")+'"></i></span>'+
+              '<span class="notification-copy"><b>'+esc(x.title)+'</b><small>'+esc(x.message)+'</small></span>'+
+              (x.count?'<span class="notification-count">'+Number(x.count)+'</span>':'')+
+            '</button>'
+          ).join("")+'</div>'
+        : '<div class="empty">ไม่มีแจ้งเตือนที่ต้องดำเนินการ</div>';
+      box.querySelectorAll(".notification-card").forEach(btn=>btn.onclick=async()=>{
+        const x=items[Number(btn.dataset.index)];
+        if(x.offline){
+          closeModal();
+          if(navigator.onLine&&typeof window.syncOfflineInspections==="function") await window.syncOfflineInspections(true);
+          else {location.hash="tasks";await route();}
+          return;
+        }
+        if(x.action){closeModal();location.hash=x.action;await route();}
+      });
+      icons();
+    }catch(e){
+      box.innerHTML='<div class="warn">โหลดแจ้งเตือนไม่สำเร็จ<br>'+esc(e.message||String(e))+'</div>';
+    }
+  }
+  async function refreshNotificationBadge(){
+    if(!S.user)return;
+    try{
+      const [server,offline]=await Promise.all([
+        rpc("notifications",{},true),
+        S.user.Role==="Inspector" ? listOfflineInspections(S.user.UserID).catch(()=>[]) : Promise.resolve([])
+      ]);
+      const n=Math.min(99,Number(server?.unread||0)+offline.length);
+      document.querySelectorAll(".notification-badge").forEach(el=>{
+        el.textContent=n>99?"99+":String(n);
+        el.classList.toggle("hidden",!n);
+      });
+    }catch(e){}
+  }
+  window.addEventListener("rsd-offline-queue-change",()=>refreshNotificationBadge());
+  window.rsdNotificationCenter=notificationCenterModal;
+
   function busy(on, text = "กำลังประมวลผล…") {
     S.busy = Math.max(0, S.busy + (on ? 1 : -1));
     $("loading").classList.toggle("hidden", !S.busy);
@@ -378,6 +481,7 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
+        '<button class="mobile-more-item" id="mobile-notifications" type="button"><span class="menu-icon-with-badge"><i data-lucide="bell"></i><b class="notification-badge hidden">0</b></span><span>แจ้งเตือน</span></button>' +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
         '<button class="mobile-more-item" id="mobile-change-pass" type="button"><i data-lucide="key-round"></i><span>เปลี่ยนรหัสผ่าน</span></button>' +
         '<button class="mobile-more-item" id="mobile-refresh" type="button"><i data-lucide="refresh-cw"></i><span>รีเฟรชข้อมูล</span></button>' +
@@ -386,6 +490,8 @@
     );
     wireInstallButtons();
     icons();
+    if ($("mobile-notifications")) $("mobile-notifications").onclick = () => { closeModal(); notificationCenterModal(); };
+    refreshNotificationBadge();
     if ($("mobile-change-pass")) $("mobile-change-pass").onclick = () => {
       closeModal();
       passwordModal();
@@ -462,6 +568,7 @@
       : "";
     $("account").innerHTML = S.user
       ? '<div class="account-user"><span class="account-name">' + esc(S.user.FullName) + '</span>' +
+        '<button class="btn small secondary notification-btn" id="notification-btn" type="button" aria-label="แจ้งเตือน"><span class="menu-icon-with-badge"><i data-lucide="bell"></i><b class="notification-badge hidden">0</b></span><span class="account-label">แจ้งเตือน</span></button>' +
         install +
         '<button class="btn small secondary" id="change-pass" type="button" aria-label="เปลี่ยนรหัสผ่าน"><i data-lucide="key-round"></i><span class="account-label">รหัสผ่าน</span></button>' +
         '<button class="btn small secondary" id="logout" type="button" aria-label="ออกจากระบบ"><i data-lucide="log-out"></i><span class="account-label">ออก</span></button></div>'
@@ -469,6 +576,7 @@
 
     if ($("mobile-fab")) $("mobile-fab").onclick = mobileQuickAction;
     if ($("mobile-more")) $("mobile-more").onclick = mobileMoreMenu;
+    if ($("notification-btn")) $("notification-btn").onclick = notificationCenterModal;
 
     if (S.user) {
       $("logout").onclick = async () => {
@@ -481,6 +589,7 @@
     }
     wireInstallButtons();
     icons();
+    if(S.user) setTimeout(refreshNotificationBadge,0);
   }
   async function route() {
     const seq = ++S.seq;
@@ -750,8 +859,17 @@
     if (!bar) return;
     bar.classList.toggle("hidden", navigator.onLine);
   }
-  window.addEventListener("online", updateNetworkStatus);
-  window.addEventListener("offline", updateNetworkStatus);
+  window.addEventListener("online", async () => {
+    updateNetworkStatus();
+    if (typeof window.syncOfflineInspections === "function") {
+      try { await window.syncOfflineInspections(false); } catch(e) {}
+    }
+    refreshNotificationBadge();
+  });
+  window.addEventListener("offline", () => {
+    updateNetworkStatus();
+    refreshNotificationBadge();
+  });
 
   window.addEventListener("DOMContentLoaded", async () => {
     placeNavigation();
@@ -769,10 +887,39 @@
   });
 
   if ("serviceWorker" in navigator) {
+    let reloadingForUpdate=false,updatePromptOpen=false;
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{
+      if(reloadingForUpdate)return;
+      reloadingForUpdate=true;
+      location.reload();
+    });
+    async function offerUpdate(reg){
+      if(updatePromptOpen||!reg?.waiting)return;
+      updatePromptOpen=true;
+      const r=await Swal.fire({
+        icon:"info",
+        title:"RSD Clean มีเวอร์ชันใหม่",
+        text:"อัปเดตตอนนี้เพื่อรับฟังก์ชันและการแก้ไขล่าสุด",
+        showCancelButton:true,
+        confirmButtonText:"อัปเดตตอนนี้",
+        cancelButtonText:"ไว้ภายหลัง",
+        confirmButtonColor:"#0f766e"
+      });
+      updatePromptOpen=false;
+      if(r.isConfirmed&&reg.waiting)reg.waiting.postMessage({type:"SKIP_WAITING"});
+    }
     window.addEventListener("load", async () => {
       try {
         const reg = await navigator.serviceWorker.register("/sw.js");
-        reg.update().catch(() => {});
+        if(reg.waiting&&navigator.serviceWorker.controller) offerUpdate(reg);
+        reg.addEventListener("updatefound",()=>{
+          const worker=reg.installing;
+          if(!worker)return;
+          worker.addEventListener("statechange",()=>{
+            if(worker.state==="installed"&&navigator.serviceWorker.controller) offerUpdate(reg);
+          });
+        });
+        reg.update().catch(()=>{});
       } catch (e) {}
     });
   }
