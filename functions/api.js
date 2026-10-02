@@ -1067,7 +1067,7 @@ async function reviewQueue(env,u){
   if(!cfg.approvalEnabled)return{enabled:false,rows:[]};
   const rows=await all(env.DB,"SELECT * FROM inspections WHERE inspection_date>=? ORDER BY inspection_date DESC,updated_at DESC LIMIT 500",shiftDate(thaiDay(),-30));
   return{enabled:true,rows:rows.filter(i=>["รอรับรอง","ส่งกลับแก้ไข"].includes(String(metaOf(i).approvalStatus||""))).map(i=>{
-    const m=metaOf(i);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:m.areaName||"—",ClassName:m.className||"—",Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",ApprovalStatus:m.approvalStatus||"",ReviewNote:m.reviewNote||"",CompletedBy:m.completedByName||i.completed_by_name||"",UpdatedAt:i.updated_at};
+    const m=metaOf(i);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:m.areaName||"—",ClassName:m.className||"—",Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",ApprovalStatus:m.approvalStatus||"",ReviewNote:m.reviewNote||"",CompletedBy:m.completedByName||i.completed_by_name||"",PhotoLinks:parseJson(i.photo_links_json,[]).map(x=>({id:x})),UpdatedAt:i.updated_at};
   })};
 }
 async function reviewInspection(env,u,p){
