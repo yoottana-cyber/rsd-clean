@@ -425,16 +425,26 @@ async function systemStatus(env,u){
 
   let drive={configured:!!(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY),ok:false,message:"ยังไม่ได้ตั้งค่า Drive Gateway"};
   if(drive.configured){
+    const timeout15 = () => new Promise((_,reject)=>setTimeout(()=>reject(Error("TIMEOUT")),15000));
     try{
-      const res=await Promise.race([
-        fetch(env.GAS_DRIVE_URL,{method:"GET",redirect:"follow",headers:{"Cache-Control":"no-cache"}}),
-        new Promise((_,reject)=>setTimeout(()=>reject(Error("TIMEOUT")),5000))
-      ]);
-      const raw=await res.text();
-      let body={};try{body=JSON.parse(raw);}catch{}
-      drive={configured:true,ok:res.ok&&body?.ok===true,message:res.ok?(body?.ok===true?"เชื่อมต่อได้":"Gateway ตอบกลับไม่สมบูรณ์"):"HTTP "+res.status,service:String(body?.service||"")};
+      try{
+        const ping=await Promise.race([gasDrive(env,"ping",{}),timeout15()]);
+        drive={configured:true,ok:!!ping?.ok,message:"เชื่อมต่อได้",service:String(ping?.service||"RSD Clean Drive Gateway")};
+      }catch(firstErr){
+        if(String(firstErr?.message||firstErr).includes("ไม่พบ Drive API")){
+          const res=await Promise.race([
+            fetch(env.GAS_DRIVE_URL,{method:"GET",redirect:"follow",headers:{"Cache-Control":"no-cache"}}),
+            timeout15()
+          ]);
+          const raw=await res.text();
+          let body={};try{body=JSON.parse(raw);}catch{}
+          drive={configured:true,ok:res.ok&&body?.ok===true,message:res.ok?(body?.ok===true?"เชื่อมต่อได้":"Gateway ตอบกลับไม่สมบูรณ์"):"HTTP "+res.status,service:String(body?.service||"")};
+        }else{
+          throw firstErr;
+        }
+      }
     }catch(e){
-      drive={configured:true,ok:false,message:e?.message==="TIMEOUT"?"เชื่อมต่อเกิน 5 วินาที":String(e?.message||e)};
+      drive={configured:true,ok:false,message:e?.message==="TIMEOUT"?"เชื่อมต่อเกิน 15 วินาที":String(e?.message||e)};
     }
   }
 
