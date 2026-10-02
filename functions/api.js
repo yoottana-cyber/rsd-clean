@@ -1466,9 +1466,9 @@ async function dashboard(env,u,d){
   ]);
   const ad=activeDates(ins),isHoliday=d<thaiDay()&&!ad.has(d);
   const selected=ins.filter(i=>i.inspection_date===d&&!isHoliday&&(!u||u.role!=="Teacher"||metaOf(i).classId===u.linked_classroom_id));
-  const done=selected.filter(i=>approvedForScoring(i,cfg)),resolved=selected.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ"),counts=[3,2,1].map(n=>done.filter(i=>Number(i.score)===n).length);
-  const recent=done.sort((a,b)=>String(metaOf(b).completedAt).localeCompare(String(metaOf(a).completedAt))).slice(0,50).map(i=>({date:i.inspection_date,area:metaOf(i).areaName,className:metaOf(i).className,rating:i.rating,score:i.score}));
-  return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,skipped:selected.filter(i=>i.status==="งดตรวจ").length,pending:selected.length-resolved.length,counts,feed:u?recent:[],leaders:leaderboard(ins,cfg).slice(0,5),updatedAt:nowIso()};
+  const submitted=selected.filter(i=>i.status==="ตรวจแล้ว"),resolved=selected.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ"),counts=[3,2,1].map(n=>submitted.filter(i=>Number(i.score)===n).length);
+  const recent=[...submitted].sort((a,b)=>String(metaOf(b).completedAt).localeCompare(String(metaOf(a).completedAt))).slice(0,50).map(i=>({date:i.inspection_date,area:metaOf(i).areaName,className:metaOf(i).className,rating:i.rating,score:i.score,approvalStatus:String(metaOf(i).approvalStatus||"")}));
+  return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:submitted.length,skipped:selected.filter(i=>i.status==="งดตรวจ").length,pending:selected.length-resolved.length,approvalPending:submitted.filter(i=>String(metaOf(i).approvalStatus||"")==="รอรับรอง").length,counts,feed:u?recent:[],leaders:leaderboard(ins,cfg).slice(0,5),updatedAt:nowIso()};
 }
 function monthShift(month,offset){
   const y=Number(month.slice(0,4)),m=Number(month.slice(5,7));
