@@ -79,12 +79,13 @@ let taskRows = [];
       };
     });
     taskRows = rows;
-    const done = rows.filter((i) => i.Status === "ตรวจแล้ว").length;
+    const todayRows=rows.filter(i=>i.InspectionDate===thaiDay());
+    const done = todayRows.filter((i) => i.Status === "ตรวจแล้ว" || i.Status === "งดตรวจ").length;
     const pendingCount=[...pending.values()].length;
     $("app").innerHTML =
       heading(
         "งานตรวจของฉัน 🔎",
-        "งานประจำวันที่ " + thaiDay() + " · สำเร็จ " + done + " จาก " + rows.length + " พื้นที่",
+        "งานประจำวันที่ " + thaiDay() + " · ดำเนินการแล้ว " + done + " จาก " + todayRows.length + " พื้นที่",
         '<div class="flex flex-wrap gap-2"><button class="btn" id="scan-qr"><span aria-hidden="true">▦</span> สแกน QR ณ จุดตรวจ</button><button class="btn secondary" id="refresh-tasks">รีเฟรช</button></div>',
       ) +
       (offlineView?'<div class="offline-work-notice mb-4"><b>โหมดออฟไลน์</b><span>กำลังใช้รายการงานล่าสุดที่เก็บไว้ในเครื่อง ผลตรวจใหม่จะซิงก์เมื่ออินเทอร์เน็ตกลับมา</span></div>':'') +
@@ -111,7 +112,9 @@ let taskRows = [];
                 esc(i.meta.className) +
                 "</span>" +
                 (i._offlinePending?'<span class="pill offline-pill">รอซิงก์</span>':pill(i.Score)) +
-                '</div><h2 class="text-xl font-medium mb-2">' +
+                '</div>' +
+                (i.InspectionDate!==thaiDay()?'<p class="pill red inline-flex mb-2">ส่งกลับแก้ไข · '+esc(i.InspectionDate)+'</p>':'')+
+                '<h2 class="text-xl font-medium mb-2">' +
                 esc(i.meta.areaName) +
                 '</h2>' +
                 (inspectorTeamLabel(i) ? '<p class="muted mb-2">' + esc(inspectorTeamLabel(i)) + '</p>' : '') +
