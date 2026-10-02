@@ -45,3 +45,10 @@ Bindings / Variables:
 - Secret: `DRIVE_GATEWAY_KEY`
 
 ก่อนเปิดใช้งานให้รัน `schema.sql` เข้า D1 และทำ Acceptance Test ตามคู่มือ
+
+
+## Audit Log + Backup
+
+ระบบมี Audit Log, ดาวน์โหลด Backup จากหน้า Admin และ Backup D1 อัตโนมัติวันละครั้งไป Google Drive ผ่าน Drive Gateway
+
+อ่านรายละเอียด: `AUDIT-BACKUP-TH.md`
