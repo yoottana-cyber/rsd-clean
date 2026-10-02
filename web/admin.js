@@ -539,7 +539,7 @@ const adminTables = {
     });
   }
   async function loadDailyLogo(){
-    const urls=["https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"];
+    const urls=["/school-logo","https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"];
     for(const url of urls){
       try{
         const res=await fetch(url,{mode:"cors",cache:"force-cache"});
@@ -715,7 +715,7 @@ const adminTables = {
     content.innerHTML=
       '<section class="daily-share-card" id="daily-share-card">'+
         '<header class="daily-share-head">'+
-          '<div class="daily-logo-box"><img src="https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png" alt="ตราโรงเรียนรัษฎา" onerror="this.onerror=null;this.src=\'/icon-192.png\'"></div>'+
+          '<div class="daily-logo-box"><img src="/school-logo" alt="ตราโรงเรียนรัษฎา" onerror="this.onerror=null;this.src=\'https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png\'"></div>'+
           '<div><span>RSD CLEAN · โรงเรียนรัษฎา</span><h2>รายงานผลการตรวจเขตพื้นที่ประจำวัน</h2><p>'+esc(date)+'</p></div>'+
         '</header>'+
         (d.isHoliday
@@ -751,7 +751,9 @@ const adminTables = {
       heading(
         "รายงานผลรายวัน 📣",
         "จัดรูปแบบสำหรับส่งในกลุ่มหัวหน้าห้อง สามารถแชร์ คัดลอกข้อความ หรือดาวน์โหลดเป็นภาพได้",
-        '<a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานหลัก</a>'
+        ["Admin","Supervisor"].includes(S.user?.Role)
+          ? '<a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานหลัก</a>'
+          : '<a class="btn secondary" href="#tasks"><i data-lucide="clipboard-check"></i> งานตรวจวันนี้</a>'
       )+
       '<form id="daily-filter" class="card daily-filter mb-4"><div class="field m-0"><label>วันที่รายงาน</label><input id="daily-date" type="date" value="'+today+'" max="'+today+'" required></div><button class="btn" type="submit"><i data-lucide="refresh-cw"></i> แสดงผล</button></form>'+
       '<div id="daily-actions" class="daily-actions hidden mb-4">'+
