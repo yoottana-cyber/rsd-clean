@@ -74,6 +74,7 @@ let taskRows = [];
       ) +
       (offlineView?'<div class="offline-work-notice mb-4"><b>โหมดออฟไลน์</b><span>กำลังใช้รายการงานล่าสุดที่เก็บไว้ในเครื่อง ผลตรวจใหม่จะซิงก์เมื่ออินเทอร์เน็ตกลับมา</span></div>':'') +
       (pendingCount?'<div class="offline-work-notice pending mb-4"><b>รอซิงก์ '+pendingCount+' รายการ</b><button class="btn small secondary" id="sync-now" type="button">ซิงก์ตอนนี้</button></div>':'') +
+      '<div class="task-filter-bar mb-4"><div class="search-box"><i data-lucide="search"></i><input id="task-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / หมายเหตุ…"></div><select id="task-status-filter" class="control"><option value="">ทุกสถานะ</option><option value="pending">รอตรวจ</option><option value="done">ตรวจแล้ว</option><option value="offline">รอซิงก์</option></select></div>' +
       '<div class="flex flex-wrap gap-2 mb-5">' +
       rewards
         .slice(-10)
@@ -91,7 +92,7 @@ let taskRows = [];
         ? rows
             .map(
               (i, index) =>
-                '<article class="card'+(i._offlinePending?' offline-pending-card':'')+'"><div class="flex justify-between items-center mb-4"><span class="muted">' +
+                '<article class="card'+(i._offlinePending?' offline-pending-card':'')+'" data-task-status="'+(i._offlinePending?'offline':i.Status==="ตรวจแล้ว"?'done':'pending')+'" data-task-search="'+esc([i.meta.areaName,i.meta.className,i.Notes,inspectorTeamLabel(i)].filter(Boolean).join(" ").toLocaleLowerCase("th"))+'"><div class="flex justify-between items-center mb-4"><span class="muted">' +
                 esc(i.meta.className) +
                 "</span>" +
                 (i._offlinePending?'<span class="pill offline-pill">รอซิงก์</span>':pill(i.Score)) +
@@ -118,6 +119,18 @@ let taskRows = [];
             .join("")
         : '<div class="card empty">ไม่มีงานวันนี้ อาจเป็นวันหยุดหรือยังไม่ได้มอบหมายงาน</div>') +
       "</div>";
+    const applyTaskFilter=()=>{
+      const q=String($("task-search")?.value||"").trim().toLocaleLowerCase("th");
+      const status=String($("task-status-filter")?.value||"");
+      document.querySelectorAll(".task-grid article[data-task-status]").forEach(card=>{
+        const matchText=!q||String(card.dataset.taskSearch||"").includes(q);
+        const matchStatus=!status||card.dataset.taskStatus===status;
+        card.style.display=matchText&&matchStatus?"":"none";
+      });
+    };
+    if($("task-search")) $("task-search").oninput=applyTaskFilter;
+    if($("task-status-filter")) $("task-status-filter").onchange=applyTaskFilter;
+    icons();
     $("refresh-tasks").onclick = route;
     $("scan-qr").onclick = scanQrModal;
     if($("sync-now")) $("sync-now").onclick=()=>window.syncOfflineInspections?.(true);
@@ -613,7 +626,7 @@ let taskRows = [];
             )
             .join("")
         : '<p class="muted">ร่วมกันดูแลพื้นที่เพื่อสะสมรางวัลแรก</p>') +
-      '</div><section class="card"><h2 class="mb-4">ฟีดผลตรวจ</h2>' +
+      '</div><section class="card"><div class="flex flex-wrap items-center justify-between gap-3 mb-4"><h2>ฟีดผลตรวจ</h2><div class="search-box"><i data-lucide="search"></i><input id="teacher-feed-search" type="search" placeholder="ค้นหาพื้นที่ / หมายเหตุ…"></div></div>' +
       table(
         ["วันที่", "พื้นที่", "ผลตรวจ", "หมายเหตุ", "รูป"],
         recent.map((i, index) => [
@@ -629,6 +642,15 @@ let taskRows = [];
         ]),
       ) +
       "</section>";
+    if($("teacher-feed-search")){
+      $("teacher-feed-search").oninput=()=>{
+        const q=String($("teacher-feed-search").value||"").trim().toLocaleLowerCase("th");
+        document.querySelectorAll("#app section.card tbody tr").forEach(tr=>{
+          tr.style.display=!q||tr.textContent.toLocaleLowerCase("th").includes(q)?"":"none";
+        });
+      };
+      icons();
+    }
     document
       .querySelectorAll(".teacher-photo")
       .forEach((b) => (b.onclick = () => showPhoto(recent[Number(b.dataset.index)])));
