@@ -530,14 +530,21 @@ const adminTables = {
     }
     toast("คัดลอกข้อความรายงานแล้ว");
   }
+  function blobImage(blob){
+    return new Promise((resolve,reject)=>{
+      const url=URL.createObjectURL(blob),img=new Image();
+      img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
+      img.onerror=()=>{URL.revokeObjectURL(url);reject(Error("โหลดรูปไม่สำเร็จ"));};
+      img.src=url;
+    });
+  }
   async function loadDailyLogo(){
     const urls=["https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"];
     for(const url of urls){
       try{
         const res=await fetch(url,{mode:"cors",cache:"force-cache"});
         if(!res.ok)continue;
-        const blob=await res.blob();
-        return await createImageBitmap(blob);
+        return await blobImage(await res.blob());
       }catch(e){}
     }
     return null;
