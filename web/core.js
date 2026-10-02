@@ -460,6 +460,7 @@
   }
   const pages = {
     dashboard: { title: "ภาพรวม", icon: "layout-dashboard", roles: ["Admin", "Supervisor", "Inspector"] },
+    executive: { title: "ผู้บริหาร", icon: "briefcase-business", roles: ["Admin", "Supervisor"] },
     tasks: { title: "งานตรวจวันนี้", icon: "clipboard-check", roles: ["Inspector"] },
     teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
@@ -483,7 +484,7 @@
   }
   function homeRouteForUser(){
     if(!S.user)return"dashboard";
-    return S.user.Role==="Inspector"?"tasks":S.user.Role==="Teacher"?"teacher":"dashboard";
+    return S.user.Role==="Inspector"?"tasks":S.user.Role==="Teacher"?"teacher":["Admin","Supervisor"].includes(S.user.Role)?"executive":"dashboard";
   }
   function onboardingKey(){
     return "rsd-onboarding-v1:"+(S.user?.Role||"guest");
@@ -505,13 +506,13 @@
       {icon:"smartphone",title:"ติดตั้งบนมือถือ",text:"เพิ่ม RSD Clean ลงหน้าจอหลักแล้วเปิดใช้งานเหมือนแอป"}
     ];
     if(S.user?.Role==="Admin")return[
-      {icon:"layout-dashboard",title:"ดูภาพรวมโรงเรียน",text:"ติดตามงานที่ตรวจแล้ว งานค้าง และผลประเมินล่าสุด"},
+      {icon:"briefcase-business",title:"Dashboard ผู้บริหาร",text:"ดูสถานะวันนี้ แนวโน้มรายสัปดาห์/รายเดือน และจุดที่ควรติดตามในหน้าเดียว"},
       {icon:"settings-2",title:"จัดการข้อมูล",text:"เพิ่มผู้ใช้ ห้องเรียน พื้นที่ ตั้งเวร QR วันหยุด และกู้คืนข้อมูลจากถังขยะ"},
       {icon:"bell",title:"ตรวจสิ่งที่ต้องดำเนินการ",text:"ศูนย์แจ้งเตือนรวมงานค้าง พื้นที่ไม่มีผู้ตรวจ Backup และสถานะสำคัญ"},
       {icon:"shield-check",title:"ระบบมี Backup และ Audit Log",text:"ตรวจประวัติการเปลี่ยนแปลง สำรอง และกู้คืนข้อมูลได้จากหน้า Admin"}
     ];
     if(S.user?.Role==="Supervisor")return[
-      {icon:"layout-dashboard",title:"ติดตามภาพรวม",text:"ดูจำนวนงานตรวจ ผลประเมิน และสถานะประจำวัน"},
+      {icon:"briefcase-business",title:"Dashboard ผู้บริหาร",text:"ดูสถานะวันนี้ แนวโน้มรายสัปดาห์/รายเดือน และประเด็นที่ควรติดตามในหน้าเดียว"},
       {icon:"chart-no-axes-column-increasing",title:"เปิดรายงาน",text:"ดูอันดับห้องเรียน พื้นที่ที่ต้องจับตา และประสิทธิภาพผู้ตรวจ"},
       ...common.slice(1)
     ];
@@ -624,6 +625,7 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
+        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-executive" type="button"><i data-lucide="briefcase-business"></i><span>Dashboard ผู้บริหาร</span></button><button class="mobile-more-item" id="mobile-dashboard" type="button"><i data-lucide="layout-dashboard"></i><span>ภาพรวมทั่วไป</span></button>' : '') +
         (["Admin","Supervisor","Inspector"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-daily-report" type="button"><i data-lucide="send"></i><span>รายงานรายวัน</span></button>' : '') +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
         '<button class="mobile-more-item" id="mobile-devices" type="button"><i data-lucide="monitor-smartphone"></i><span>อุปกรณ์ที่เข้าสู่ระบบ</span></button>' +
@@ -636,6 +638,8 @@
     wireInstallButtons();
     icons();
     refreshNotificationBadge();
+    if ($("mobile-executive")) $("mobile-executive").onclick = () => { closeModal(); location.hash="executive"; route(); };
+    if ($("mobile-dashboard")) $("mobile-dashboard").onclick = () => { closeModal(); location.hash="dashboard"; route(); };
     if ($("mobile-daily-report")) $("mobile-daily-report").onclick = () => { closeModal(); location.hash="daily"; route(); };
     if ($("mobile-devices")) $("mobile-devices").onclick = () => { closeModal(); deviceSessionsModal(); };
     if ($("mobile-guide")) $("mobile-guide").onclick = () => { closeModal(); showOnboarding(true); };
@@ -693,13 +697,13 @@
       fabIcon = "scan-line";
       fabText = "สแกน";
     } else if (S.user?.Role === "Admin") {
-      slot1 = mobileLink("dashboard",1);
+      slot1 = mobileLink("executive",1);
       slot4 = mobileLink("reports",4);
       fabIcon = "plus";
       fabText = "เพิ่ม";
     } else if (S.user?.Role === "Supervisor") {
-      slot1 = mobileLink("dashboard",1);
-      slot4 = spacer(4);
+      slot1 = mobileLink("executive",1);
+      slot4 = mobileLink("dashboard",4);
       fabIcon = "chart-no-axes-column-increasing";
       fabText = "รายงาน";
     } else if (S.user?.Role === "Teacher") {
@@ -765,12 +769,12 @@
     if (!S.scanToken) S.scanToken = getPendingQr();
     let p = (location.hash.slice(1).split("?")[0] || "home");
     if(p==="home") p=homeRouteForUser();
-    if (S.user && p === "login") p = S.user.Role === "Teacher" ? "teacher" : "dashboard";
+    if (S.user && p === "login") p = homeRouteForUser();
     if (S.user && p === "dashboard" && S.user.Role === "Teacher") p = "teacher";
     if (S.user && S.scanToken && S.user.Role === "Inspector") p = "tasks";
     if (!S.user && p !== "dashboard") p = "login";
     if (S.user && pages[p] && !pages[p].roles.includes(S.user.Role))
-      p = S.user.Role === "Teacher" ? "teacher" : "dashboard";
+      p = homeRouteForUser();
     if (!pages[p] && p !== "login") p = "dashboard";
     S.route = p;
     nav();
@@ -778,6 +782,7 @@
     try {
       if (p === "login") renderLogin();
       else if (p === "dashboard") await renderDashboard(seq);
+      else if (p === "executive") await renderExecutiveDashboard(seq);
       else if (p === "admin") await renderAdmin(seq);
       else if (p === "reports") await renderReports(seq);
       else if (p === "daily") await renderDailyReport(seq);
