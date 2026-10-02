@@ -8,6 +8,7 @@ export async function onRequest(context){
   );
 }
   try{
+    if(String(env.MIGRATION_ENABLED||"").toLowerCase()!=="true") throw Error("MIGRATION_DISABLED");
     if(!env.DB||!env.MIGRATION_SECRET) throw Error("ยังไม่ได้ตั้งค่า DB/MIGRATION_SECRET");
     const body=await request.json();
     if(String(body.secret||"")!==String(env.MIGRATION_SECRET)) throw Error("MIGRATION_DENIED");
