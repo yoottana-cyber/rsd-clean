@@ -772,6 +772,149 @@ const adminTables = {
     await loadDailyReport(seq);
   }
 
+  function execPct(v){return Number(v||0).toLocaleString("th-TH",{maximumFractionDigits:1})+"%";}
+  function execScore(v){return Number(v||0).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2});}
+  function execWeekLabel(date){
+    try{return new Date(date+"T12:00:00+07:00").toLocaleDateString("th-TH",{day:"numeric",month:"short",timeZone:"Asia/Bangkok"});}
+    catch(e){return date;}
+  }
+  function execMonthLabel(month){
+    try{return new Date(month+"-01T12:00:00+07:00").toLocaleDateString("th-TH",{month:"short",year:"2-digit",timeZone:"Asia/Bangkok"});}
+    catch(e){return month;}
+  }
+  function execDelta(current,previous,digits=1,suffix=""){
+    const a=Number(current||0),b=Number(previous||0),d=a-b;
+    if(!Number.isFinite(d)||Math.abs(d)<0.005)return '<span class="exec-delta neutral">คงที่</span>';
+    const sign=d>0?"+":"";
+    const cls=d>0?"up":"down";
+    return '<span class="exec-delta '+cls+'">'+sign+d.toLocaleString("th-TH",{maximumFractionDigits:digits})+suffix+'</span>';
+  }
+  function execSummaryText(d){
+    const t=d.todayStats||{},l=d.last30||{};
+    if(!t.scheduled)return "วันนี้ไม่มีงานตรวจตามตาราง หรือเป็นวันหยุด";
+    const parts=[
+      "วันนี้ตรวจแล้ว "+t.done+"/"+t.scheduled+" พื้นที่ ("+execPct(t.completionRate)+")",
+      "ยอดเยี่ยม "+t.excellent+" · ปานกลาง "+t.medium+" · ปรับปรุง "+t.improve
+    ];
+    if(t.pending)parts.push("ยังเหลือ "+t.pending+" พื้นที่รอตรวจ");
+    if(l.done)parts.push("30 วันล่าสุดคะแนนเฉลี่ย "+execScore(l.averageScore)+" จาก 3");
+    return parts.join(" · ");
+  }
+  function execWatchRows(rows){
+    return rows.length
+      ? rows.map(x=>[
+          '<b>'+esc(x.name||"—")+'</b>',
+          esc(x.className||"—"),
+          String(x.improve||0),
+          execScore(x.avg)
+        ])
+      : [['<span class="muted">ยังไม่พบรายการที่ต้องติดตาม</span>','—','0','—']];
+  }
+  async function renderExecutiveDashboard(seq){
+    $("app").innerHTML=
+      heading(
+        "Dashboard ผู้บริหาร",
+        "สรุปสถานะวันนี้และแนวโน้มโรงเรียนแบบกระชับ",
+        '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานรายวัน</a><a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานละเอียด</a><button class="btn" id="exec-refresh" type="button"><i data-lucide="refresh-cw"></i> รีเฟรช</button></div>'
+      )+
+      '<div id="executive-content"><div class="card empty">กำลังสรุปข้อมูลสำหรับผู้บริหาร…</div></div>';
+    $("exec-refresh").onclick=()=>loadExecutiveDashboard(S.seq).catch(error);
+    icons();
+    await loadExecutiveDashboard(seq);
+  }
+  async function loadExecutiveDashboard(seq=S.seq){
+    const d=await rpc("executiveDashboard",{},true);
+    if(seq!==S.seq)return;
+    const t=d.todayStats||{},w=d.currentWeek||{},pw=d.previousWeek||{},m=d.currentMonth||{},pm=d.previousMonth||{},l=d.last30||{};
+    const watch=d.watchAreas||[],leaders=d.leaders||[];
+    const statusClass=!t.scheduled?"neutral":t.pending?"warning":"good";
+    const statusText=!t.scheduled?"ไม่มีงานวันนี้":t.pending?"ยังมีงานรอตรวจ":"ตรวจครบแล้ว";
+    $("executive-content").innerHTML=
+      '<section class="exec-hero '+statusClass+'">'+
+        '<div><span class="exec-eyebrow">EXECUTIVE SUMMARY · '+esc(d.today)+'</span><h2>'+esc(statusText)+'</h2><p>'+esc(execSummaryText(d))+'</p></div>'+
+        '<div class="exec-hero-rate"><span>อัตราตรวจครบวันนี้</span><b>'+execPct(t.completionRate)+'</b><small>'+t.done+' / '+t.scheduled+' พื้นที่</small></div>'+
+      '</section>'+
+      '<div class="exec-kpi-grid">'+
+        '<article class="exec-kpi"><span>คะแนนเฉลี่ย 30 วัน</span><b>'+execScore(l.averageScore)+'</b><small>จากคะแนนเต็ม 3</small></article>'+
+        '<article class="exec-kpi excellent"><span>ยอดเยี่ยม 30 วัน</span><b>'+execPct(l.excellentRate)+'</b><small>'+Number(l.excellent||0)+' จาก '+Number(l.done||0)+' ผลตรวจ</small></article>'+
+        '<article class="exec-kpi improve"><span>ปรับปรุง 30 วัน</span><b>'+execPct(l.improveRate)+'</b><small>'+Number(l.improve||0)+' ครั้ง</small></article>'+
+        '<article class="exec-kpi"><span>พื้นที่ต้องติดตาม</span><b>'+watch.length+'</b><small>มีผลระดับปรับปรุงใน 30 วัน</small></article>'+
+      '</div>'+
+      '<div class="exec-period-grid">'+
+        '<section class="card exec-period-card"><div class="exec-period-head"><div><span>สัปดาห์นี้</span><h3>'+execPct(w.completionRate)+' ตรวจครบ</h3></div>'+execDelta(w.completionRate,pw.completionRate,1,"%")+'</div>'+
+          '<div class="exec-period-stats"><span>คะแนนเฉลี่ย <b>'+execScore(w.averageScore)+'</b></span><span>ตรวจแล้ว <b>'+w.done+'/'+w.scheduled+'</b></span><span>ปรับปรุง <b>'+w.improve+'</b></span></div>'+
+        '</section>'+
+        '<section class="card exec-period-card"><div class="exec-period-head"><div><span>เดือนนี้</span><h3>'+execPct(m.completionRate)+' ตรวจครบ</h3></div>'+execDelta(m.completionRate,pm.completionRate,1,"%")+'</div>'+
+          '<div class="exec-period-stats"><span>คะแนนเฉลี่ย <b>'+execScore(m.averageScore)+'</b></span><span>ตรวจแล้ว <b>'+m.done+'/'+m.scheduled+'</b></span><span>ปรับปรุง <b>'+m.improve+'</b></span></div>'+
+        '</section>'+
+      '</div>'+
+      '<div class="grid xl:grid-cols-2 gap-5 mb-5">'+
+        '<section class="card"><div class="exec-chart-head"><div><span class="muted">8 สัปดาห์ล่าสุด</span><h2>แนวโน้มรายสัปดาห์</h2></div><span class="exec-legend-note">คะแนนเฉลี่ย + อัตราตรวจครบ</span></div><div class="chart-box exec-chart-box"><canvas id="exec-week-chart"></canvas></div></section>'+
+        '<section class="card"><div class="exec-chart-head"><div><span class="muted">6 เดือนล่าสุด</span><h2>แนวโน้มผลประเมินรายเดือน</h2></div><span class="exec-legend-note">จำนวนผลตรวจแต่ละระดับ</span></div><div class="chart-box exec-chart-box"><canvas id="exec-month-chart"></canvas></div></section>'+
+      '</div>'+
+      '<div class="grid xl:grid-cols-2 gap-5 mb-5">'+
+        '<section class="card"><div class="exec-section-title"><div><span class="muted">30 วันล่าสุด</span><h2>พื้นที่ที่ควรติดตาม</h2></div><a href="#reports" class="text-link">ดูรายงานทั้งหมด</a></div>'+
+          table(["พื้นที่","ห้องรับผิดชอบ","ปรับปรุง","คะแนนเฉลี่ย"],execWatchRows(watch.slice(0,6)))+
+        '</section>'+
+        '<section class="card"><div class="exec-section-title"><div><span class="muted">30 วันล่าสุด</span><h2>ห้องเรียนผลเฉลี่ยเด่น</h2></div><a href="#reports" class="text-link">ดูรายละเอียด</a></div>'+
+          (leaders.length?'<div class="exec-leader-list">'+leaders.map((x,i)=>
+            '<div class="exec-leader-row"><span class="exec-rank">'+(i+1)+'</span><div><b>'+esc(x.name)+'</b><small>'+Number(x.total||0)+' ผลตรวจ</small></div><strong>'+execScore(x.avg)+'</strong></div>'
+          ).join("")+'</div>':'<div class="empty">ยังไม่มีข้อมูลเพียงพอ</div>')+
+        '</section>'+
+      '</div>'+
+      '<section class="card exec-quality-card"><div class="exec-section-title"><div><span class="muted">วันนี้</span><h2>สัดส่วนผลประเมิน</h2></div><span class="muted">อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</span></div>'+
+        '<div class="exec-quality-grid">'+
+          '<div class="excellent"><span>ยอดเยี่ยม</span><b>'+t.excellent+'</b></div>'+
+          '<div class="medium"><span>ปานกลาง</span><b>'+t.medium+'</b></div>'+
+          '<div class="improve"><span>ปรับปรุง</span><b>'+t.improve+'</b></div>'+
+          '<div class="pending"><span>รอตรวจ</span><b>'+t.pending+'</b></div>'+
+        '</div>'+
+      '</section>';
+
+    S.charts.forEach(c=>c.destroy());S.charts=[];
+    if(window.Chart){
+      Chart.defaults.font.family="Kanit";
+      Chart.defaults.color="#718497";
+      const weeks=d.weekSeries||[],months=d.monthSeries||[];
+      S.charts.push(new Chart($("exec-week-chart"),{
+        data:{
+          labels:weeks.map(x=>execWeekLabel(x.start)),
+          datasets:[
+            {type:"line",label:"คะแนนเฉลี่ย",data:weeks.map(x=>Number(x.averageScore||0)),borderColor:"#0f766e",backgroundColor:"#0f766e",tension:.35,yAxisID:"yScore",pointRadius:3,pointHoverRadius:5},
+            {type:"bar",label:"ตรวจครบ (%)",data:weeks.map(x=>Number(x.completionRate||0)),backgroundColor:"rgba(8,145,178,.18)",borderColor:"#0891b2",borderWidth:1,borderRadius:7,yAxisID:"yRate"}
+          ]
+        },
+        options:{
+          maintainAspectRatio:false,
+          interaction:{mode:"index",intersect:false},
+          scales:{
+            yScore:{position:"left",min:0,max:3,ticks:{stepSize:1},grid:{color:"rgba(148,163,184,.12)"}},
+            yRate:{position:"right",min:0,max:100,grid:{drawOnChartArea:false},ticks:{callback:v=>v+"%"}},
+            x:{grid:{display:false}}
+          },
+          plugins:{legend:{position:"bottom"}}
+        }
+      }));
+      S.charts.push(new Chart($("exec-month-chart"),{
+        type:"bar",
+        data:{
+          labels:months.map(x=>execMonthLabel(x.month)),
+          datasets:[
+            {label:"ยอดเยี่ยม",data:months.map(x=>Number(x.excellent||0)),backgroundColor:"#86efac",borderRadius:5},
+            {label:"ปานกลาง",data:months.map(x=>Number(x.medium||0)),backgroundColor:"#fde68a",borderRadius:5},
+            {label:"ปรับปรุง",data:months.map(x=>Number(x.improve||0)),backgroundColor:"#fda4af",borderRadius:5}
+          ]
+        },
+        options:{
+          maintainAspectRatio:false,
+          scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:"rgba(148,163,184,.12)"}}},
+          plugins:{legend:{position:"bottom"}}
+        }
+      }));
+    }
+    icons();
+  }
+
   async function renderReports(seq) {
     const today = thaiDay();
     $("app").innerHTML =
