@@ -148,6 +148,7 @@ async function dispatch(env, action, p, token, request) {
     backupExport: async () => backupExport(env,u),
     backupNow: async () => backupNow(env,u),
     restoreBackup: async () => restoreBackup(env,u,p),
+    systemStatus: async () => systemStatus(env,u),
   };
   assert(handlers[action], "ไม่พบ API");
   const result = await handlers[action]();
@@ -394,6 +395,78 @@ async function autoBackupIfDue(env){
     await env.DB.prepare("DELETE FROM settings WHERE key=? AND value=?").bind(key,day).run();
     throw e;
   }
+}
+
+async function systemStatus(env,u){
+  role(u,["Admin"]);
+  const db=env.DB;
+  await ensureAuditTable(db);
+
+  const countSql = [
+    ["users","SELECT COUNT(*) n FROM users"],
+    ["classrooms","SELECT COUNT(*) n FROM classrooms"],
+    ["areas","SELECT COUNT(*) n FROM areas"],
+    ["assignments","SELECT COUNT(*) n FROM assignments"],
+    ["inspections","SELECT COUNT(*) n FROM inspections"],
+    ["auditLogs","SELECT COUNT(*) n FROM audit_log"],
+    ["activeSessions","SELECT COUNT(*) n FROM sessions WHERE expires_at>?"],
+    ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"]
+  ];
+  const counts={};
+  for(const [key,sql] of countSql){
+    const row = key==="activeSessions" ? await db.prepare(sql).bind(Date.now()).first() : await db.prepare(sql).first();
+    counts[key]=Number(row?.n||0);
+  }
+
+  const settingsRows=await all(db,"SELECT key,value FROM settings WHERE key IN ('last_backup_at','last_backup_file_id','last_auto_backup_day','last_restore_at') ORDER BY key");
+  const settings=Object.fromEntries(settingsRows.map(x=>[x.key,x.value]));
+  const lastInspection=await db.prepare("SELECT inspection_date,status,updated_at FROM inspections ORDER BY updated_at DESC LIMIT 1").first();
+  const lastAudit=await db.prepare("SELECT timestamp,action,actor_name FROM audit_log ORDER BY timestamp DESC LIMIT 1").first();
+
+  let drive={configured:!!(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY),ok:false,message:"ยังไม่ได้ตั้งค่า Drive Gateway"};
+  if(drive.configured){
+    try{
+      const res=await Promise.race([
+        fetch(env.GAS_DRIVE_URL,{method:"GET",redirect:"follow",headers:{"Cache-Control":"no-cache"}}),
+        new Promise((_,reject)=>setTimeout(()=>reject(Error("TIMEOUT")),5000))
+      ]);
+      const raw=await res.text();
+      let body={};try{body=JSON.parse(raw);}catch{}
+      drive={configured:true,ok:res.ok&&body?.ok===true,message:res.ok?(body?.ok===true?"เชื่อมต่อได้":"Gateway ตอบกลับไม่สมบูรณ์"):"HTTP "+res.status,service:String(body?.service||"")};
+    }catch(e){
+      drive={configured:true,ok:false,message:e?.message==="TIMEOUT"?"เชื่อมต่อเกิน 5 วินาที":String(e?.message||e)};
+    }
+  }
+
+  const warnings=[];
+  if(!drive.ok) warnings.push("Google Drive Gateway: "+drive.message);
+  const lastBackup=String(settings.last_backup_at||"");
+  if(!lastBackup){
+    warnings.push("ยังไม่พบประวัติ Backup");
+  }else{
+    const age=Date.now()-new Date(lastBackup).getTime();
+    if(!Number.isFinite(age)||age>48*3600000) warnings.push("Backup ล่าสุดเกิน 48 ชั่วโมงแล้ว");
+  }
+  if(counts.users===0) warnings.push("ไม่พบผู้ใช้งานในฐานข้อมูล");
+  if(counts.areas>0&&counts.assignments===0) warnings.push("มีพื้นที่แล้วแต่ยังไม่มีการมอบหมายเวร");
+
+  return{
+    overall:warnings.length?"warning":"ok",
+    serverTime:nowIso(),
+    today:thaiDay(),
+    d1:{ok:true,message:"เชื่อมต่อ D1 ได้"},
+    drive,
+    backup:{
+      lastAt:lastBackup,
+      lastFileId:String(settings.last_backup_file_id||""),
+      lastAutoDay:String(settings.last_auto_backup_day||""),
+      lastRestoreAt:String(settings.last_restore_at||"")
+    },
+    counts,
+    lastInspection:lastInspection?{date:lastInspection.inspection_date,status:lastInspection.status,updatedAt:lastInspection.updated_at}:null,
+    lastAudit:lastAudit?{timestamp:lastAudit.timestamp,action:lastAudit.action,actorName:lastAudit.actor_name}:null,
+    warnings
+  };
 }
 
 async function schoolDay(env,date) {
