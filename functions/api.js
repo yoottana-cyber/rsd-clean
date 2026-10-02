@@ -537,6 +537,11 @@ function validateBackupBundle(b){
     assert(inspectionIds.has(String(r.inspection_id)),"ทีมผู้ตรวจอ้างอิงผลตรวจที่ไม่มีอยู่");
     assert(userIds.has(String(r.user_id)),"ทีมผู้ตรวจอ้างอิงผู้ใช้ที่ไม่มีอยู่");
   }
+  for(const r of t.duty_overrides){
+    assert(areaIds.has(String(r.area_id)),"เวรทดแทนอ้างอิงพื้นที่ที่ไม่มีอยู่");
+    assert(userIds.has(String(r.substitute_user_id)),"เวรทดแทนอ้างอิงผู้ตรวจทดแทนที่ไม่มีอยู่");
+    if(String(r.replace_user_id||""))assert(userIds.has(String(r.replace_user_id)),"เวรทดแทนอ้างอิงผู้ตรวจเดิมที่ไม่มีอยู่");
+  }
   return{tables:t,counts:Object.fromEntries(Object.entries(t).map(([k,v])=>[k,v.length]))};
 }
 async function runDbBatches(db,stmts,size=50){
@@ -732,6 +737,7 @@ async function systemStatus(env,u){
   await ensureAuditTable(db);
   await ensureRecycleTable(db);
   await ensureSystemEventsTable(db);
+  await ensureDutyOverridesTable(db);
 
   const countSql = [
     ["users","SELECT COUNT(*) n FROM users"],
@@ -743,11 +749,15 @@ async function systemStatus(env,u){
     ["activeSessions","SELECT COUNT(*) n FROM sessions WHERE expires_at>?"],
     ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"],
     ["recycleBin","SELECT COUNT(*) n FROM recycle_bin"],
-    ["systemEvents","SELECT COUNT(*) n FROM system_events"]
+    ["systemEvents","SELECT COUNT(*) n FROM system_events"],
+    ["dutyOverrides","SELECT COUNT(*) n FROM duty_overrides WHERE override_date>=?"]
   ];
   const counts={};
   for(const [key,sql] of countSql){
-    const row = key==="activeSessions" ? await db.prepare(sql).bind(Date.now()).first() : await db.prepare(sql).first();
+    let row;
+    if(key==="activeSessions")row=await db.prepare(sql).bind(Date.now()).first();
+    else if(key==="dutyOverrides")row=await db.prepare(sql).bind(thaiDay()).first();
+    else row=await db.prepare(sql).first();
     counts[key]=Number(row?.n||0);
   }
 
