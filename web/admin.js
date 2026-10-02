@@ -511,7 +511,7 @@ const adminTables = {
     }
     lines.push("สรุป: ตรวจแล้ว "+d.done+"/"+d.scheduled+" พื้นที่");
     const labels=cfg.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
-    lines.push("🌟 "+labels["3"]+" "+d.counts.excellent+" | 🙂 "+labels["2"]+" "+d.counts.medium+" | 🔧 "+labels["1"]+" "+d.counts.improve+(d.skipped?" | 📴 งดตรวจ "+d.skipped:"")+(d.pending?" | ⏳ รอตรวจ "+d.pending:""));
+    lines.push("🌟 "+labels["3"]+" "+d.counts.excellent+" | 🙂 "+labels["2"]+" "+d.counts.medium+" | 🔧 "+labels["1"]+" "+d.counts.improve+(d.skipped?" | 📴 งดตรวจ "+d.skipped:"")+(d.pending?" | ⏳ รอตรวจ "+d.pending:"")+(d.approvalPending?" | 🛡️ รอรับรอง "+d.approvalPending:""));
     const sections=[
       ["🌟 "+labels["3"],g.excellent],
       ["🙂 "+labels["2"],g.medium],
@@ -628,6 +628,11 @@ const adminTables = {
         ctx.font='700 38px "Kanit",sans-serif';ctx.fillText(String(x[1]),sx+18,y+91);
       });
       y+=178;
+      if(d.approvalPending){
+        canvasRoundRect(ctx,86,y,908,62,16,"#eef2ff");
+        ctx.fillStyle="#4338ca";ctx.font='500 22px "Kanit",sans-serif';
+        ctx.fillText("🛡 รอรับรอง "+d.approvalPending+" รายการ",110,y+40);y+=78;
+      }
       if(d.skipped){
         canvasRoundRect(ctx,86,y,908,62,16,"#f1f5f9");
         ctx.fillStyle="#64748b";ctx.font='500 22px "Kanit",sans-serif';
@@ -748,6 +753,7 @@ const adminTables = {
               '<div class="medium"><span>ปานกลาง</span><b>'+d.counts.medium+'</b></div>'+
               '<div class="improve"><span>ปรับปรุง</span><b>'+d.counts.improve+'</b></div>'+
             '</div>'+
+            (d.approvalPending?'<div class="daily-pending" style="background:#eef2ff;color:#4338ca;border-color:#c7d2fe"><i data-lucide="badge-check"></i> รอรับรอง '+d.approvalPending+' รายการ</div>':'')+
             (d.skipped?'<div class="daily-pending" style="background:#f1f5f9;color:#64748b;border-color:#e2e8f0"><i data-lucide="circle-off"></i> งดตรวจ '+d.skipped+' พื้นที่ · มีเหตุผลบันทึกไว้</div>':'')+
             (d.pending?'<div class="daily-pending"><i data-lucide="clock-3"></i> ยังรอตรวจ '+d.pending+' พื้นที่</div>':'')+
             '<div class="daily-section excellent"><h3><span></span>'+esc(cfg.scoreLabels?.["3"]||"ยอดเยี่ยม")+' <b>'+g.excellent.length+'</b></h3>'+dailyResultRows(g.excellent,"excellent")+'</div>'+
