@@ -154,3 +154,18 @@ CREATE TABLE IF NOT EXISTS system_events (
 );
 CREATE INDEX IF NOT EXISTS idx_system_events_timestamp ON system_events(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_system_events_type_time ON system_events(event_type, timestamp DESC);
+
+
+CREATE TABLE IF NOT EXISTS duty_overrides (
+  override_id TEXT PRIMARY KEY,
+  override_date TEXT NOT NULL,
+  area_id TEXT NOT NULL,
+  replace_user_id TEXT NOT NULL DEFAULT '',
+  substitute_user_id TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  created_by_id TEXT NOT NULL DEFAULT '',
+  created_by_name TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_duty_overrides_date ON duty_overrides(override_date, area_id);
+CREATE INDEX IF NOT EXISTS idx_duty_overrides_substitute ON duty_overrides(substitute_user_id, override_date);
