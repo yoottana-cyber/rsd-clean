@@ -138,9 +138,18 @@ async function dispatch(env, action, p, token, request) {
     photo: async () => photo(env,u,p),
     password: async () => password(env,u,p),
     holidays: async () => saveHolidays(env,u,p),
+    auditLog: async () => auditList(env,u,p),
+    backupExport: async () => backupExport(env,u),
   };
   assert(handlers[action], "ไม่พบ API");
-  return handlers[action]();
+  const result = await handlers[action]();
+  if (AUDIT_ACTIONS.has(action)) {
+    try { await writeAudit(env,u,action,p,result); }
+    catch (e) { console.error("AUDIT_WRITE_FAILED",e); }
+  }
+  try { await autoBackupIfDue(env); }
+  catch (e) { console.error("AUTO_BACKUP_FAILED",e); }
+  return result;
 }
 
 async function login(env,p) {
@@ -164,6 +173,92 @@ async function auth(env, token) {
 }
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
+
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport"]);
+
+async function ensureAuditTable(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
+    audit_id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    actor_user_id TEXT NOT NULL DEFAULT '',
+    actor_name TEXT NOT NULL DEFAULT '',
+    actor_role TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL DEFAULT '',
+    entity_id TEXT NOT NULL DEFAULT '',
+    details_json TEXT NOT NULL DEFAULT '{}'
+  )`).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_user_id,timestamp DESC)").run();
+}
+function safeMasterAuditRow(row={}){
+  const out={};
+  ["UserID","Username","FullName","Role","LinkedClassroomID","ClassroomID","ClassName","AreaID","AreaName","ResponsibleClassroomID"]
+    .forEach(k=>{if(row[k]!==undefined)out[k]=row[k];});
+  return out;
+}
+function auditMeta(action,p,result){
+  if(action==="saveMaster")return{entityType:String(p.table||""),entityId:String(p.row?.UserID||p.row?.ClassroomID||p.row?.AreaID||""),details:{row:safeMasterAuditRow(p.row)}};
+  if(action==="bulkCreate")return{entityType:String(p.table||""),entityId:"",details:{table:p.table,count:Number(result?.count||0)}};
+  if(action==="deleteMaster")return{entityType:String(p.table||""),entityId:String(p.id||""),details:{table:p.table}};
+  if(action==="assign")return{entityType:"Assignments",entityId:"",details:{userIds:(p.userIds||[]).map(String).slice(0,100),areaIds:(p.areaIds||[]).map(String).slice(0,100),days:p.days||[],added:Number(result?.added||0),merged:Number(result?.merged||0)}};
+  if(action==="setAssignmentDays")return{entityType:"Assignments",entityId:String(p.id||""),details:{days:p.days||[]}};
+  if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
+  if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
+  if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
+  if(action==="backupExport")return{entityType:"Backup",entityId:"manual",details:{createdAt:result?.createdAt||nowIso()}};
+  return{entityType:"",entityId:"",details:{}};
+}
+async function writeAudit(env,u,action,p,result){
+  await ensureAuditTable(env.DB);
+  const m=auditMeta(action,p,result);
+  await env.DB.prepare("INSERT INTO audit_log(audit_id,timestamp,actor_user_id,actor_name,actor_role,action,entity_type,entity_id,details_json) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(uuid(),nowIso(),String(u.user_id||""),String(u.full_name||""),String(u.role||""),action,m.entityType,m.entityId,JSON.stringify(m.details||{})).run();
+}
+async function auditList(env,u,p){
+  role(u,["Admin"]);await ensureAuditTable(env.DB);
+  const limit=Math.max(1,Math.min(500,Number(p?.limit||200)));
+  const rows=await all(env.DB,"SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?",limit);
+  return rows.map(r=>({AuditID:r.audit_id,Timestamp:r.timestamp,ActorUserID:r.actor_user_id,ActorName:r.actor_name,ActorRole:r.actor_role,Action:r.action,EntityType:r.entity_type,EntityID:r.entity_id,Details:parseJson(r.details_json,{})}));
+}
+async function buildBackupBundle(env){
+  await ensureAuditTable(env.DB);
+  const specs=[
+    ["users","SELECT * FROM users ORDER BY user_id"],
+    ["classrooms","SELECT * FROM classrooms ORDER BY classroom_id"],
+    ["areas","SELECT * FROM areas ORDER BY area_id"],
+    ["assignments","SELECT * FROM assignments ORDER BY assignment_id"],
+    ["inspections","SELECT * FROM inspections ORDER BY inspection_date,inspection_id"],
+    ["inspection_inspectors","SELECT * FROM inspection_inspectors ORDER BY inspection_id,user_id"],
+    ["rewards_log","SELECT * FROM rewards_log ORDER BY timestamp,log_id"],
+    ["holidays","SELECT * FROM holidays ORDER BY holiday_date"],
+    ["settings","SELECT * FROM settings ORDER BY key"],
+    ["audit_log","SELECT * FROM audit_log ORDER BY timestamp,audit_id"]
+  ];
+  const tables={};
+  for(const [name,sql] of specs)tables[name]=await all(env.DB,sql);
+  return{format:"rsd-clean-d1-backup-v1",createdAt:nowIso(),tables};
+}
+async function backupExport(env,u){role(u,["Admin"]);return buildBackupBundle(env);}
+async function autoBackupIfDue(env){
+  if(!env.GAS_DRIVE_URL||!env.DRIVE_GATEWAY_KEY)return;
+  const day=thaiDay(),key="last_auto_backup_day";
+  const old=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();
+  if(String(old?.value||"")===day)return;
+  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind(key,day).run();
+  try{
+    const bundle=await buildBackupBundle(env),content=JSON.stringify(bundle),filename="RSD-Clean-D1-auto-"+day+".json";
+    const saved=await gasDrive(env,"saveBackup",{filename,content});
+    await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_backup_at',?),('last_backup_file_id',?)")
+      .bind(bundle.createdAt,String(saved.fileId||"")).run();
+    await ensureAuditTable(env.DB);
+    await env.DB.prepare("INSERT INTO audit_log(audit_id,timestamp,actor_user_id,actor_name,actor_role,action,entity_type,entity_id,details_json) VALUES(?,?,?,?,?,?,?,?,?)")
+      .bind(uuid(),bundle.createdAt,"","ระบบ","System","backupAuto","Backup",String(saved.fileId||""),JSON.stringify({filename,size:Number(saved.size||content.length)})).run();
+  }catch(e){
+    await env.DB.prepare("DELETE FROM settings WHERE key=? AND value=?").bind(key,day).run();
+    throw e;
+  }
+}
 
 async function schoolDay(env,date) {
   const w=weekday(date); if(w===0||w===6) return false;
