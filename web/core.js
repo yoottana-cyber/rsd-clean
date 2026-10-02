@@ -229,8 +229,11 @@
     openModal("ศูนย์แจ้งเตือน",'<div id="notification-center-body"><div class="muted">กำลังโหลดแจ้งเตือน…</div></div>');
     const box=$("notification-center-body");
     try{
+      const freshInspectorNotice=S.user.Role==="Inspector"&&window.rsdInspectorNotifications&&Date.now()-Number(window.rsdInspectorNotifications.at||0)<30000
+        ? window.rsdInspectorNotifications.data
+        : null;
       const [server,offline]=await Promise.all([
-        rpc("notifications",{},true).catch(()=>({items:[],unread:0,offline:true})),
+        freshInspectorNotice ? Promise.resolve(freshInspectorNotice) : rpc("notifications",{},true).catch(()=>({items:[],unread:0,offline:true})),
         S.user.Role==="Inspector" ? listOfflineInspections(S.user.UserID).catch(()=>[]) : Promise.resolve([])
       ]);
       if(!box?.isConnected)return;
@@ -264,8 +267,11 @@
   async function refreshNotificationBadge(){
     if(!S.user)return;
     try{
+      const freshInspectorNotice=S.user.Role==="Inspector"&&window.rsdInspectorNotifications&&Date.now()-Number(window.rsdInspectorNotifications.at||0)<30000
+        ? window.rsdInspectorNotifications.data
+        : null;
       const [server,offline]=await Promise.all([
-        rpc("notifications",{},true).catch(()=>({unread:0})),
+        freshInspectorNotice ? Promise.resolve(freshInspectorNotice) : rpc("notifications",{},true).catch(()=>({unread:0})),
         S.user.Role==="Inspector" ? listOfflineInspections(S.user.UserID).catch(()=>[]) : Promise.resolve([])
       ]);
       const n=Math.min(99,Number(server?.unread||0)+offline.length);
@@ -726,7 +732,7 @@
     }
     wireInstallButtons();
     icons();
-    if(S.user) setTimeout(refreshNotificationBadge,0);
+    if(S.user) setTimeout(refreshNotificationBadge,S.user.Role==="Inspector"&&S.route==="tasks"?1200:0);
   }
   async function route() {
     const seq = ++S.seq;
