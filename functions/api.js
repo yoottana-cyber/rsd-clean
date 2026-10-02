@@ -250,7 +250,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions"]);
 
 async function ensureAuditTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
@@ -287,6 +287,8 @@ function auditMeta(action,p,result){
   if(action==="restoreBackup")return{entityType:"Backup",entityId:"restore",details:{restoredAt:result?.restoredAt||nowIso(),sourceCreatedAt:result?.sourceCreatedAt||"",preRestoreFileId:result?.preRestoreBackup?.fileId||"",counts:result?.counts||{}}};
   if(action==="restoreTrash")return{entityType:"RecycleBin",entityId:String(p.recycleId||""),details:{restoredType:result?.entityType||"",restoredId:result?.entityId||""}};
   if(action==="purgeTrash")return{entityType:"RecycleBin",entityId:String(p.recycleId||""),details:{purged:true}};
+  if(action==="logoutSession")return{entityType:"Session",entityId:String(p.sessionId||""),details:{remoteLogout:true}};
+  if(action==="logoutOtherSessions")return{entityType:"Session",entityId:"others",details:{logoutOtherDevices:true}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
