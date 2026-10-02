@@ -510,11 +510,12 @@ const adminTables = {
       return lines.join("\n");
     }
     lines.push("สรุป: ตรวจแล้ว "+d.done+"/"+d.scheduled+" พื้นที่");
-    lines.push("🌟 ยอดเยี่ยม "+d.counts.excellent+" | 🙂 ปานกลาง "+d.counts.medium+" | 🔧 ปรับปรุง "+d.counts.improve+(d.skipped?" | 📴 งดตรวจ "+d.skipped:"")+(d.pending?" | ⏳ รอตรวจ "+d.pending:""));
+    const labels=cfg.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
+    lines.push("🌟 "+labels["3"]+" "+d.counts.excellent+" | 🙂 "+labels["2"]+" "+d.counts.medium+" | 🔧 "+labels["1"]+" "+d.counts.improve+(d.skipped?" | 📴 งดตรวจ "+d.skipped:"")+(d.pending?" | ⏳ รอตรวจ "+d.pending:""));
     const sections=[
-      ["🌟 ยอดเยี่ยม",g.excellent],
-      ["🙂 ปานกลาง",g.medium],
-      ["🔧 ปรับปรุง",g.improve],
+      ["🌟 "+labels["3"],g.excellent],
+      ["🙂 "+labels["2"],g.medium],
+      ["🔧 "+labels["1"],g.improve],
       ["📴 งดตรวจ",g.skipped],
       ["⏳ รอตรวจ",g.pending]
     ];
@@ -546,8 +547,8 @@ const adminTables = {
       img.src=url;
     });
   }
-  async function loadDailyLogo(){
-    const urls=["/school-logo","https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"];
+  async function loadDailyLogo(preferred=""){
+    const urls=[preferred,"/school-logo","https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"].filter(Boolean);
     for(const url of urls){
       try{
         const res=await fetch(url,{mode:"cors",cache:"force-cache"});
@@ -590,7 +591,7 @@ const adminTables = {
     grad.addColorStop(0,"#0f766e");grad.addColorStop(1,"#0891b2");
     canvasRoundRect(ctx,42,42,996,300,34,grad);
 
-    const logo=await loadDailyLogo();
+    const logo=await loadDailyLogo(cfg.schoolLogoUrl||"");
     if(logo){
       ctx.fillStyle="#ffffff";ctx.beginPath();ctx.arc(150,152,72,0,Math.PI*2);ctx.fill();
       ctx.drawImage(logo,92,94,116,116);
@@ -613,11 +614,12 @@ const adminTables = {
       ctx.fillText(d.holidayReason||"วันนี้ไม่นับเป็นวันขาดข้อมูล",540,y+120);
       ctx.textAlign="left";y+=230;
     }else{
+      const labels=cfg.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
       const stats=[
         ["ตรวจแล้ว",d.done+"/"+d.scheduled,"#e8f7f3","#0f766e"],
-        ["ยอดเยี่ยม",d.counts.excellent,"#ecfdf5","#15803d"],
-        ["ปานกลาง",d.counts.medium,"#fff8e7","#a16207"],
-        ["ปรับปรุง",d.counts.improve,"#fff1f2","#be123c"]
+        [labels["3"],d.counts.excellent,"#ecfdf5","#15803d"],
+        [labels["2"],d.counts.medium,"#fff8e7","#a16207"],
+        [labels["1"],d.counts.improve,"#fff1f2","#be123c"]
       ];
       stats.forEach((x,i)=>{
         const sx=86+i*226;
@@ -637,9 +639,9 @@ const adminTables = {
         ctx.fillText("⏳ รอตรวจ "+d.pending+" พื้นที่",110,y+40);y+=90;
       }
       const sections=[
-        ["ยอดเยี่ยม",g.excellent,"#15803d","#ecfdf5"],
-        ["ปานกลาง",g.medium,"#a16207","#fff8e7"],
-        ["ปรับปรุง",g.improve,"#be123c","#fff1f2"],
+        [labels["3"],g.excellent,"#15803d","#ecfdf5"],
+        [labels["2"],g.medium,"#a16207","#fff8e7"],
+        [labels["1"],g.improve,"#be123c","#fff1f2"],
         ["งดตรวจ",g.skipped,"#64748b","#f1f5f9"],
         ["รอตรวจ",g.pending,"#64748b","#f1f5f9"]
       ];
@@ -734,7 +736,7 @@ const adminTables = {
     content.innerHTML=
       '<section class="daily-share-card" id="daily-share-card">'+
         '<header class="daily-share-head">'+
-          '<div class="daily-logo-box"><img src="/school-logo" alt="ตราโรงเรียนรัษฎา" onerror="this.onerror=null;this.src=\'https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png\'"></div>'+
+          '<div class="daily-logo-box"><img src="'+esc(cfg.schoolLogoUrl||"/school-logo")+'" alt="ตราโรงเรียน" onerror="this.onerror=null;this.src=\'/school-logo\'"></div>'+
           '<div><span>RSD CLEAN · '+esc(cfg.schoolName||"โรงเรียนรัษฎา")+'</span><h2>รายงานผลการตรวจเขตพื้นที่ประจำวัน</h2><p>'+esc(date)+'</p></div>'+
         '</header>'+
         (d.isHoliday
@@ -747,9 +749,9 @@ const adminTables = {
             '</div>'+
             (d.skipped?'<div class="daily-pending" style="background:#f1f5f9;color:#64748b;border-color:#e2e8f0"><i data-lucide="circle-off"></i> งดตรวจ '+d.skipped+' พื้นที่ · มีเหตุผลบันทึกไว้</div>':'')+
             (d.pending?'<div class="daily-pending"><i data-lucide="clock-3"></i> ยังรอตรวจ '+d.pending+' พื้นที่</div>':'')+
-            '<div class="daily-section excellent"><h3><span></span>ยอดเยี่ยม <b>'+g.excellent.length+'</b></h3>'+dailyResultRows(g.excellent,"excellent")+'</div>'+
-            '<div class="daily-section medium"><h3><span></span>ปานกลาง <b>'+g.medium.length+'</b></h3>'+dailyResultRows(g.medium,"medium")+'</div>'+
-            '<div class="daily-section improve"><h3><span></span>ปรับปรุง <b>'+g.improve.length+'</b></h3>'+dailyResultRows(g.improve,"improve")+'</div>'+
+            '<div class="daily-section excellent"><h3><span></span>'+esc(cfg.scoreLabels?.["3"]||"ยอดเยี่ยม")+' <b>'+g.excellent.length+'</b></h3>'+dailyResultRows(g.excellent,"excellent")+'</div>'+
+            '<div class="daily-section medium"><h3><span></span>'+esc(cfg.scoreLabels?.["2"]||"ปานกลาง")+' <b>'+g.medium.length+'</b></h3>'+dailyResultRows(g.medium,"medium")+'</div>'+
+            '<div class="daily-section improve"><h3><span></span>'+esc(cfg.scoreLabels?.["1"]||"ปรับปรุง")+' <b>'+g.improve.length+'</b></h3>'+dailyResultRows(g.improve,"improve")+'</div>'+
             (g.skipped.length?'<div class="daily-section pending"><h3><span></span>งดตรวจ <b>'+g.skipped.length+'</b></h3>'+dailyResultRows(g.skipped,"pending")+'</div>':'')+
             (g.pending.length?'<div class="daily-section pending"><h3><span></span>รอตรวจ <b>'+g.pending.length+'</b></h3>'+dailyResultRows(g.pending,"pending")+'</div>':'')
         )+
