@@ -443,7 +443,7 @@
     teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
     reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
-    daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor"] },
+    daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor", "Inspector"] },
   };
   function getDeviceIdentity(){
     let id="";
@@ -603,7 +603,7 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
-        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-daily-report" type="button"><i data-lucide="send"></i><span>รายงานรายวัน</span></button>' : '') +
+        (["Admin","Supervisor","Inspector"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-daily-report" type="button"><i data-lucide="send"></i><span>รายงานรายวัน</span></button>' : '') +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
         '<button class="mobile-more-item" id="mobile-devices" type="button"><i data-lucide="monitor-smartphone"></i><span>อุปกรณ์ที่เข้าสู่ระบบ</span></button>' +
         '<button class="mobile-more-item" id="mobile-guide" type="button"><i data-lucide="circle-help"></i><span>คู่มือใช้งาน</span></button>' +
