@@ -236,6 +236,7 @@ async function dispatch(env, action, p, token, request) {
     bootstrap: async () => ({ user:publicUser(u), today:thaiDay(), holidays:(await all(db,"SELECT holiday_date FROM holidays ORDER BY holiday_date")).map(x=>x.holiday_date) }),
     myRewards: async () => { role(u,["Inspector"]); return (await all(db,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id)).map(rewardRow); },
     dashboard: async () => dashboard(env,u,validateDate(p.date || thaiDay())),
+    executiveDashboard: async () => executiveDashboard(env,u),
     tasks: async () => tasks(env,u),
     inspectorHome: async () => inspectorHome(env,u),
     qrTask: async () => qrTask(env,u,p),
@@ -1143,6 +1144,104 @@ async function dashboard(env,u,d){
   const recent=done.sort((a,b)=>String(metaOf(b).completedAt).localeCompare(String(metaOf(a).completedAt))).slice(0,50).map(i=>({date:i.inspection_date,area:metaOf(i).areaName,className:metaOf(i).className,rating:i.rating,score:i.score}));
   return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,pending:selected.length-done.length,counts,feed:u?recent:[],leaders:leaderboard(ins).slice(0,5),updatedAt:nowIso()};
 }
+function monthShift(month,offset){
+  const y=Number(month.slice(0,4)),m=Number(month.slice(5,7));
+  const d=new Date(Date.UTC(y,m-1+offset,1));
+  return d.toISOString().slice(0,7);
+}
+function mondayOf(date){
+  const d=new Date(date+"T00:00:00Z"),wd=d.getUTCDay()||7;
+  d.setUTCDate(d.getUTCDate()-(wd-1));
+  return d.toISOString().slice(0,10);
+}
+function executiveStats(ins,start,end){
+  const rows=ins.filter(i=>i.inspection_date>=start&&i.inspection_date<=end);
+  const done=rows.filter(i=>i.status==="ตรวจแล้ว");
+  const scores=done.map(i=>Number(i.score||0)).filter(n=>n>0);
+  const excellent=done.filter(i=>Number(i.score)===3).length;
+  const medium=done.filter(i=>Number(i.score)===2).length;
+  const improve=done.filter(i=>Number(i.score)===1).length;
+  const scheduled=rows.length,doneCount=done.length;
+  return{
+    start,end,scheduled,done:doneCount,pending:Math.max(0,scheduled-doneCount),
+    completionRate:scheduled?doneCount*100/scheduled:0,
+    averageScore:scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:0,
+    excellent,medium,improve,
+    excellentRate:doneCount?excellent*100/doneCount:0,
+    improveRate:doneCount?improve*100/doneCount:0
+  };
+}
+async function executiveDashboard(env,u){
+  role(u,["Admin","Supervisor"]);
+  await ensureToday(env);
+  const db=env.DB,today=thaiDay(),thisMonth=today.slice(0,7);
+  const currentWeekStart=mondayOf(today);
+  const firstMonth=monthShift(thisMonth,-5)+"-01";
+  const firstWeek=shiftDate(currentWeekStart,-49);
+  const start=firstMonth<firstWeek?firstMonth:firstWeek;
+  const [{ins},areaRow]=await Promise.all([
+    inspectionBundleRange(db,start,today),
+    db.prepare("SELECT COUNT(*) n FROM areas").first()
+  ]);
+
+  const todayStats=executiveStats(ins,today,today);
+  const weekSeries=[];
+  for(let n=7;n>=0;n--){
+    const ws=shiftDate(currentWeekStart,-7*n);
+    const we=n===0?today:shiftDate(ws,6);
+    const x=executiveStats(ins,ws,we);
+    weekSeries.push({...x,label:ws});
+  }
+
+  const monthSeries=[];
+  for(let n=5;n>=0;n--){
+    const month=monthShift(thisMonth,-n),ms=month+"-01";
+    const me=n===0?today:monthLastDay(month);
+    const x=executiveStats(ins,ms,me);
+    monthSeries.push({...x,month});
+  }
+
+  const last30Start=shiftDate(today,-29);
+  const last30=ins.filter(i=>i.inspection_date>=last30Start&&i.inspection_date<=today);
+  const last30Stats=executiveStats(ins,last30Start,today);
+  const areaMap={},classMap={};
+  for(const i of last30){
+    if(i.status!=="ตรวจแล้ว")continue;
+    const m=metaOf(i),score=Number(i.score||0);
+    const a=areaMap[m.areaId]||(areaMap[m.areaId]={id:m.areaId,name:m.areaName||"—",className:m.className||"—",done:0,improve:0,totalScore:0});
+    a.done++;a.totalScore+=score;if(score===1)a.improve++;
+    const c=classMap[m.classId]||(classMap[m.classId]={id:m.classId,name:m.className||"—",done:0,improve:0,totalScore:0});
+    c.done++;c.totalScore+=score;if(score===1)c.improve++;
+  }
+  const watchAreas=Object.values(areaMap)
+    .map(x=>({...x,avg:x.done?x.totalScore/x.done:0}))
+    .filter(x=>x.improve>0)
+    .sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th"))
+    .slice(0,8);
+  const watchClasses=Object.values(classMap)
+    .map(x=>({...x,avg:x.done?x.totalScore/x.done:0}))
+    .filter(x=>x.improve>0)
+    .sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th"))
+    .slice(0,8);
+
+  const currentWeek=weekSeries[weekSeries.length-1]||executiveStats([],today,today);
+  const previousWeek=weekSeries[weekSeries.length-2]||executiveStats([],today,today);
+  const currentMonth=monthSeries[monthSeries.length-1]||executiveStats([],today,today);
+  const previousMonth=monthSeries[monthSeries.length-2]||executiveStats([],today,today);
+
+  return{
+    today,
+    areas:Number(areaRow?.n||0),
+    todayStats,
+    last30:last30Stats,
+    currentWeek,previousWeek,currentMonth,previousMonth,
+    weekSeries,monthSeries,
+    leaders:leaderboard(last30.filter(i=>i.status==="ตรวจแล้ว")).slice(0,5),
+    watchAreas,watchClasses,
+    updatedAt:nowIso()
+  };
+}
+
 async function teacher(env,u){ role(u,["Teacher"]); await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins); const filtered=ins.filter(i=>metaOf(i).classId===u.linked_classroom_id&&(i.inspection_date===thaiDay()||ad.has(i.inspection_date))).sort((a,b)=>b.inspection_date.localeCompare(a.inspection_date)).slice(0,200); return{inspections:await Promise.all(filtered.map(i=>displayOne(env.DB,i))),rewards:(await all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=?",u.linked_classroom_id)).map(rewardRow),monthly:(await monthly(env,ins,thaiDay().slice(0,7))).filter(r=>r.id===u.linked_classroom_id)}; }
 async function dailyReport(env,u,date){
   role(u,["Admin","Supervisor","Inspector"]);
