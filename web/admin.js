@@ -13,6 +13,18 @@ const adminTables = {
   };
   let adminTab = "Users",
     reportData = null;
+  function wireTextFilter(inputId, scopeSelector) {
+    const input=$(inputId),scope=document.querySelector(scopeSelector);
+    if(!input||!scope)return;
+    const run=()=>{
+      const q=String(input.value||"").trim().toLocaleLowerCase("th");
+      scope.querySelectorAll("tbody tr").forEach(tr=>{
+        tr.style.display=!q||tr.textContent.toLocaleLowerCase("th").includes(q)?"":"none";
+      });
+    };
+    input.oninput=run;
+    run();
+  }
   function opts(rows, key, label, current, empty = "— เลือก —") {
     return (
       '<option value="">' +
@@ -74,9 +86,9 @@ const adminTables = {
     const t = adminTables[adminTab],
       key = adminTab === "Users" ? "UserID" : adminTab === "Classrooms" ? "ClassroomID" : "AreaID";
     $("admin-content").innerHTML =
-      '<div class="flex justify-between mb-4"><h2 class="text-lg">' +
+      '<div class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h2 class="text-lg">' +
       t.name +
-      '</h2><div class="flex flex-wrap gap-2">' +
+      '</h2><div class="search-box mt-2"><i data-lucide="search"></i><input id="admin-table-search" type="search" placeholder="ค้นหา '+esc(t.name)+'…"></div></div><div class="flex flex-wrap gap-2">' +
       (adminTab === "Areas"
         ? '<button class="btn secondary" id="qr-all"><span aria-hidden="true">▦</span> พิมพ์ QR ทุกพื้นที่</button>'
         : "") +
@@ -100,6 +112,8 @@ const adminTables = {
             '">ลบ</button>',
         ]),
       );
+    wireTextFilter("admin-table-search","#admin-content");
+    icons();
     $("add-row").onclick = () => editMaster();
     $("bulk-add").onclick = bulkModal;
     if ($("qr-all")) $("qr-all").onclick = () => printAreaQrs();
@@ -374,9 +388,11 @@ const adminTables = {
       '<div class="field"><label>2) เลือกผู้ตรวจ (เลือกได้หลายคน)</label><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-auto p-1">' + inspectorChecks + '</div></div>' +
       '<div class="field"><label>3) เลือกพื้นที่ (เลือกได้หลายพื้นที่)</label><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-auto p-1">' + areaChecks + '</div></div>' +
       '<button class="btn" ' + (!inspectors.length || !m.Areas.length ? 'disabled' : '') + '>เพิ่ม / รวมเวรที่เลือก</button></form>' +
-      '<div class="flex flex-wrap items-center justify-between gap-2 mt-8 mb-3"><h2 class="text-lg">ตารางเวรปัจจุบัน</h2><span class="muted">ทั้งหมด ' + rows.length + ' รายการ</span></div>' +
+      '<div class="flex flex-wrap items-center justify-between gap-3 mt-8 mb-3"><div><h2 class="text-lg">ตารางเวรปัจจุบัน</h2><span class="muted">ทั้งหมด ' + rows.length + ' รายการ</span></div><div class="search-box"><i data-lucide="search"></i><input id="assignment-search" type="search" placeholder="ค้นหาผู้ตรวจ / พื้นที่ / วัน…"></div></div>' +
       table(["ผู้ตรวจ", "พื้นที่", "วันเข้าเวร", "จัดการ"], rows);
 
+    wireTextFilter("assignment-search","#admin-content");
+    icons();
     $("assign-form").onsubmit = async (e) => {
       e.preventDefault();
       const f = new FormData(e.target), userIds = f.getAll("user"), areaIds = f.getAll("area"), days = f.getAll("day");
@@ -469,6 +485,7 @@ const adminTables = {
   function drawReport() {
     const r = reportData;
     $("report-content").innerHTML =
+      '<div class="card mb-4 report-search-card"><div class="search-box"><i data-lucide="search"></i><input id="report-search" type="search" placeholder="ค้นหาห้องเรียน / พื้นที่ / ผู้ตรวจ…"></div></div>' +
       '<section class="card mb-6"><div class="flex justify-between items-center mb-4"><h2>🏆 อันดับห้องเรียน</h2><select id="leader-sort" class="control" style="width:180px"><option value="average">คะแนนเฉลี่ย</option><option value="total">คะแนนสะสม</option></select></div><div id="report-leaders"></div></section><div class="grid lg:grid-cols-2 gap-6 mb-6"><section class="card"><h2 class="mb-4">พื้นที่ที่ต้องจับตา</h2>' +
       table(
         ["พื้นที่", "ปรับปรุง (ครั้ง)"],
@@ -537,6 +554,8 @@ const adminTables = {
     };
     $("leader-sort").onchange = leaders;
     leaders();
+    wireTextFilter("report-search","#report-content");
+    icons();
     document
       .querySelectorAll(".certificate-btn")
       .forEach((b) => (b.onclick = () => certificate(r.monthly[Number(b.dataset.index)], r.month)));
