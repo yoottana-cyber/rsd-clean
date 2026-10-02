@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "rsd-clean",
+  "pages_build_output_dir": "./web",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rsd-clean",
+      "database_id": "PUT_YOUR_D1_DATABASE_ID_HERE"
+    }
+  ]
+}
