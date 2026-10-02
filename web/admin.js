@@ -483,11 +483,13 @@ const adminTables = {
       excellent:dailySorted(done.filter(x=>Number(x.Score)===3)),
       medium:dailySorted(done.filter(x=>Number(x.Score)===2)),
       improve:dailySorted(done.filter(x=>Number(x.Score)===1)),
-      pending:dailySorted((d.items||[]).filter(x=>x.Status!=="ตรวจแล้ว"))
+      skipped:dailySorted((d.items||[]).filter(x=>x.Status==="งดตรวจ")),
+      pending:dailySorted((d.items||[]).filter(x=>x.Status==="รอตรวจ"))
     };
   }
   function dailyItemText(x,withNote=true){
     let line=String(x.ClassName||"—")+" — "+String(x.AreaName||"—");
+    if(x.Status==="งดตรวจ"&&x.SkipReason)line+=" | เหตุผล: "+String(x.SkipReason);
     if(withNote&&String(x.Notes||"").trim()){
       const note=String(x.Notes).trim().replace(/\s+/g," ");
       line+=" | หมายเหตุ: "+(note.length>180?note.slice(0,177)+"…":note);
@@ -495,10 +497,10 @@ const adminTables = {
     return line;
   }
   function dailyReportText(d){
-    const g=dailyGroups(d),date=dailyThaiDate(d.date);
+    const g=dailyGroups(d),date=dailyThaiDate(d.date),cfg=d.settings||{};
     const lines=[
       "📢 รายงานผลการตรวจเขตพื้นที่ประจำวัน",
-      "🏫 โรงเรียนรัษฎา",
+      "🏫 "+(cfg.schoolName||"โรงเรียนรัษฎา"),
       "📅 "+date,
       ""
     ];
@@ -508,11 +510,12 @@ const adminTables = {
       return lines.join("\n");
     }
     lines.push("สรุป: ตรวจแล้ว "+d.done+"/"+d.scheduled+" พื้นที่");
-    lines.push("🌟 ยอดเยี่ยม "+d.counts.excellent+" | 🙂 ปานกลาง "+d.counts.medium+" | 🔧 ปรับปรุง "+d.counts.improve+(d.pending?" | ⏳ รอตรวจ "+d.pending:""));
+    lines.push("🌟 ยอดเยี่ยม "+d.counts.excellent+" | 🙂 ปานกลาง "+d.counts.medium+" | 🔧 ปรับปรุง "+d.counts.improve+(d.skipped?" | 📴 งดตรวจ "+d.skipped:"")+(d.pending?" | ⏳ รอตรวจ "+d.pending:""));
     const sections=[
       ["🌟 ยอดเยี่ยม",g.excellent],
       ["🙂 ปานกลาง",g.medium],
       ["🔧 ปรับปรุง",g.improve],
+      ["📴 งดตรวจ",g.skipped],
       ["⏳ รอตรวจ",g.pending]
     ];
     sections.forEach(([title,rows])=>{
@@ -520,7 +523,7 @@ const adminTables = {
       lines.push("",title+" ("+rows.length+")");
       rows.forEach(x=>lines.push("• "+dailyItemText(x,true)));
     });
-    lines.push("","RSD Clean · โรงเรียนรัษฎา");
+    lines.push("",cfg.reportFooter||("RSD Clean · "+(cfg.schoolName||"โรงเรียนรัษฎา")));
     return lines.join("\n");
   }
   async function copyDailyReport(){
@@ -573,7 +576,7 @@ const adminTables = {
   }
   async function dailyReportCanvasBlob(d){
     await document.fonts?.ready?.catch?.(()=>{});
-    const g=dailyGroups(d);
+    const g=dailyGroups(d),cfg=d.settings||{};
     const itemCount=(d.items||[]).length;
     const noteCount=(d.items||[]).filter(x=>String(x.Notes||"").trim()).length;
     const height=Math.max(1350,Math.min(7000,880+itemCount*76+noteCount*34+(d.isHoliday?0:260)));
@@ -595,7 +598,7 @@ const adminTables = {
     ctx.fillStyle="#ffffff";
     ctx.font='700 46px "Kanit",sans-serif';
     ctx.fillText("รายงานผลการตรวจเขตพื้นที่ประจำวัน",250,125);
-    ctx.font='500 31px "Kanit",sans-serif';ctx.fillText("โรงเรียนรัษฎา",250,178);
+    ctx.font='500 31px "Kanit",sans-serif';ctx.fillText(String(cfg.schoolName||"โรงเรียนรัษฎา"),250,178);
     ctx.font='400 25px "Kanit",sans-serif';ctx.fillStyle="rgba(255,255,255,.9)";
     ctx.fillText(dailyThaiDate(d.date),250,225);
     ctx.font='400 20px "Kanit",sans-serif';
@@ -623,6 +626,11 @@ const adminTables = {
         ctx.font='700 38px "Kanit",sans-serif';ctx.fillText(String(x[1]),sx+18,y+91);
       });
       y+=178;
+      if(d.skipped){
+        canvasRoundRect(ctx,86,y,908,62,16,"#f1f5f9");
+        ctx.fillStyle="#64748b";ctx.font='500 22px "Kanit",sans-serif';
+        ctx.fillText("📴 งดตรวจ "+d.skipped+" พื้นที่ (มีเหตุผลบันทึกไว้)",110,y+40);y+=78;
+      }
       if(d.pending){
         canvasRoundRect(ctx,86,y,908,62,16,"#fff9e9");
         ctx.fillStyle="#8a671b";ctx.font='500 22px "Kanit",sans-serif';
@@ -632,6 +640,7 @@ const adminTables = {
         ["ยอดเยี่ยม",g.excellent,"#15803d","#ecfdf5"],
         ["ปานกลาง",g.medium,"#a16207","#fff8e7"],
         ["ปรับปรุง",g.improve,"#be123c","#fff1f2"],
+        ["งดตรวจ",g.skipped,"#64748b","#f1f5f9"],
         ["รอตรวจ",g.pending,"#64748b","#f1f5f9"]
       ];
       for(const [title,rows,color,bg] of sections){
@@ -643,6 +652,11 @@ const adminTables = {
           ctx.fillStyle="#17334b";ctx.font='600 22px "Kanit",sans-serif';
           const main=canvasWrap(ctx,dailyItemText(item,false),840);
           for(const line of main){ctx.fillText("• "+line,112,y);y+=31;}
+          if(item.Status==="งดตรวจ"&&String(item.SkipReason||"").trim()){
+            ctx.fillStyle="#64748b";ctx.font='400 19px "Kanit",sans-serif';
+            const why=canvasWrap(ctx,"เหตุผล: "+String(item.SkipReason).trim(),805);
+            for(const line of why){ctx.fillText(line,145,y);y+=27;}
+          }
           if(String(item.Notes||"").trim()){
             ctx.fillStyle="#718596";ctx.font='400 19px "Kanit",sans-serif';
             const note=canvasWrap(ctx,"หมายเหตุ: "+String(item.Notes).trim().replace(/\s+/g," "),805);
@@ -655,7 +669,7 @@ const adminTables = {
     }
     ctx.strokeStyle="#dcebed";ctx.beginPath();ctx.moveTo(86,y);ctx.lineTo(994,y);ctx.stroke();y+=42;
     ctx.fillStyle="#718596";ctx.font='400 19px "Kanit",sans-serif';
-    ctx.fillText("ข้อมูลจากระบบ RSD Clean · อัปเดต "+new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"})+" น.",86,y);
+    ctx.fillText(String(cfg.reportFooter||"ข้อมูลจากระบบ RSD Clean")+" · อัปเดต "+new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"})+" น.",86,y);
     y+=50;
 
     const finalHeight=Math.min(height,Math.max(650,y+70));
@@ -714,14 +728,14 @@ const adminTables = {
     ).join("")+'</div>';
   }
   function drawDailyReport(){
-    const d=dailyReportData,g=dailyGroups(d),date=dailyThaiDate(d.date);
+    const d=dailyReportData,g=dailyGroups(d),date=dailyThaiDate(d.date),cfg=d.settings||{};
     const content=$("daily-report-content");
     if(!content)return;
     content.innerHTML=
       '<section class="daily-share-card" id="daily-share-card">'+
         '<header class="daily-share-head">'+
           '<div class="daily-logo-box"><img src="/school-logo" alt="ตราโรงเรียนรัษฎา" onerror="this.onerror=null;this.src=\'https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png\'"></div>'+
-          '<div><span>RSD CLEAN · โรงเรียนรัษฎา</span><h2>รายงานผลการตรวจเขตพื้นที่ประจำวัน</h2><p>'+esc(date)+'</p></div>'+
+          '<div><span>RSD CLEAN · '+esc(cfg.schoolName||"โรงเรียนรัษฎา")+'</span><h2>รายงานผลการตรวจเขตพื้นที่ประจำวัน</h2><p>'+esc(date)+'</p></div>'+
         '</header>'+
         (d.isHoliday
           ? '<div class="daily-holiday"><i data-lucide="calendar-off"></i><h3>วันหยุด / ไม่มีการตรวจ</h3><p>'+esc(d.holidayReason||"วันนี้ไม่นับเป็นวันขาดข้อมูล")+'</p></div>'
@@ -731,13 +745,15 @@ const adminTables = {
               '<div class="medium"><span>ปานกลาง</span><b>'+d.counts.medium+'</b></div>'+
               '<div class="improve"><span>ปรับปรุง</span><b>'+d.counts.improve+'</b></div>'+
             '</div>'+
+            (d.skipped?'<div class="daily-pending" style="background:#f1f5f9;color:#64748b;border-color:#e2e8f0"><i data-lucide="circle-off"></i> งดตรวจ '+d.skipped+' พื้นที่ · มีเหตุผลบันทึกไว้</div>':'')+
             (d.pending?'<div class="daily-pending"><i data-lucide="clock-3"></i> ยังรอตรวจ '+d.pending+' พื้นที่</div>':'')+
             '<div class="daily-section excellent"><h3><span></span>ยอดเยี่ยม <b>'+g.excellent.length+'</b></h3>'+dailyResultRows(g.excellent,"excellent")+'</div>'+
             '<div class="daily-section medium"><h3><span></span>ปานกลาง <b>'+g.medium.length+'</b></h3>'+dailyResultRows(g.medium,"medium")+'</div>'+
             '<div class="daily-section improve"><h3><span></span>ปรับปรุง <b>'+g.improve.length+'</b></h3>'+dailyResultRows(g.improve,"improve")+'</div>'+
+            (g.skipped.length?'<div class="daily-section pending"><h3><span></span>งดตรวจ <b>'+g.skipped.length+'</b></h3>'+dailyResultRows(g.skipped,"pending")+'</div>':'')+
             (g.pending.length?'<div class="daily-section pending"><h3><span></span>รอตรวจ <b>'+g.pending.length+'</b></h3>'+dailyResultRows(g.pending,"pending")+'</div>':'')
         )+
-        '<footer class="daily-share-footer">ข้อมูลจากระบบ RSD Clean · อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</footer>'+
+        '<footer class="daily-share-footer">'+esc(cfg.reportFooter||"ข้อมูลจากระบบ RSD Clean")+' · อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</footer>'+
       '</section>';
     $("daily-actions").classList.remove("hidden");
     icons();
