@@ -144,6 +144,7 @@
     charts: [],
     seq: 0,
     master: null,
+    config: null,
     polling: false,
     scanToken: initialScanToken,
     scanHandled: false,
@@ -456,6 +457,7 @@
       sessionStorage.removeItem("rsd-token");
       localStorage.removeItem("rsd-token");
       localStorage.removeItem("rsd-user-cache");
+      localStorage.removeItem("rsd-config-cache");
     } catch (e) {}
   }
   const pages = {
@@ -465,6 +467,9 @@
     teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
     reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
+    review: { title: "รับรองผล", icon: "badge-check", roles: ["Admin", "Supervisor"] },
+    history: { title: "ประวัติ", icon: "history", roles: ["Admin", "Supervisor", "Inspector", "Teacher"] },
+    exports: { title: "ส่งออก", icon: "file-down", roles: ["Admin", "Supervisor", "Teacher"] },
     daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor", "Inspector"] },
   };
   function getDeviceIdentity(){
@@ -625,7 +630,9 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
-        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-executive" type="button"><i data-lucide="briefcase-business"></i><span>Dashboard ผู้บริหาร</span></button><button class="mobile-more-item" id="mobile-dashboard" type="button"><i data-lucide="layout-dashboard"></i><span>ภาพรวมทั่วไป</span></button>' : '') +
+        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-executive" type="button"><i data-lucide="briefcase-business"></i><span>Dashboard ผู้บริหาร</span></button><button class="mobile-more-item" id="mobile-review" type="button"><i data-lucide="badge-check"></i><span>รับรองผลตรวจ</span></button><button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติพื้นที่/ห้อง</span></button><button class="mobile-more-item" id="mobile-exports" type="button"><i data-lucide="file-down"></i><span>ส่งออก Excel/PDF</span></button><button class="mobile-more-item" id="mobile-dashboard" type="button"><i data-lucide="layout-dashboard"></i><span>ภาพรวมทั่วไป</span></button>' : '') +
+        (["Inspector"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติพื้นที่</span></button>' : '') +
+        (["Teacher"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติห้องเรียน</span></button><button class="mobile-more-item" id="mobile-exports" type="button"><i data-lucide="file-down"></i><span>ส่งออก Excel/PDF</span></button>' : '') +
         (["Admin","Supervisor","Inspector"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-daily-report" type="button"><i data-lucide="send"></i><span>รายงานรายวัน</span></button>' : '') +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
         '<button class="mobile-more-item" id="mobile-devices" type="button"><i data-lucide="monitor-smartphone"></i><span>อุปกรณ์ที่เข้าสู่ระบบ</span></button>' +
@@ -639,6 +646,9 @@
     icons();
     refreshNotificationBadge();
     if ($("mobile-executive")) $("mobile-executive").onclick = () => { closeModal(); location.hash="executive"; route(); };
+    if ($("mobile-review")) $("mobile-review").onclick = () => { closeModal(); location.hash="review"; route(); };
+    if ($("mobile-history")) $("mobile-history").onclick = () => { closeModal(); location.hash="history"; route(); };
+    if ($("mobile-exports")) $("mobile-exports").onclick = () => { closeModal(); location.hash="exports"; route(); };
     if ($("mobile-dashboard")) $("mobile-dashboard").onclick = () => { closeModal(); location.hash="dashboard"; route(); };
     if ($("mobile-daily-report")) $("mobile-daily-report").onclick = () => { closeModal(); location.hash="daily"; route(); };
     if ($("mobile-devices")) $("mobile-devices").onclick = () => { closeModal(); deviceSessionsModal(); };
@@ -786,6 +796,9 @@
       else if (p === "admin") await renderAdmin(seq);
       else if (p === "reports") await renderReports(seq);
       else if (p === "daily") await renderDailyReport(seq);
+      else if (p === "review") await renderReviewQueue(seq);
+      else if (p === "history") await renderHistoryHub(seq);
+      else if (p === "exports") await renderExportCenter(seq);
       else if (p === "tasks") await renderTasks(seq);
       else if (p === "teacher") await renderTeacher(seq);
     } catch (e) {
@@ -1050,11 +1063,12 @@
       try {
         const b = await rpc("bootstrap");
         S.user = b.user;
-        try { localStorage.setItem("rsd-user-cache",JSON.stringify(b.user)); } catch(e) {}
+        S.config = b.settings || S.config;
+        try { localStorage.setItem("rsd-user-cache",JSON.stringify(b.user)); localStorage.setItem("rsd-config-cache",JSON.stringify(S.config||{})); } catch(e) {}
       } catch (e) {
-        let cached=null;
-        try { cached=JSON.parse(localStorage.getItem("rsd-user-cache")||"null"); } catch(x) {}
-        if(S.token&&cached) S.user=cached;
+        let cached=null,cachedConfig=null;
+        try { cached=JSON.parse(localStorage.getItem("rsd-user-cache")||"null"); cachedConfig=JSON.parse(localStorage.getItem("rsd-config-cache")||"null"); } catch(x) {}
+        if(S.token&&cached){ S.user=cached; S.config=cachedConfig||S.config; }
         else clearSession();
       }
     }
