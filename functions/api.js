@@ -952,7 +952,7 @@ async function notifications(env,u,skipEnsure=false){
     const improveRows=await all(db,"SELECT area_id,score,meta_json FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว'",last30,today);
     const areaCounts={},classCounts={};
     for(const i of improveRows){
-      if(Number(i.score)!==1)continue;
+      if(!approvedForScoring(i,cfg)||Number(i.score)!==1)continue;
       const m=metaOf(i);areaCounts[m.areaName||i.area_id]=(areaCounts[m.areaName||i.area_id]||0)+1;classCounts[m.classId||""]=(classCounts[m.classId||""]||0)+1;
     }
     const repeatAreas=Object.entries(areaCounts).filter(([,n])=>n>=3);
@@ -960,7 +960,7 @@ async function notifications(env,u,skipEnsure=false){
 
     const monthRows=await all(db,"SELECT score,meta_json FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว'",monthStart,today);
     const risk={};
-    for(const i of monthRows){if(Number(i.score)===1){const m=metaOf(i);risk[m.classId||""]=(risk[m.classId||""]||0)+1;}}
+    for(const i of monthRows){if(approvedForScoring(i,cfg)&&Number(i.score)===1){const m=metaOf(i);risk[m.classId||""]=(risk[m.classId||""]||0)+1;}}
     const risky=Object.values(risk).filter(n=>n>cfg.certificateBronzeMax).length;
     if(risky)add("warning","ห้องเสี่ยงไม่ได้รับเกียรติบัตร",risky+" ห้องมีผลปรับปรุงเกิน "+cfg.certificateBronzeMax+" ครั้งในเดือนนี้","reports",risky);
 
@@ -972,7 +972,7 @@ async function notifications(env,u,skipEnsure=false){
     if(u.role==="Admin"){await cleanRecycle(db);const trash=await db.prepare("SELECT COUNT(*) n FROM recycle_bin").first();if(Number(trash?.n||0)>0)add("info","มีข้อมูลในถังขยะ",Number(trash.n)+" รายการจะถูกลบถาวรตามระยะเวลาที่ตั้งไว้","admin",Number(trash.n));}
   }else if(u.role==="Teacher"){
     const rows=await all(db,"SELECT score,inspection_date,meta_json FROM inspections WHERE inspection_date>=? AND status='ตรวจแล้ว' ORDER BY inspection_date DESC",last30);
-    const mine=rows.filter(x=>String(metaOf(x).classId||"")===String(u.linked_classroom_id)),improve=mine.filter(x=>Number(x.score)===1);
+    const mine=rows.filter(x=>String(metaOf(x).classId||"")===String(u.linked_classroom_id)&&approvedForScoring(x,cfg)),improve=mine.filter(x=>Number(x.score)===1);
     if(improve.length)add("warning","มีผลประเมินที่ควรติดตาม","พบ "+improve.length+" ผลตรวจระดับปรับปรุงใน 30 วัน","teacher",improve.length);
     else add("success","สถานะห้องเรียน","ยังไม่พบผลระดับปรับปรุงใน 30 วันล่าสุด","teacher",0);
     const monthImprove=mine.filter(x=>x.inspection_date>=monthStart&&Number(x.score)===1).length;
