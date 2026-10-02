@@ -269,6 +269,8 @@ async function dispatch(env, action, p, token, request) {
     master: async () => master(env,u),
     report: async () => report(env,u,validateDate(p.start),validateDate(p.end)),
     dailyReport: async () => dailyReport(env,u,validateDate(p.date || thaiDay())),
+    inspectionExceptions: async () => inspectionExceptions(env,u,p),
+    setInspectionException: async () => setInspectionException(env,u,p),
     saveMaster: async () => saveMaster(env,u,p),
     bulkPreview: async () => bulkPreview(env,u,p),
     bulkCreate: async () => bulkCreate(env,u,p),
@@ -387,7 +389,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException"]);
 
 async function ensureAuditTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
@@ -430,6 +432,7 @@ function auditMeta(action,p,result){
   if(action==="saveDutyOverride")return{entityType:"DutyOverride",entityId:String(result?.OverrideID||""),details:{date:String(p.date||""),areaId:String(p.areaId||""),substituteUserId:String(p.substituteUserId||"")}};
   if(action==="deleteDutyOverride")return{entityType:"DutyOverride",entityId:String(p.id||""),details:{deleted:true}};
   if(action==="reviewInspection")return{entityType:"InspectionReview",entityId:String(p.id||""),details:{decision:String(p.decision||""),note:String(p.note||"").slice(0,300)}};
+  if(action==="setInspectionException")return{entityType:"InspectionException",entityId:String(p.id||""),details:{action:String(p.action||""),reason:String(p.reason||"").slice(0,120)}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
@@ -1100,6 +1103,34 @@ async function reviewInspection(env,u,p){
   await db.prepare("UPDATE inspections SET meta_json=?,version=version+1,updated_at=? WHERE inspection_id=?").bind(JSON.stringify(m),nowIso(),id).run();
   return{InspectionID:id,ApprovalStatus:m.approvalStatus};
 }
+async function inspectionExceptions(env,u,p){
+  role(u,["Admin","Supervisor"]);const db=env.DB,date=validateDate(p.date||thaiDay());
+  assert(date<=thaiDay()&&date>=shiftDate(thaiDay(),-30),"จัดการงดตรวจย้อนหลังได้ไม่เกิน 30 วัน");
+  if(date===thaiDay())await ensureToday(env);
+  const rows=await all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date);
+  return{date,settings:await getAppSettings(db),rows:rows.map(i=>{const m=metaOf(i);return{InspectionID:i.inspection_id,AreaName:m.areaName||"—",ClassName:m.className||"—",Status:i.status,Score:Number(i.score||0),SkipReason:m.skipReason||"",Notes:i.note||"",ApprovalStatus:m.approvalStatus||"",Version:Number(i.version||0)};})};
+}
+async function setInspectionException(env,u,p){
+  role(u,["Admin","Supervisor"]);const db=env.DB,id=text(p.id,120),action=text(p.action,30),cfg=await getAppSettings(db);
+  assert(["skip","reopen"].includes(action),"คำสั่งไม่ถูกต้อง");
+  const i=await db.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(id).first();assert(i,"ไม่พบงานตรวจ");
+  assert(i.inspection_date<=thaiDay()&&i.inspection_date>=shiftDate(thaiDay(),-30),"จัดการย้อนหลังได้ไม่เกิน 30 วัน");
+  const m=metaOf(i),stamp=nowIso();
+  if(action==="skip"){
+    const reason=text(p.reason||"",120),note=text(p.note||"",2000);assert(reason&&cfg.skipReasons.includes(reason),"เลือกเหตุผลงดตรวจ");
+    m.skipReason=reason;m.note=note;m.completedAt=stamp;m.completedById=u.user_id;m.completedByName=u.full_name;m.reviewNote="";
+    if(cfg.approvalEnabled){m.approvalStatus="รอรับรอง";m.approvedById="";m.approvedByName="";m.approvedAt="";}
+    else{m.approvalStatus="รับรองแล้ว";m.approvedById="system";m.approvedByName="รับรองอัตโนมัติ";m.approvedAt=stamp;}
+    await db.prepare("UPDATE inspections SET status='งดตรวจ',rating='',score=0,note=?,meta_json=?,version=version+1,completed_at=?,completed_by_id=?,completed_by_name=?,updated_at=? WHERE inspection_id=?")
+      .bind(note,JSON.stringify(m),stamp,u.user_id,u.full_name,stamp,id).run();
+  }else{
+    assert(i.inspection_date===thaiDay(),"เปิดงานกลับเป็นรอตรวจได้เฉพาะวันนี้");
+    m.skipReason="";m.reviewNote="";m.approvalStatus="";m.completedAt="";m.completedById="";m.completedByName="";
+    await db.prepare("UPDATE inspections SET status='รอตรวจ',rating='',score=0,note='',meta_json=?,version=version+1,completed_at='',completed_by_id='',completed_by_name='',updated_at=? WHERE inspection_id=?").bind(JSON.stringify(m),stamp,id).run();
+  }
+  return true;
+}
+
 async function historyOptions(env,u){
   const db=env.DB;
   let classes=await all(db,"SELECT classroom_id id,class_name name FROM classrooms ORDER BY class_name");
