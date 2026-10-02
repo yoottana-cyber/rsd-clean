@@ -51,7 +51,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -61,6 +61,7 @@ const adminTables = {
     );
     $("holiday-btn").onclick = holidayModal;
     $("audit-btn").onclick = auditModal;
+    $("trash-btn").onclick = trashModal;
     $("backup-btn").onclick = backupCenterModal;
     $("status-btn").onclick = systemStatusModal;
     adminContent();
@@ -296,17 +297,17 @@ const adminTables = {
   }
   async function deleteRow(tableName, id) {
     const confirm = await Swal.fire({
-      title: "ยืนยันการลบ?",
-      text: "ประวัติผลตรวจที่บันทึกไว้จะยังคงอยู่",
+      title: "ย้ายไปถังขยะ?",
+      text: "กู้คืนได้ภายใน 30 วัน และประวัติผลตรวจที่บันทึกไว้จะยังคงอยู่",
       icon: "question",
       showCancelButton: true,
-      confirmButtonText: "ลบรายการ",
+      confirmButtonText: "ย้ายไปถังขยะ",
       cancelButtonText: "ยกเลิก",
     });
     if (!confirm.isConfirmed) return;
     try {
       await rpc("deleteMaster", { table: tableName, id });
-      toast("ลบแล้ว");
+      toast("ย้ายไปถังขยะแล้ว");
       await route();
     } catch (e) {
       error(e);
@@ -1039,6 +1040,77 @@ const adminTables = {
   }
 
 
+  function trashTypeLabel(t) {
+    return ({Users:"ผู้ใช้งาน",Classrooms:"ห้องเรียน",Areas:"เขตพื้นที่",Assignments:"งานมอบหมาย"})[t] || t;
+  }
+  async function trashModal() {
+    openModal("ถังขยะ", '<div id="trash-body"><div class="muted">กำลังโหลดถังขยะ…</div></div>');
+    await refreshTrash();
+  }
+  async function refreshTrash() {
+    const box=$("trash-body"); if(!box) return;
+    try{
+      const rows=await rpc("recycleBin",{},true);
+      if(!box.isConnected) return;
+      box.innerHTML =
+        '<div class="warn mb-4"><b>กู้คืนได้ภายใน 30 วัน</b><br>รายการที่ครบกำหนดจะถูกลบถาวรอัตโนมัติ</div>' +
+        table(
+          ["ประเภท","รายการ","ลบเมื่อ","ผู้ลบ","เหลือ","จัดการ"],
+          rows.map(r=>{
+            const days=Math.max(0,Math.ceil((Number(r.ExpiresAt)-Date.now())/86400000));
+            return[
+              esc(trashTypeLabel(r.EntityType)),
+              esc(r.Label||r.EntityID),
+              esc(new Date(r.DeletedAt).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})),
+              esc(r.DeletedBy||"—"),
+              days+" วัน",
+              '<button class="btn small secondary restore-trash" data-id="'+esc(r.RecycleID)+'">กู้คืน</button> '+
+              '<button class="btn small danger purge-trash" data-id="'+esc(r.RecycleID)+'">ลบถาวร</button>'
+            ];
+          })
+        );
+      document.querySelectorAll(".restore-trash").forEach(b=>b.onclick=async()=>{
+        const ok=await Swal.fire({icon:"question",title:"กู้คืนรายการนี้?",showCancelButton:true,confirmButtonText:"กู้คืน",cancelButtonText:"ยกเลิก"});
+        if(!ok.isConfirmed)return;
+        try{
+          await rpc("restoreTrash",{recycleId:b.dataset.id});
+          toast("กู้คืนข้อมูลแล้ว");
+          await refreshTrash();
+          if(S.route==="admin") {
+            S.master=await rpc("master",{},true);
+            adminContent();
+          }
+        }catch(e){error(e);}
+      });
+      document.querySelectorAll(".purge-trash").forEach(b=>b.onclick=async()=>{
+        const ok=await Swal.fire({
+          icon:"warning",
+          title:"ลบถาวร?",
+          text:"รายการนี้จะไม่สามารถกู้คืนจากถังขยะได้",
+          input:"text",
+          inputLabel:"พิมพ์ DELETE เพื่อยืนยัน",
+          inputPlaceholder:"DELETE",
+          showCancelButton:true,
+          confirmButtonText:"ลบถาวร",
+          cancelButtonText:"ยกเลิก",
+          confirmButtonColor:"#be123c",
+          preConfirm:v=>{
+            if(String(v||"").trim()!=="DELETE"){Swal.showValidationMessage("กรุณาพิมพ์ DELETE");return false;}
+            return true;
+          }
+        });
+        if(!ok.isConfirmed)return;
+        try{
+          await rpc("purgeTrash",{recycleId:b.dataset.id});
+          toast("ลบถาวรแล้ว");
+          await refreshTrash();
+        }catch(e){error(e);}
+      });
+    }catch(e){
+      box.innerHTML='<div class="warn">โหลดถังขยะไม่สำเร็จ<br>'+esc(e.message||String(e))+'</div>';
+    }
+  }
+
   function statusBadge(ok, okText, badText) {
     return ok
       ? '<span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:700">' + esc(okText) + '</span>'
@@ -1087,6 +1159,7 @@ const adminTables = {
             ["ผลการตรวจ",c.inspections||0],
             ["ผลตรวจที่มีรูป",c.photos||0],
             ["Audit Log",c.auditLogs||0],
+            ["ถังขยะ",c.recycleBin||0],
             ["Session ที่ยังใช้งาน",c.activeSessions||0]
           ].map(x=>[esc(x[0]),String(x[1])])
         ) +
