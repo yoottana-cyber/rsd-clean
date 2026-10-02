@@ -967,6 +967,13 @@
       '</section><p class="muted text-right mt-3" id="poll-status">อัปเดต ' +
       new Date(d.updatedAt).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok" }) +
       " · รีเฟรชอัตโนมัติทุก 60 วินาที</p>";
+    if (d.approvalPending) {
+      const approval = document.createElement("p");
+      approval.className = "card mb-5";
+      approval.style.cssText = "background:#eef2ff;color:#4338ca;border-color:#c7d2fe";
+      approval.textContent = "มีผลตรวจรอรับรอง "+d.approvalPending+" รายการ — คะแนนจัดอันดับและเกียรติบัตรจะใช้หลังรับรองแล้ว";
+      $("dashboard-content").prepend(approval);
+    }
     if (d.isHoliday) {
       const notice = document.createElement("p");
       notice.className = "card mb-5 text-cyan-800";
