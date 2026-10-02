@@ -121,7 +121,7 @@ export async function onRequest(context) {
     if (!["challenge","login","publicDashboard"].includes(action)) {
       background(context,autoBackupIfDue(env).catch(e => console.error("AUTO_BACKUP_FAILED", e)));
     }
-    if (action === "saveInspection") {
+    if (action === "saveInspection" || action === "reviewInspection") {
       background(context,rebuildRewards(env).catch(e => console.error("REWARD_REBUILD_FAILED", e)));
     }
     if(duration>=1200 && action!=="systemEvents"){
@@ -1383,7 +1383,7 @@ function monthLastDay(month){
 }
 function activeDates(ins){ return new Set(ins.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ").map(i=>i.inspection_date)); }
 async function rewardRecords(env,ins,teamMap){
-  const ad=activeDates(ins); ins=ins.filter(i=>ad.has(i.inspection_date)); const rewards=[],classes={},inspectors={};
+  const cfg=await getAppSettings(env.DB),ad=activeDates(ins); ins=ins.filter(i=>ad.has(i.inspection_date)&&(!cfg.approvalEnabled||i.status!=="ตรวจแล้ว"||String(metaOf(i).approvalStatus||"")==="รับรองแล้ว")); const rewards=[],classes={},inspectors={};
   const add=async(ref,key,name,details)=>rewards.push({log_id:await digest(ref+"|"+key),timestamp:details.at||nowIso(),reference_id:ref,achievement:name,details_json:JSON.stringify(details)});
   for(const i of ins){ const m=metaOf(i); (classes[m.classId]||(classes[m.classId]=[])).push(i); for(const uid of inspectorIdsFrom(i,teamMap)){ const k=uid+"|"+i.inspection_date; (inspectors[k]||(inspectors[k]=[])).push(i); } }
   for(const [ref,list] of Object.entries(classes)){
@@ -1394,20 +1394,23 @@ async function rewardRecords(env,ins,teamMap){
   return rewards;
 }
 async function rebuildRewards(env){ const {ins,teamMap}=await inspectionBundle(env.DB), desired=await rewardRecords(env,ins,teamMap), existing=await all(env.DB,"SELECT * FROM rewards_log"), old=new Map(existing.map(x=>[x.log_id,x.timestamp])); const stmts=[env.DB.prepare("DELETE FROM rewards_log")]; for(const r of desired) stmts.push(env.DB.prepare("INSERT INTO rewards_log(log_id,timestamp,reference_id,achievement,details_json) VALUES(?,?,?,?,?)").bind(r.log_id,old.get(r.log_id)||r.timestamp,r.reference_id,r.achievement,r.details_json)); await env.DB.batch(stmts); }
-function leaderboard(ins){ const groups={}; ins.filter(i=>i.status==="ตรวจแล้ว").forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,score:0});g.total++;g.score+=Number(i.score||0);}); return Object.values(groups).map(g=>({...g,avg:g.total?g.score/g.total:0})).sort((a,b)=>b.avg-a.avg||b.total-a.total||a.name.localeCompare(b.name,"th")); }
-async function monthly(env,allIns,month){ const cfg=await getAppSettings(env.DB),ad=activeDates(allIns), firstNext=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),1)), last=new Date(firstNext.getTime()-86400000).toISOString().slice(0,10), cutoff=last<thaiDay()?last:thaiDay(), expected=[...ad].filter(d=>d.startsWith(month)&&d<=cutoff).sort(),groups={}; allIns.filter(i=>i.inspection_date.startsWith(month)&&i.inspection_date<=cutoff).forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,done:0,resolved:0,skipped:0,improve:0,days:new Set()}); if(!ad.has(i.inspection_date))return;g.total++;g.days.add(i.inspection_date);if(i.status==="ตรวจแล้ว"){g.done++;g.resolved++;if(Number(i.score)===1)g.improve++;}else if(i.status==="งดตรวจ"){g.skipped++;g.resolved++;}}); return Object.values(groups).map(g=>{const missingDays=expected.filter(d=>!g.days.has(d)).length,complete=expected.length>0&&g.total>0&&g.resolved===g.total&&missingDays===0;return{id:g.id,name:g.name,total:g.total,done:g.done,skipped:g.skipped,improve:g.improve,missingDays,inspectionDays:expected.length,provisional:last>=thaiDay(),medal:expected.length===0?"ไม่มีการตรวจในเดือนนี้":!complete?"ข้อมูลไม่ครบ":g.improve===0?"เหรียญทอง":g.improve<=cfg.certificateSilverMax?"เหรียญเงิน":g.improve<=cfg.certificateBronzeMax?"เหรียญทองแดง":"ไม่ผ่านเกณฑ์"};}); }
+function approvedForScoring(i,cfg){
+  return i.status==="ตรวจแล้ว" && (!cfg?.approvalEnabled || String(metaOf(i).approvalStatus||"")==="รับรองแล้ว");
+}
+function leaderboard(ins,cfg=null){ const groups={}; ins.filter(i=>approvedForScoring(i,cfg)).forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,score:0});g.total++;g.score+=Number(i.score||0);}); return Object.values(groups).map(g=>({...g,avg:g.total?g.score/g.total:0})).sort((a,b)=>b.avg-a.avg||b.total-a.total||a.name.localeCompare(b.name,"th")); }
+async function monthly(env,allIns,month){ const cfg=await getAppSettings(env.DB),ad=activeDates(allIns), firstNext=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),1)), last=new Date(firstNext.getTime()-86400000).toISOString().slice(0,10), cutoff=last<thaiDay()?last:thaiDay(), expected=[...ad].filter(d=>d.startsWith(month)&&d<=cutoff).sort(),groups={}; allIns.filter(i=>i.inspection_date.startsWith(month)&&i.inspection_date<=cutoff).forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,done:0,resolved:0,skipped:0,improve:0,days:new Set()}); if(!ad.has(i.inspection_date))return;g.total++;g.days.add(i.inspection_date);if(i.status==="ตรวจแล้ว"&&approvedForScoring(i,cfg)){g.done++;g.resolved++;if(Number(i.score)===1)g.improve++;}else if(i.status==="งดตรวจ"){g.skipped++;g.resolved++;}}); return Object.values(groups).map(g=>{const missingDays=expected.filter(d=>!g.days.has(d)).length,complete=expected.length>0&&g.total>0&&g.resolved===g.total&&missingDays===0;return{id:g.id,name:g.name,total:g.total,done:g.done,skipped:g.skipped,improve:g.improve,missingDays,inspectionDays:expected.length,provisional:last>=thaiDay(),medal:expected.length===0?"ไม่มีการตรวจในเดือนนี้":!complete?"ข้อมูลไม่ครบ":g.improve===0?"เหรียญทอง":g.improve<=cfg.certificateSilverMax?"เหรียญเงิน":g.improve<=cfg.certificateBronzeMax?"เหรียญทองแดง":"ไม่ผ่านเกณฑ์"};}); }
 async function dashboard(env,u,d){
   if(d===thaiDay())await ensureToday(env);
-  const start=shiftDate(d,-29);
+  const cfg=await getAppSettings(env.DB),start=shiftDate(d,-29);
   const [{ins},areas]=await Promise.all([
     inspectionBundleRange(env.DB,start,d),
     env.DB.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
   const ad=activeDates(ins),isHoliday=d<thaiDay()&&!ad.has(d);
   const selected=ins.filter(i=>i.inspection_date===d&&!isHoliday&&(!u||u.role!=="Teacher"||metaOf(i).classId===u.linked_classroom_id));
-  const done=selected.filter(i=>i.status==="ตรวจแล้ว"),counts=[3,2,1].map(n=>done.filter(i=>Number(i.score)===n).length);
+  const done=selected.filter(i=>approvedForScoring(i,cfg)),resolved=selected.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ"),counts=[3,2,1].map(n=>done.filter(i=>Number(i.score)===n).length);
   const recent=done.sort((a,b)=>String(metaOf(b).completedAt).localeCompare(String(metaOf(a).completedAt))).slice(0,50).map(i=>({date:i.inspection_date,area:metaOf(i).areaName,className:metaOf(i).className,rating:i.rating,score:i.score}));
-  return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,pending:selected.length-done.length,counts,feed:u?recent:[],leaders:leaderboard(ins).slice(0,5),updatedAt:nowIso()};
+  return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,skipped:selected.filter(i=>i.status==="งดตรวจ").length,pending:selected.length-resolved.length,counts,feed:u?recent:[],leaders:leaderboard(ins,cfg).slice(0,5),updatedAt:nowIso()};
 }
 function monthShift(month,offset){
   const y=Number(month.slice(0,4)),m=Number(month.slice(5,7));
@@ -1419,17 +1422,17 @@ function mondayOf(date){
   d.setUTCDate(d.getUTCDate()-(wd-1));
   return d.toISOString().slice(0,10);
 }
-function executiveStats(ins,start,end){
+function executiveStats(ins,start,end,cfg=null){
   const rows=ins.filter(i=>i.inspection_date>=start&&i.inspection_date<=end);
-  const done=rows.filter(i=>i.status==="ตรวจแล้ว");
+  const done=rows.filter(i=>approvedForScoring(i,cfg)),resolved=rows.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ");
   const scores=done.map(i=>Number(i.score||0)).filter(n=>n>0);
   const excellent=done.filter(i=>Number(i.score)===3).length;
   const medium=done.filter(i=>Number(i.score)===2).length;
   const improve=done.filter(i=>Number(i.score)===1).length;
   const scheduled=rows.length,doneCount=done.length;
   return{
-    start,end,scheduled,done:doneCount,pending:Math.max(0,scheduled-doneCount),
-    completionRate:scheduled?doneCount*100/scheduled:0,
+    start,end,scheduled,done:doneCount,skipped:rows.filter(i=>i.status==="งดตรวจ").length,pending:Math.max(0,scheduled-resolved.length),
+    completionRate:scheduled?resolved.length*100/scheduled:0,
     averageScore:scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:0,
     excellent,medium,improve,
     excellentRate:doneCount?excellent*100/doneCount:0,
@@ -1439,7 +1442,7 @@ function executiveStats(ins,start,end){
 async function executiveDashboard(env,u){
   role(u,["Admin","Supervisor"]);
   await ensureToday(env);
-  const db=env.DB,today=thaiDay(),thisMonth=today.slice(0,7);
+  const db=env.DB,today=thaiDay(),thisMonth=today.slice(0,7),cfg=await getAppSettings(db);
   const currentWeekStart=mondayOf(today);
   const firstMonth=monthShift(thisMonth,-5)+"-01";
   const firstWeek=shiftDate(currentWeekStart,-49);
@@ -1449,12 +1452,12 @@ async function executiveDashboard(env,u){
     db.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
 
-  const todayStats=executiveStats(ins,today,today);
+  const todayStats=executiveStats(ins,today,today,cfg);
   const weekSeries=[];
   for(let n=7;n>=0;n--){
     const ws=shiftDate(currentWeekStart,-7*n);
     const we=n===0?today:shiftDate(ws,6);
-    const x=executiveStats(ins,ws,we);
+    const x=executiveStats(ins,ws,we,cfg);
     weekSeries.push({...x,label:ws});
   }
 
@@ -1462,16 +1465,16 @@ async function executiveDashboard(env,u){
   for(let n=5;n>=0;n--){
     const month=monthShift(thisMonth,-n),ms=month+"-01";
     const me=n===0?today:monthLastDay(month);
-    const x=executiveStats(ins,ms,me);
+    const x=executiveStats(ins,ms,me,cfg);
     monthSeries.push({...x,month});
   }
 
   const last30Start=shiftDate(today,-29);
   const last30=ins.filter(i=>i.inspection_date>=last30Start&&i.inspection_date<=today);
-  const last30Stats=executiveStats(ins,last30Start,today);
+  const last30Stats=executiveStats(ins,last30Start,today,cfg);
   const areaMap={},classMap={};
   for(const i of last30){
-    if(i.status!=="ตรวจแล้ว")continue;
+    if(!approvedForScoring(i,cfg))continue;
     const m=metaOf(i),score=Number(i.score||0);
     const a=areaMap[m.areaId]||(areaMap[m.areaId]={id:m.areaId,name:m.areaName||"—",className:m.className||"—",done:0,improve:0,totalScore:0});
     a.done++;a.totalScore+=score;if(score===1)a.improve++;
@@ -1489,10 +1492,10 @@ async function executiveDashboard(env,u){
     .sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th"))
     .slice(0,8);
 
-  const currentWeek=weekSeries[weekSeries.length-1]||executiveStats([],today,today);
-  const previousWeek=weekSeries[weekSeries.length-2]||executiveStats([],today,today);
-  const currentMonth=monthSeries[monthSeries.length-1]||executiveStats([],today,today);
-  const previousMonth=monthSeries[monthSeries.length-2]||executiveStats([],today,today);
+  const currentWeek=weekSeries[weekSeries.length-1]||executiveStats([],today,today,cfg);
+  const previousWeek=weekSeries[weekSeries.length-2]||executiveStats([],today,today,cfg);
+  const currentMonth=monthSeries[monthSeries.length-1]||executiveStats([],today,today,cfg);
+  const previousMonth=monthSeries[monthSeries.length-2]||executiveStats([],today,today,cfg);
 
   return{
     today,
@@ -1501,7 +1504,7 @@ async function executiveDashboard(env,u){
     last30:last30Stats,
     currentWeek,previousWeek,currentMonth,previousMonth,
     weekSeries,monthSeries,
-    leaders:leaderboard(last30.filter(i=>i.status==="ตรวจแล้ว")).slice(0,5),
+    leaders:leaderboard(last30,cfg).slice(0,5),
     watchAreas,watchClasses,
     updatedAt:nowIso()
   };
@@ -1558,14 +1561,14 @@ async function dailyReport(env,u,date){
 async function report(env,u,start,end){
   role(u,["Admin","Supervisor"]); assert(start<=end&&end<=thaiDay(),"ช่วงวันที่ไม่ถูกต้อง"); assert((new Date(end)-new Date(start))<=366*86400000,"เลือกช่วงไม่เกิน 366 วัน");
   await ensureToday(env);
-  const month=end.slice(0,7),monthStart=month+"-01",monthEnd=monthLastDay(month)<thaiDay()?monthLastDay(month):thaiDay();
+  const cfg=await getAppSettings(env.DB),month=end.slice(0,7),monthStart=month+"-01",monthEnd=monthLastDay(month)<thaiDay()?monthLastDay(month):thaiDay();
   const [{ins,teamMap},{ins:monthIns},users,rewardRows]=await Promise.all([
     inspectionBundleRange(env.DB,start,end),
     inspectionBundleRange(env.DB,monthStart,monthEnd),
     all(env.DB,"SELECT user_id,full_name FROM users"),
     all(env.DB,"SELECT * FROM rewards_log ORDER BY timestamp")
   ]);
-  const ad=activeDates(ins),filtered=ins.filter(i=>ad.has(i.inspection_date)),done=filtered.filter(i=>i.status==="ตรวจแล้ว"),areas={},people={},um=new Map(users.map(x=>[x.user_id,x.full_name]));
-  for(const i of filtered){const m=metaOf(i),ids=inspectorIdsFrom(i,teamMap),names=inspectorNamesFrom(i,teamMap);ids.forEach((uid,idx)=>{const g=people[uid]||(people[uid]={name:names[idx]||um.get(uid)||"—",scheduled:0,done:0});g.scheduled++;if(i.status==="ตรวจแล้ว")g.done++;});if(i.status==="ตรวจแล้ว"&&Number(i.score)===1){const a=areas[m.areaId]||(areas[m.areaId]={name:m.areaName,count:0});a.count++;}}
-  return{start,end,leaders:leaderboard(done),watch:Object.values(areas).sort((a,b)=>b.count-a.count),inspectors:Object.values(people),monthly:await monthly(env,monthIns,month),month,rewards:rewardRows.map(rewardRow)};
+  const ad=activeDates(ins),filtered=ins.filter(i=>ad.has(i.inspection_date)),done=filtered.filter(i=>approvedForScoring(i,cfg)),areas={},people={},um=new Map(users.map(x=>[x.user_id,x.full_name]));
+  for(const i of filtered){const m=metaOf(i),ids=inspectorIdsFrom(i,teamMap),names=inspectorNamesFrom(i,teamMap);ids.forEach((uid,idx)=>{const g=people[uid]||(people[uid]={name:names[idx]||um.get(uid)||"—",scheduled:0,done:0});g.scheduled++;if(i.status==="ตรวจแล้ว"||i.status==="งดตรวจ")g.done++;});if(approvedForScoring(i,cfg)&&Number(i.score)===1){const a=areas[m.areaId]||(areas[m.areaId]={name:m.areaName,count:0});a.count++;}}
+  return{start,end,leaders:leaderboard(done,cfg),watch:Object.values(areas).sort((a,b)=>b.count-a.count),inspectors:Object.values(people),monthly:await monthly(env,monthIns,month),month,rewards:rewardRows.map(rewardRow)};
 }
