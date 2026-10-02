@@ -1,3 +1,6 @@
+let lastHealthAt = 0;
+let lastHealth = null;
+
 export async function onRequest({ request, env }) {
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
@@ -11,6 +14,11 @@ export async function onRequest({ request, env }) {
       headers:{...headers,Allow:"GET, HEAD"}
     });
   }
+  const now=Date.now();
+  if(lastHealth && now-lastHealthAt<10000){
+    if(request.method==="HEAD")return new Response(null,{status:lastHealth.ok?200:503,headers});
+    return new Response(JSON.stringify({...lastHealth,cached:true}),{status:lastHealth.ok?200:503,headers});
+  }
   const started=Date.now();
   let dbOk=false,message="ok";
   try{
@@ -21,14 +29,15 @@ export async function onRequest({ request, env }) {
   }catch(e){
     message=String(e?.message||e).slice(0,160);
   }
-  const body={
+  lastHealthAt=Date.now();
+  lastHealth={
     ok:dbOk,
     service:"RSD Clean",
     db:dbOk?"ok":"error",
     time:new Date().toISOString(),
     responseMs:Date.now()-started
   };
-  if(!dbOk)body.message=message;
+  if(!dbOk)lastHealth.message=message;
   if(request.method==="HEAD")return new Response(null,{status:dbOk?200:503,headers});
-  return new Response(JSON.stringify(body),{status:dbOk?200:503,headers});
+  return new Response(JSON.stringify(lastHealth),{status:dbOk?200:503,headers});
 }
