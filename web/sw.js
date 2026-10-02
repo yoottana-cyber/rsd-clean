@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-19";
+const CACHE="rsd-clean-v2-shell-20";
 const SHELL=[
   "/",
   "/index.html",
@@ -6,6 +6,7 @@ const SHELL=[
   "/core.js",
   "/admin.js",
   "/inspector.js",
+  "/coverage.js",
   "/manifest.webmanifest",
   "/icon.svg",
   "/icon-192.png",
