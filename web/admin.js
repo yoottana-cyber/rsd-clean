@@ -724,6 +724,7 @@ const adminTables = {
     return '<div class="daily-result-list">'+rows.map(x=>
       '<div class="daily-result-row">'+
         '<div><b>'+esc(x.ClassName)+'</b><span>'+esc(x.AreaName)+'</span>'+
+        (x.SkipReason?'<small>เหตุผล: '+esc(x.SkipReason)+'</small>':'')+
         (x.Notes?'<small>หมายเหตุ: '+esc(x.Notes)+'</small>':'')+'</div>'+
         '<span class="daily-dot '+labelClass+'"></span>'+
       '</div>'
