@@ -85,7 +85,9 @@ export async function onRequest(context) {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer"
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains"
   };
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
   if (request.method !== "POST") return jsonResponse({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, headers);
@@ -119,7 +121,7 @@ export async function onRequest(context) {
         details:{thresholdMs:1200}
       },request));
     }
-    return jsonResponse({ ok: true, data }, 200, headers);
+    return jsonResponse({ ok: true, data }, 200, {...headers,"Server-Timing":"app;dur="+duration});
   } catch (err) {
     const message=err?.message||String(err),duration=Date.now()-started;
     if(err?.rateLimited && shouldLogRateEvent(request,action)){
@@ -139,7 +141,7 @@ export async function onRequest(context) {
         details:{name:String(err?.name||"Error")}
       },request));
     }
-    return jsonResponse({ ok: false, error: message }, Number(err?.httpStatus||200), headers);
+    return jsonResponse({ ok: false, error: message }, Number(err?.httpStatus||200), {...headers,"Server-Timing":"app;dur="+duration});
   }
 }
 
