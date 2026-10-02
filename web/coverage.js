@@ -159,6 +159,51 @@ async function coveragePhoto(x){
 }
 
 /* =========================
+   4) DOCUMENTED NO-INSPECTION EXCEPTIONS
+   ========================= */
+async function inspectionExceptionModal(date=thaiDay()){
+  if(!["Admin","Supervisor"].includes(S.user?.Role))return;
+  openModal("จัดการงดตรวจ / ไม่สามารถตรวจได้",'<div id="inspection-exception-body"><div class="muted">กำลังโหลดงานตรวจ…</div></div>');
+  await refreshInspectionExceptionModal(date);
+}
+async function refreshInspectionExceptionModal(date){
+  const box=$("inspection-exception-body");if(!box)return;
+  try{
+    const r=await rpc("inspectionExceptions",{date},true),cfg=r.settings||S.config||{},rows=r.rows||[];
+    const pending=rows.filter(x=>x.Status==="รอตรวจ"),skipped=rows.filter(x=>x.Status==="งดตรวจ");
+    box.innerHTML=
+      '<div class="coverage-section-head mb-4"><div><h3>'+esc(coverageDateText(r.date))+'</h3><p class="muted">ใช้เมื่อมีเหตุจำเป็นที่ทำให้พื้นที่ไม่ได้รับการตรวจ</p></div></div>'+
+      (pending.length
+        ? '<form id="exception-form" class="coverage-form-grid">'+
+            '<div class="field coverage-span-2"><label>พื้นที่ที่ยังรอตรวจ</label><select name="id" required><option value="">— เลือกพื้นที่ —</option>'+pending.map(x=>'<option value="'+esc(x.InspectionID)+'">'+esc(x.ClassName)+' · '+esc(x.AreaName)+'</option>').join("")+'</select></div>'+
+            '<div class="field"><label>เหตุผล</label><select name="reason" required><option value="">— เลือกเหตุผล —</option>'+(cfg.skipReasons||[]).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("")+'</select></div>'+
+            '<div class="field"><label>หมายเหตุเพิ่มเติม</label><input name="note" maxlength="2000" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></div>'+
+            '<div class="coverage-span-2"><button class="btn" type="submit"><i data-lucide="circle-off"></i> บันทึกเป็นงดตรวจ</button></div>'+
+          '</form>'
+        : '<div class="empty mb-4">ไม่มีงานรอตรวจในวันที่เลือก</div>')+
+      '<div class="coverage-section-head mt-5"><div><h3>รายการงดตรวจแล้ว</h3><p class="muted">วันนี้สามารถเปิดกลับเป็น “รอตรวจ” ได้</p></div></div>'+
+      (skipped.length?table(["ห้องเรียน","พื้นที่","เหตุผล","หมายเหตุ","จัดการ"],skipped.map(x=>[
+        esc(x.ClassName),esc(x.AreaName),esc(x.SkipReason||"—"),esc(x.Notes||"—"),
+        r.date===thaiDay()?'<button class="btn small secondary exception-reopen" data-id="'+esc(x.InspectionID)+'">เปิดกลับเป็นรอตรวจ</button>':'—'
+      ])):'<div class="empty">ยังไม่มีรายการงดตรวจ</div>');
+    if($("exception-form"))$("exception-form").onsubmit=async e=>{
+      e.preventDefault();const f=e.target.elements;
+      try{
+        await rpc("setInspectionException",{id:f.id.value,action:"skip",reason:f.reason.value,note:f.note.value});
+        toast("บันทึกเหตุผลงดตรวจแล้ว");
+        await refreshInspectionExceptionModal(date);
+      }catch(err){error(err);}
+    };
+    box.querySelectorAll(".exception-reopen").forEach(b=>b.onclick=async()=>{
+      const ok=await Swal.fire({icon:"question",title:"เปิดงานกลับเป็นรอตรวจ?",showCancelButton:true,confirmButtonText:"เปิดงาน",cancelButtonText:"ยกเลิก"});
+      if(!ok.isConfirmed)return;
+      try{await rpc("setInspectionException",{id:b.dataset.id,action:"reopen"});toast("เปิดงานกลับเป็นรอตรวจแล้ว");await refreshInspectionExceptionModal(date);}catch(e){error(e);}
+    });
+    icons();
+  }catch(e){box.innerHTML='<div class="warn">'+esc(e.message||String(e))+'</div>';}
+}
+
+/* =========================
    5-6) AREA / CLASS HISTORY
    ========================= */
 let coverageHistoryOptions=null,coverageHistoryData=null;
