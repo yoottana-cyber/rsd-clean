@@ -230,7 +230,7 @@
     const box=$("notification-center-body");
     try{
       const [server,offline]=await Promise.all([
-        rpc("notifications",{},true),
+        rpc("notifications",{},true).catch(()=>({items:[],unread:0,offline:true})),
         S.user.Role==="Inspector" ? listOfflineInspections(S.user.UserID).catch(()=>[]) : Promise.resolve([])
       ]);
       if(!box?.isConnected)return;
@@ -265,7 +265,7 @@
     if(!S.user)return;
     try{
       const [server,offline]=await Promise.all([
-        rpc("notifications",{},true),
+        rpc("notifications",{},true).catch(()=>({unread:0})),
         S.user.Role==="Inspector" ? listOfflineInspections(S.user.UserID).catch(()=>[]) : Promise.resolve([])
       ]);
       const n=Math.min(99,Number(server?.unread||0)+offline.length);
