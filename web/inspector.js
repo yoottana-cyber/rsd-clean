@@ -40,6 +40,10 @@ let taskRows = [];
         const home=await rpc("inspectorHome");
         rows=home.tasks||[];
         rewards=home.rewards||[];
+        if(home.settings){
+          S.config=home.settings;
+          try{localStorage.setItem("rsd-config-cache",JSON.stringify(home.settings));}catch(e){}
+        }
         saveTaskCache(rows,rewards);
         if(home.notifications){
           window.rsdInspectorNotifications={data:home.notifications,at:Date.now()};
@@ -112,6 +116,8 @@ let taskRows = [];
                 '</h2>' +
                 (inspectorTeamLabel(i) ? '<p class="muted mb-2">' + esc(inspectorTeamLabel(i)) + '</p>' : '') +
                 (i.meta.completedByName && !i._offlinePending ? '<p class="muted mb-2">ตรวจล่าสุดโดย ' + esc(i.meta.completedByName) + '</p>' : '') +
+                (i.ApprovalStatus ? '<p class="muted mb-2">สถานะรับรอง: <b>'+esc(i.ApprovalStatus)+'</b>'+(i.ReviewNote?' · '+esc(i.ReviewNote):'')+'</p>' : '') +
+                (i.SkipReason ? '<p class="muted mb-2">เหตุผลงดตรวจ: '+esc(i.SkipReason)+'</p>' : '') +
                 (i._offlineError?'<p class="offline-error mb-2">ซิงก์ล่าสุดไม่สำเร็จ: '+esc(i._offlineError)+'</p>':'') +
                 '<p class="muted min-h-10">' +
                 esc(i.Notes || "ยังไม่มีหมายเหตุ") +
@@ -367,7 +373,9 @@ let taskRows = [];
         '</p>' +
         (inspectorTeamLabel(i) ? '<p class="muted">' + esc(inspectorTeamLabel(i)) + '</p>' : '') +
         (i.meta.completedByName ? '<p class="muted">ผลปัจจุบันบันทึกโดย ' + esc(i.meta.completedByName) + '</p>' : '') +
-        '<div class="field"><label>สถานะ</label><select name="status"><option selected>ตรวจแล้ว</option><option>รอตรวจ</option></select></div><div class="field"><label>ระดับประเมิน</label><select name="score"><option value="">— เลือกระดับ —</option>' +
+        '<div class="field"><label>สถานะ</label><select name="status"><option value="ตรวจแล้ว" '+(i.Status==="ตรวจแล้ว"?"selected":"")+'>ตรวจแล้ว</option><option value="งดตรวจ" '+(i.Status==="งดตรวจ"?"selected":"")+'>งดตรวจ / ไม่สามารถตรวจได้</option><option value="รอตรวจ" '+(i.Status==="รอตรวจ"?"selected":"")+'>รอตรวจ</option></select></div>'+
+        '<div class="field hidden" id="skip-reason-field"><label>เหตุผลงดตรวจ</label><select name="skipReason"><option value="">— เลือกเหตุผล —</option>'+((S.config?.skipReasons||["ผู้ตรวจลา","กิจกรรมโรงเรียน","ฝนตก/สภาพอากาศ","พื้นที่ปิด/เข้าไม่ได้","เหตุจำเป็นอื่น"]).map(x=>'<option value="'+esc(x)+'" '+(i.SkipReason===x?"selected":"")+'>'+esc(x)+'</option>').join(""))+'</select></div>'+
+        '<div class="field"><label>ระดับประเมิน</label><select name="score"><option value="">— เลือกระดับ —</option>' +
         [
           [3, "ยอดเยี่ยม — 3 คะแนน"],
           [2, "ปานกลาง — 2 คะแนน"],
@@ -394,8 +402,12 @@ let taskRows = [];
     );
     const form = $("inspection-form");
     const toggle = () => {
-      form.elements.score.required = form.elements.status.value === "ตรวจแล้ว";
-      form.elements.score.disabled = !form.elements.score.required;
+      const status=form.elements.status.value,isDone=status==="ตรวจแล้ว",isSkip=status==="งดตรวจ";
+      form.elements.score.required=isDone;
+      form.elements.score.disabled=!isDone;
+      form.elements.skipReason.required=isSkip;
+      $("skip-reason-field")?.classList.toggle("hidden",!isSkip);
+      if(!isDone)form.elements.score.value="";
     };
     form.elements.status.onchange = toggle;
     toggle();
@@ -416,9 +428,11 @@ let taskRows = [];
         status:f.status.value,
         score:Number(f.score.value),
         notes:f.notes.value,
+        skipReason:f.skipReason?.value||"",
         removePhoto:f.removePhoto?.checked||false
       };
       const queueRecord=async(reason="")=>{
+        if(S.config?.offlineEnabled===false) throw Error("Admin ปิดการบันทึกแบบออฟไลน์ไว้ กรุณาเชื่อมต่ออินเทอร์เน็ตก่อนบันทึก");
         if(!window.rsdOfflineQueue) throw Error("อุปกรณ์นี้ไม่รองรับการเก็บงานแบบออฟไลน์");
         const prior=queuedRecord?.photo||null;
         const photo=selectedPhoto||prior||null;
@@ -615,7 +629,7 @@ let taskRows = [];
     const recent = r.inspections,
       done = recent.filter((i) => i.Status === "ตรวจแล้ว");
     $("app").innerHTML =
-      heading("ห้องเรียนของฉัน 🌟", "ติดตามผลการดูแลพื้นที่และความสำเร็จของห้องเรียน") +
+      heading("ห้องเรียนของฉัน 🌟", "ติดตามผลการดูแลพื้นที่และความสำเร็จของห้องเรียน", '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#history"><i data-lucide="history"></i> ประวัติ</a><a class="btn secondary" href="#exports"><i data-lucide="file-down"></i> ส่งออก</a></div>') +
       '<div class="grid md:grid-cols-3 gap-4 mb-6"><section class="card"><p class="muted">ผลตรวจที่แสดง (สูงสุด 200 รายการ)</p><div class="kpi">' +
       done.length +
       '</div></section><section class="card"><p class="muted">รางวัลที่ได้รับ</p><div class="kpi">' +
