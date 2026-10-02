@@ -19,9 +19,11 @@ export async function onRequest(context) {
   if (!env.RSD_PEPPER) return jsonResponse({ ok: false, error: "ยังไม่ได้ตั้งค่า RSD_PEPPER" }, 500, headers);
   try {
     const input = await request.json();
-    if (JSON.stringify(input?.payload || {}).length > 100000) throw Error("คำขอใหญ่เกินไป");
     const action = String(input?.action || "");
     const payload = input?.payload || {};
+    const payloadSize = JSON.stringify(payload).length;
+    const maxPayload = action === "restoreBackup" ? 20 * 1024 * 1024 : 100000;
+    if (payloadSize > maxPayload) throw Error(action === "restoreBackup" ? "ไฟล์ Backup ใหญ่เกิน 20 MB" : "คำขอใหญ่เกินไป");
     const token = String(input?.token || "");
     const data = await dispatch(env, action, payload, token, request);
     if (!["challenge","login","publicDashboard"].includes(action)) {
@@ -144,6 +146,8 @@ async function dispatch(env, action, p, token, request) {
     holidays: async () => saveHolidays(env,u,p),
     auditLog: async () => auditList(env,u,p),
     backupExport: async () => backupExport(env,u),
+    backupNow: async () => backupNow(env,u),
+    restoreBackup: async () => restoreBackup(env,u,p),
   };
   assert(handlers[action], "ไม่พบ API");
   const result = await handlers[action]();
@@ -176,7 +180,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup"]);
 
 async function ensureAuditTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
@@ -208,7 +212,9 @@ function auditMeta(action,p,result){
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
   if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
   if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
-  if(action==="backupExport")return{entityType:"Backup",entityId:"manual",details:{createdAt:result?.createdAt||nowIso()}};
+  if(action==="backupExport")return{entityType:"Backup",entityId:"download",details:{createdAt:result?.createdAt||nowIso()}};
+  if(action==="backupNow")return{entityType:"Backup",entityId:String(result?.fileId||"manual-drive"),details:{createdAt:result?.createdAt||nowIso(),filename:result?.filename||""}};
+  if(action==="restoreBackup")return{entityType:"Backup",entityId:"restore",details:{restoredAt:result?.restoredAt||nowIso(),sourceCreatedAt:result?.sourceCreatedAt||"",preRestoreFileId:result?.preRestoreBackup?.fileId||"",counts:result?.counts||{}}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
@@ -242,6 +248,135 @@ async function buildBackupBundle(env){
   return{format:"rsd-clean-d1-backup-v1",createdAt:nowIso(),tables};
 }
 async function backupExport(env,u){role(u,["Admin"]);return buildBackupBundle(env);}
+async function backupNow(env,u){
+  role(u,["Admin"]);
+  assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ยังไม่ได้ตั้งค่า Google Drive gateway");
+  const bundle=await buildBackupBundle(env),content=JSON.stringify(bundle);
+  assert(content.length<=20*1024*1024,"Backup ใหญ่เกิน 20 MB");
+  const filename="RSD-Clean-D1-manual-"+new Date().toISOString().replace(/[:.]/g,"-")+".json";
+  const saved=await gasDrive(env,"saveBackup",{filename,content});
+  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_backup_at',?),('last_backup_file_id',?)")
+    .bind(bundle.createdAt,String(saved.fileId||"")).run();
+  return{createdAt:bundle.createdAt,fileId:String(saved.fileId||""),filename:String(saved.name||filename),url:String(saved.url||""),size:Number(saved.size||content.length)};
+}
+function backupArrays(b){
+  assert(b&&b.format==="rsd-clean-d1-backup-v1","ไฟล์นี้ไม่ใช่ Backup ของ RSD Clean D1");
+  assert(b.tables&&typeof b.tables==="object","โครงสร้าง Backup ไม่ถูกต้อง");
+  const names=["users","classrooms","areas","assignments","inspections","inspection_inspectors","rewards_log","holidays","settings"];
+  const t={};
+  for(const name of names){assert(Array.isArray(b.tables[name]),"Backup ขาดตาราง "+name);t[name]=b.tables[name];}
+  t.audit_log=Array.isArray(b.tables.audit_log)?b.tables.audit_log:[];
+  return t;
+}
+function uniqueBackup(rows,key,label,transform=v=>String(v??"")){
+  const seen=new Set();
+  for(const row of rows){
+    const value=transform(row?.[key]);
+    assert(value,label+" มีรหัสว่าง");
+    assert(!seen.has(value),label+" มีข้อมูลซ้ำ: "+value);
+    seen.add(value);
+  }
+  return seen;
+}
+function validateBackupBundle(b){
+  const t=backupArrays(b);
+  const userIds=uniqueBackup(t.users,"user_id","users");
+  uniqueBackup(t.users,"username","users username",v=>String(v??"").toLowerCase());
+  const classIds=uniqueBackup(t.classrooms,"classroom_id","classrooms");
+  uniqueBackup(t.classrooms,"class_name","classrooms name",v=>String(v??"").toLowerCase());
+  const areaIds=uniqueBackup(t.areas,"area_id","areas");
+  uniqueBackup(t.assignments,"assignment_id","assignments");
+  const inspectionIds=uniqueBackup(t.inspections,"inspection_id","inspections");
+  uniqueBackup(t.rewards_log,"log_id","rewards_log");
+  uniqueBackup(t.holidays,"holiday_date","holidays");
+  uniqueBackup(t.settings,"key","settings");
+  if(t.audit_log.length)uniqueBackup(t.audit_log,"audit_id","audit_log");
+  const pairs=new Set();
+  for(const r of t.inspection_inspectors){
+    const k=String(r?.inspection_id||"")+"|"+String(r?.user_id||"");
+    assert(!pairs.has(k),"inspection_inspectors มีข้อมูลซ้ำ: "+k);pairs.add(k);
+  }
+  assert(t.users.some(x=>String(x.role)==="Admin"),"Backup ต้องมี Admin อย่างน้อย 1 บัญชี");
+  for(const r of t.users){
+    assert(["Admin","Supervisor","Inspector","Teacher"].includes(String(r.role)),"พบ Role ผู้ใช้ไม่ถูกต้อง");
+    if(String(r.role)==="Teacher"&&String(r.linked_classroom_id||""))assert(classIds.has(String(r.linked_classroom_id)),"Teacher อ้างอิงห้องเรียนที่ไม่มีอยู่");
+  }
+  for(const r of t.areas)assert(classIds.has(String(r.responsible_classroom_id)),"พื้นที่อ้างอิงห้องเรียนที่ไม่มีอยู่");
+  for(const r of t.assignments){
+    assert(userIds.has(String(r.user_id)),"งานมอบหมายอ้างอิงผู้ใช้ที่ไม่มีอยู่");
+    assert(areaIds.has(String(r.area_id)),"งานมอบหมายอ้างอิงพื้นที่ที่ไม่มีอยู่");
+  }
+  for(const r of t.inspections)assert(areaIds.has(String(r.area_id)),"ผลตรวจอ้างอิงพื้นที่ที่ไม่มีอยู่");
+  for(const r of t.inspection_inspectors){
+    assert(inspectionIds.has(String(r.inspection_id)),"ทีมผู้ตรวจอ้างอิงผลตรวจที่ไม่มีอยู่");
+    assert(userIds.has(String(r.user_id)),"ทีมผู้ตรวจอ้างอิงผู้ใช้ที่ไม่มีอยู่");
+  }
+  return{tables:t,counts:Object.fromEntries(Object.entries(t).map(([k,v])=>[k,v.length]))};
+}
+async function runDbBatches(db,stmts,size=50){
+  for(let i=0;i<stmts.length;i+=size)await db.batch(stmts.slice(i,i+size));
+}
+async function restoreBackup(env,u,p){
+  role(u,["Admin"]);
+  assert(String(p.confirm||"")==="RESTORE","ต้องยืนยันด้วยคำว่า RESTORE");
+  assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ต้องตั้งค่า Google Drive gateway ก่อนกู้คืน");
+  const checked=validateBackupBundle(p.bundle),t=checked.tables,db=env.DB;
+
+  // Safety snapshot: restoration is blocked if the current state cannot be backed up first.
+  const before=await buildBackupBundle(env),beforeContent=JSON.stringify(before);
+  assert(beforeContent.length<=20*1024*1024,"Backup ปัจจุบันใหญ่เกิน 20 MB จึงยังไม่อนุญาตให้ Restore");
+  const preName="RSD-Clean-D1-before-restore-"+new Date().toISOString().replace(/[:.]/g,"-")+".json";
+  const pre=await gasDrive(env,"saveBackup",{filename:preName,content:beforeContent});
+  assert(pre&&pre.fileId,"สร้าง Backup ก่อน Restore ไม่สำเร็จ");
+
+  await db.batch([
+    db.prepare("DELETE FROM inspection_inspectors"),
+    db.prepare("DELETE FROM inspections"),
+    db.prepare("DELETE FROM assignments"),
+    db.prepare("DELETE FROM rewards_log"),
+    db.prepare("DELETE FROM sessions"),
+    db.prepare("DELETE FROM upload_tickets"),
+    db.prepare("DELETE FROM areas"),
+    db.prepare("DELETE FROM users"),
+    db.prepare("DELETE FROM classrooms"),
+    db.prepare("DELETE FROM holidays"),
+    db.prepare("DELETE FROM settings"),
+    db.prepare("DELETE FROM audit_log")
+  ]);
+
+  const now=nowIso();
+  await runDbBatches(db,t.classrooms.map(r=>db.prepare("INSERT INTO classrooms(classroom_id,class_name,created_at,updated_at) VALUES(?,?,?,?)")
+    .bind(String(r.classroom_id),String(r.class_name),String(r.created_at||now),String(r.updated_at||now))));
+  await runDbBatches(db,t.users.map(r=>db.prepare("INSERT INTO users(user_id,username,password,full_name,role,linked_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
+    .bind(String(r.user_id),String(r.username).toLowerCase(),String(r.password),String(r.full_name),String(r.role),String(r.linked_classroom_id||""),String(r.created_at||now),String(r.updated_at||now))));
+  await runDbBatches(db,t.areas.map(r=>db.prepare("INSERT INTO areas(area_id,area_name,responsible_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?)")
+    .bind(String(r.area_id),String(r.area_name),String(r.responsible_classroom_id),String(r.created_at||now),String(r.updated_at||now))));
+  await runDbBatches(db,t.assignments.map(r=>db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+    .bind(String(r.assignment_id),String(r.user_id),String(r.area_id),String(r.days||"1,2,3,4,5"),String(r.created_at||now),String(r.updated_at||now))));
+  await runDbBatches(db,t.inspections.map(r=>db.prepare(`INSERT INTO inspections(inspection_id,area_id,inspection_date,status,rating,score,note,meta_json,photo_links_json,version,completed_at,completed_by_id,completed_by_name,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(String(r.inspection_id),String(r.area_id),String(r.inspection_date),String(r.status||"รอตรวจ"),String(r.rating||""),Number(r.score||0),String(r.note||""),String(r.meta_json||"{}"),String(r.photo_links_json||"[]"),Number(r.version||0),String(r.completed_at||""),String(r.completed_by_id||""),String(r.completed_by_name||""),String(r.created_at||now),String(r.updated_at||now))));
+  await runDbBatches(db,t.inspection_inspectors.map(r=>db.prepare("INSERT INTO inspection_inspectors(inspection_id,user_id,user_name) VALUES(?,?,?)")
+    .bind(String(r.inspection_id),String(r.user_id),String(r.user_name||""))));
+  await runDbBatches(db,t.rewards_log.map(r=>db.prepare("INSERT INTO rewards_log(log_id,timestamp,reference_id,achievement,details_json) VALUES(?,?,?,?,?)")
+    .bind(String(r.log_id),String(r.timestamp),String(r.reference_id),String(r.achievement),String(r.details_json||"{}"))));
+  await runDbBatches(db,t.holidays.map(r=>db.prepare("INSERT INTO holidays(holiday_date) VALUES(?)").bind(String(r.holiday_date))));
+  await runDbBatches(db,t.settings.map(r=>db.prepare("INSERT INTO settings(key,value) VALUES(?,?)").bind(String(r.key),String(r.value??""))));
+  await runDbBatches(db,t.audit_log.map(r=>db.prepare("INSERT INTO audit_log(audit_id,timestamp,actor_user_id,actor_name,actor_role,action,entity_type,entity_id,details_json) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(String(r.audit_id),String(r.timestamp),String(r.actor_user_id||""),String(r.actor_name||""),String(r.actor_role||""),String(r.action||""),String(r.entity_type||""),String(r.entity_id||""),String(r.details_json||"{}"))));
+
+  const restoredAt=nowIso();
+  await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_restore_at',?),('last_restore_prebackup_file_id',?),('last_auto_backup_day',?)")
+    .bind(restoredAt,String(pre.fileId),thaiDay()).run();
+
+  const adminCount=await db.prepare("SELECT COUNT(*) n FROM users WHERE role='Admin'").first();
+  assert(Number(adminCount?.n||0)>0,"Restore ไม่สมบูรณ์: ไม่พบ Admin");
+  return{
+    restoredAt,
+    sourceCreatedAt:String(p.bundle?.createdAt||""),
+    counts:checked.counts,
+    preRestoreBackup:{fileId:String(pre.fileId),filename:String(pre.name||preName),url:String(pre.url||"")}
+  };
+}
 async function autoBackupIfDue(env){
   if(!env.GAS_DRIVE_URL||!env.DRIVE_GATEWAY_KEY)return;
   const day=thaiDay(),key="last_auto_backup_day";
