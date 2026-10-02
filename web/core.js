@@ -467,10 +467,10 @@
     teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
     reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
-    review: { title: "รับรองผล", icon: "badge-check", roles: ["Admin", "Supervisor"] },
-    history: { title: "ประวัติ", icon: "history", roles: ["Admin", "Supervisor", "Inspector", "Teacher"] },
-    exports: { title: "ส่งออก", icon: "file-down", roles: ["Admin", "Supervisor", "Teacher"] },
-    daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor", "Inspector"] },
+    review: { title: "รับรองผล", icon: "badge-check", roles: ["Admin", "Supervisor"], navRoles: [] },
+    history: { title: "ประวัติ", icon: "history", roles: ["Admin", "Supervisor", "Inspector", "Teacher"], navRoles: ["Inspector","Teacher"] },
+    exports: { title: "ส่งออก", icon: "file-down", roles: ["Admin", "Supervisor", "Teacher"], navRoles: ["Teacher"] },
+    daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor", "Inspector"], navRoles: ["Inspector"] },
   };
   function applyBrandSettings(){
     const cfg=S.config||{},name=String(cfg.schoolName||"โรงเรียนรัษฎา"),logo=String(cfg.schoolLogoUrl||SCHOOL_LOGO_URL);
@@ -681,7 +681,7 @@
 
   function nav() {
     const keys = S.user
-      ? Object.keys(pages).filter((k) => pages[k].roles.includes(S.user.Role))
+      ? Object.keys(pages).filter((k) => pages[k].roles.includes(S.user.Role) && (!Array.isArray(pages[k].navRoles) || pages[k].navRoles.includes(S.user.Role)))
       : ["dashboard"];
 
     const desktopLinks = keys
