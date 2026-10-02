@@ -64,7 +64,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="override-btn">ผู้ตรวจทดแทน</button><button class="btn secondary" id="settings-btn">ตั้งค่าระบบ</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -72,6 +72,8 @@ const adminTables = {
           adminContent();
         }),
     );
+    $("override-btn").onclick = dutyOverrideModal;
+    $("settings-btn").onclick = appSettingsModal;
     $("holiday-btn").onclick = holidayModal;
     $("audit-btn").onclick = auditModal;
     $("trash-btn").onclick = trashModal;
@@ -107,8 +109,10 @@ const adminTables = {
             (adminTab === "Areas"
               ? '<button class="btn small secondary qr-area" data-id="' +
                 esc(r[key]) +
-                '">QR</button> '
-              : "") +
+                '">QR</button> <a class="btn small secondary" href="#history" data-history-type="area" data-history-id="'+esc(r[key])+'">ประวัติ</a> '
+              : adminTab === "Classrooms"
+                ? '<a class="btn small secondary" href="#history" data-history-type="class" data-history-id="'+esc(r[key])+'">ประวัติ</a> '
+                : "") +
             '<button class="btn small danger delete-row" data-id="' +
             esc(r[key]) +
             '">ลบ</button>',
