@@ -51,7 +51,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -62,6 +62,7 @@ const adminTables = {
     $("holiday-btn").onclick = holidayModal;
     $("audit-btn").onclick = auditModal;
     $("backup-btn").onclick = backupCenterModal;
+    $("status-btn").onclick = systemStatusModal;
     adminContent();
   }
   function adminContent() {
@@ -1010,5 +1011,75 @@ const adminTables = {
       error(e);
     } finally {
       busy(false);
+    }
+  }
+
+
+  function statusBadge(ok, okText, badText) {
+    return ok
+      ? '<span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:700">' + esc(okText) + '</span>'
+      : '<span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#fff1f2;color:#be123c;font-weight:700">' + esc(badText) + '</span>';
+  }
+  function fmtStatusDate(v) {
+    if (!v) return "—";
+    const d = new Date(v);
+    return Number.isNaN(d.valueOf()) ? esc(String(v)) : esc(d.toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}));
+  }
+  async function systemStatusModal() {
+    openModal(
+      "สถานะระบบ",
+      '<div id="system-status-body"><div class="muted">กำลังตรวจสอบ D1, Drive Gateway และ Backup…</div></div>'
+    );
+    await refreshSystemStatus();
+  }
+  async function refreshSystemStatus() {
+    const box = $("system-status-body");
+    if (!box) return;
+    box.innerHTML = '<div class="muted">กำลังตรวจสอบระบบ…</div>';
+    try {
+      const r = await rpc("systemStatus", {}, true);
+      if (!box.isConnected) return;
+      const c = r.counts || {}, b = r.backup || {};
+      const warnings = Array.isArray(r.warnings) ? r.warnings : [];
+      const warningHtml = warnings.length
+        ? '<div class="warn mb-4"><b>พบจุดที่ควรตรวจสอบ</b><ul style="margin:8px 0 0 20px;list-style:disc">' +
+          warnings.map(x=>'<li>'+esc(x)+'</li>').join("") + '</ul></div>'
+        : '<div style="background:#ecfdf5;color:#166534;padding:12px;border-radius:12px;margin-bottom:16px"><b>ระบบหลักทำงานปกติ</b></div>';
+      box.innerHTML =
+        warningHtml +
+        '<div class="grid gap-3 md:grid-cols-3 mb-4">' +
+          '<div class="card"><div class="muted">Cloudflare D1</div><div class="mt-2">'+statusBadge(!!r.d1?.ok,"ปกติ","ผิดปกติ")+'</div><div class="muted mt-2">'+esc(r.d1?.message||"")+'</div></div>' +
+          '<div class="card"><div class="muted">Google Drive Gateway</div><div class="mt-2">'+statusBadge(!!r.drive?.ok,"เชื่อมต่อแล้ว","มีปัญหา")+'</div><div class="muted mt-2">'+esc(r.drive?.message||"")+'</div></div>' +
+          '<div class="card"><div class="muted">Backup ล่าสุด</div><div class="mt-2"><b>'+fmtStatusDate(b.lastAt)+'</b></div><div class="muted mt-2">Auto: '+esc(b.lastAutoDay||"—")+'</div></div>' +
+        '</div>' +
+        '<h3 class="text-lg font-medium mb-2">จำนวนข้อมูล</h3>' +
+        table(
+          ["รายการ","จำนวน"],
+          [
+            ["ผู้ใช้งาน",c.users||0],
+            ["ห้องเรียน",c.classrooms||0],
+            ["เขตพื้นที่",c.areas||0],
+            ["งานมอบหมาย",c.assignments||0],
+            ["ผลการตรวจ",c.inspections||0],
+            ["ผลตรวจที่มีรูป",c.photos||0],
+            ["Audit Log",c.auditLogs||0],
+            ["Session ที่ยังใช้งาน",c.activeSessions||0]
+          ].map(x=>[esc(x[0]),String(x[1])])
+        ) +
+        '<div class="mt-4 card">' +
+          '<div><b>Server time:</b> '+fmtStatusDate(r.serverTime)+'</div>' +
+          '<div class="mt-1"><b>Restore ล่าสุด:</b> '+fmtStatusDate(b.lastRestoreAt)+'</div>' +
+          '<div class="mt-1"><b>ผลตรวจที่อัปเดตล่าสุด:</b> '+fmtStatusDate(r.lastInspection?.updatedAt)+'</div>' +
+          '<div class="mt-1"><b>Audit ล่าสุด:</b> '+fmtStatusDate(r.lastAudit?.timestamp)+' '+esc(r.lastAudit?.actorName||"")+'</div>' +
+        '</div>' +
+        '<div class="flex gap-2 mt-4"><button class="btn" id="status-refresh">↻ ตรวจสอบอีกครั้ง</button><button class="btn secondary" id="status-backup-now">☁ Backup ตอนนี้</button></div>';
+      $("status-refresh").onclick = refreshSystemStatus;
+      $("status-backup-now").onclick = async () => {
+        await backupToDriveNow();
+        if ($("system-status-body")) await refreshSystemStatus();
+      };
+    } catch(e) {
+      box.innerHTML = '<div class="warn"><b>ตรวจสอบสถานะไม่สำเร็จ</b><br>'+esc(e.message||String(e))+'</div><button class="btn mt-3" id="status-retry">ลองใหม่</button>';
+      if ($("status-retry")) $("status-retry").onclick = refreshSystemStatus;
     }
   }
