@@ -1535,8 +1535,8 @@ async function dailyReport(env,u,date){
       CompletedAt:String(i.completed_at||m.completedAt||"")
     };
   });
-  const done=items.filter(x=>x.Status==="ตรวจแล้ว");
-  const noInspectionHoliday=date<thaiDay()&&done.length===0;
+  const done=items.filter(x=>x.Status==="ตรวจแล้ว"),resolved=items.filter(x=>x.Status==="ตรวจแล้ว"||x.Status==="งดตรวจ");
+  const noInspectionHoliday=date<thaiDay()&&resolved.length===0;
   const isHoliday=!isSchoolDay||noInspectionHoliday;
   const counts={
     excellent:done.filter(x=>x.Score===3).length,
