@@ -37,8 +37,19 @@ let taskRows = [];
       offlineView=true;
     }else{
       try{
-        [rows,rewards]=await Promise.all([rpc("tasks"),rpc("myRewards")]);
+        const home=await rpc("inspectorHome");
+        rows=home.tasks||[];
+        rewards=home.rewards||[];
         saveTaskCache(rows,rewards);
+        if(home.notifications){
+          window.rsdInspectorNotifications={data:home.notifications,at:Date.now()};
+          const offline=await window.rsdOfflineQueue?.list(S.user.UserID).catch(()=>[])||[];
+          const n=Math.min(99,Number(home.notifications.unread||0)+offline.length);
+          document.querySelectorAll(".notification-badge").forEach(el=>{
+            el.textContent=n>99?"99+":String(n);
+            el.classList.toggle("hidden",!n);
+          });
+        }
       }catch(e){
         const cached=loadTaskCache();
         if(!cached) throw e;
