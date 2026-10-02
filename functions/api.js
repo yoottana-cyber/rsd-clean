@@ -7,7 +7,9 @@ const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
 const enc = new TextEncoder();
 const DEFAULT_APP_SETTINGS = {
   schoolName:"โรงเรียนรัษฎา",
+  schoolLogoUrl:"/school-logo",
   reportFooter:"ข้อมูลจากระบบ RSD Clean",
+  scoreLabels:{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"},
   inspectionStart:"07:30",
   inspectionEnd:"16:30",
   approvalEnabled:false,
@@ -973,6 +975,9 @@ async function getAppSettings(db){
   const parsed=parseJson(r?.value,{});
   const cfg={...DEFAULT_APP_SETTINGS,...(parsed&&typeof parsed==="object"?parsed:{})};
   cfg.schoolName=String(cfg.schoolName||DEFAULT_APP_SETTINGS.schoolName).slice(0,200);
+  cfg.schoolLogoUrl=String(cfg.schoolLogoUrl||DEFAULT_APP_SETTINGS.schoolLogoUrl).slice(0,500);
+  cfg.scoreLabels={...DEFAULT_APP_SETTINGS.scoreLabels,...(cfg.scoreLabels&&typeof cfg.scoreLabels==="object"?cfg.scoreLabels:{})};
+  ["1","2","3"].forEach(k=>cfg.scoreLabels[k]=String(cfg.scoreLabels[k]||DEFAULT_APP_SETTINGS.scoreLabels[k]).slice(0,50));
   cfg.reportFooter=String(cfg.reportFooter||DEFAULT_APP_SETTINGS.reportFooter).slice(0,300);
   cfg.inspectionStart=/^\d{2}:\d{2}$/.test(String(cfg.inspectionStart))?String(cfg.inspectionStart):DEFAULT_APP_SETTINGS.inspectionStart;
   cfg.inspectionEnd=/^\d{2}:\d{2}$/.test(String(cfg.inspectionEnd))?String(cfg.inspectionEnd):DEFAULT_APP_SETTINGS.inspectionEnd;
@@ -995,6 +1000,12 @@ async function saveAppSettings(env,u,p){
   const cfg={
     ...old,
     schoolName:text(x.schoolName||old.schoolName,200),
+    schoolLogoUrl:text(x.schoolLogoUrl||old.schoolLogoUrl||"/school-logo",500),
+    scoreLabels:{
+      "1":text(x.scoreLabels?.["1"]||old.scoreLabels?.["1"]||"ปรับปรุง",50),
+      "2":text(x.scoreLabels?.["2"]||old.scoreLabels?.["2"]||"ปานกลาง",50),
+      "3":text(x.scoreLabels?.["3"]||old.scoreLabels?.["3"]||"ยอดเยี่ยม",50)
+    },
     reportFooter:text(x.reportFooter||old.reportFooter,300),
     inspectionStart:/^\d{2}:\d{2}$/.test(String(x.inspectionStart||""))?String(x.inspectionStart):old.inspectionStart,
     inspectionEnd:/^\d{2}:\d{2}$/.test(String(x.inspectionEnd||""))?String(x.inspectionEnd):old.inspectionEnd,
@@ -1352,7 +1363,7 @@ async function saveInspection(env,u,p){
     meta.approvalStatus="";
   }
   await db.prepare(`UPDATE inspections SET status=?,rating=?,score=?,note=?,meta_json=?,photo_links_json=?,version=?,completed_at=?,completed_by_id=?,completed_by_name=?,updated_at=? WHERE inspection_id=?`)
-    .bind(p.status,score?["","ปรับปรุง","ปานกลาง","ยอดเยี่ยม"][score]:"",score,meta.note,JSON.stringify(meta),JSON.stringify(photos),meta.version,meta.completedAt,meta.completedById,meta.completedByName,stamp,i.inspection_id).run();
+    .bind(p.status,score?String(cfg.scoreLabels[String(score)]||["","ปรับปรุง","ปานกลาง","ยอดเยี่ยม"][score]):"",score,meta.note,JSON.stringify(meta),JSON.stringify(photos),meta.version,meta.completedAt,meta.completedById,meta.completedByName,stamp,i.inspection_id).run();
   if(p.uploadTicket) { await db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).run(); gasDrive(env,"consumeUpload",{ticket:String(p.uploadTicket)}).catch(()=>{}); }
   const trash=oldPhotos.filter(id=>!photos.includes(id)); if(trash.length&&env.GAS_DRIVE_URL) gasDrive(env,"trashFiles",{fileIds:trash}).catch(()=>{});
   const updated=await db.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(i.inspection_id).first();
