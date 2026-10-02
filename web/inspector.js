@@ -29,15 +29,23 @@ let taskRows = [];
   }
   async function renderTasks(seq) {
     let rows,rewards,offlineView=false;
-    try{
-      [rows,rewards]=await Promise.all([rpc("tasks"),rpc("myRewards")]);
-      saveTaskCache(rows,rewards);
-    }catch(e){
+    if(!navigator.onLine){
       const cached=loadTaskCache();
-      if(!cached) throw e;
+      if(!cached) throw Error("ยังไม่มีรายการงานที่เก็บไว้ในเครื่อง กรุณาเชื่อมต่ออินเทอร์เน็ตอย่างน้อย 1 ครั้ง");
       rows=cached.rows;
       rewards=cached.rewards;
       offlineView=true;
+    }else{
+      try{
+        [rows,rewards]=await Promise.all([rpc("tasks"),rpc("myRewards")]);
+        saveTaskCache(rows,rewards);
+      }catch(e){
+        const cached=loadTaskCache();
+        if(!cached) throw e;
+        rows=cached.rows;
+        rewards=cached.rewards;
+        offlineView=true;
+      }
     }
     if (seq !== S.seq) return;
 
@@ -380,7 +388,7 @@ let taskRows = [];
       const selectedPhoto=f.photo.files[0] || null;
       const basePayload={
         id:i.InspectionID,
-        version:Number(queuedRecord?.payload?.version ?? i.meta.version),
+        version:Number(navigator.onLine ? i.meta.version : (queuedRecord?.payload?.version ?? i.meta.version)),
         status:f.status.value,
         score:Number(f.score.value),
         notes:f.notes.value,
