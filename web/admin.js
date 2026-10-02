@@ -502,12 +502,36 @@ const adminTables = {
         ]),
       ) +
       "</section>";
+    const leaderValues = (x) => {
+      const isNewShape = x.avg !== undefined || x.score !== undefined;
+      const count = Number(x.count ?? (isNewShape ? x.total : 0) ?? 0);
+      const average = Number(x.average ?? x.avg ?? 0);
+      const totalScore = Number(x.score ?? (!isNewShape ? x.total : 0) ?? 0);
+      return {
+        count: Number.isFinite(count) ? count : 0,
+        average: Number.isFinite(average) ? average : 0,
+        totalScore: Number.isFinite(totalScore) ? totalScore : 0,
+      };
+    };
     const leaders = () => {
+      const metric = $("leader-sort").value;
+      const rows = [...(r.leaders || [])]
+        .map((x) => ({ ...x, _v: leaderValues(x) }))
+        .sort((a, b) =>
+          metric === "average"
+            ? b._v.average - a._v.average
+            : b._v.totalScore - a._v.totalScore
+        )
+        .map((x, i) => [
+          i + 1,
+          esc(x.name),
+          x._v.count,
+          x._v.average.toFixed(2),
+          x._v.totalScore,
+        ]);
       $("report-leaders").innerHTML = table(
         ["อันดับ", "ห้องเรียน", "ครั้ง", "คะแนนเฉลี่ย", "คะแนนสะสม"],
-        [...r.leaders]
-          .sort((a, b) => b[$("leader-sort").value] - a[$("leader-sort").value])
-          .map((x, i) => [i + 1, esc(x.name), x.count, x.average.toFixed(2), x.total]),
+        rows,
       );
     };
     $("leader-sort").onchange = leaders;
