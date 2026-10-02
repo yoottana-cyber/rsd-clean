@@ -51,7 +51,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="backup-btn">ดาวน์โหลด Backup</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -60,6 +60,8 @@ const adminTables = {
         }),
     );
     $("holiday-btn").onclick = holidayModal;
+    $("audit-btn").onclick = auditModal;
+    $("backup-btn").onclick = downloadBackup;
     adminContent();
   }
   function adminContent() {
@@ -844,4 +846,66 @@ const adminTables = {
         }
       }
     };
+  }
+
+  async function auditModal() {
+    openModal("ประวัติการเปลี่ยนแปลง", '<div class="muted">กำลังโหลด Audit Log…</div>');
+    try {
+      const rows = await rpc("auditLog", { limit: 200 });
+      const labels = {
+        saveMaster:"เพิ่ม/แก้ข้อมูลหลัก",
+        bulkCreate:"เพิ่มข้อมูลหลายรายการ",
+        deleteMaster:"ลบข้อมูล",
+        assign:"ตั้งเวรผู้ตรวจ",
+        setAssignmentDays:"แก้วันเข้าเวร",
+        saveInspection:"บันทึกผลตรวจ",
+        password:"เปลี่ยนรหัสผ่าน",
+        holidays:"แก้วันหยุด",
+        backupExport:"ดาวน์โหลด Backup",
+        backupAuto:"Backup อัตโนมัติ"
+      };
+      $("modal-body").innerHTML =
+        '<p class="muted mb-4">แสดงรายการล่าสุด ' + rows.length + ' รายการ · Audit Log ไม่เก็บรหัสผ่านหรือ credential</p>' +
+        table(
+          ["วันเวลา","ผู้ดำเนินการ","รายการ","ประเภท/รหัส","รายละเอียด"],
+          rows.map(r => [
+            esc(new Date(r.Timestamp).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})),
+            esc((r.ActorName||"ระบบ") + (r.ActorRole ? " · " + r.ActorRole : "")),
+            esc(labels[r.Action] || r.Action),
+            esc((r.EntityType||"—") + (r.EntityID ? " · " + r.EntityID : "")),
+            '<code class="text-xs whitespace-pre-wrap">' + esc(JSON.stringify(r.Details||{})) + '</code>'
+          ])
+        );
+    } catch (e) {
+      $("modal-body").innerHTML = '<div class="warn">' + esc(e.message||String(e)) + '</div>';
+    }
+  }
+
+  async function downloadBackup() {
+    const ok = await Swal.fire({
+      title:"ดาวน์โหลด Backup D1?",
+      text:"ไฟล์มีข้อมูลระบบและ password hash ควรเก็บไว้เป็นความลับ",
+      icon:"question",
+      showCancelButton:true,
+      confirmButtonText:"ดาวน์โหลด",
+      cancelButtonText:"ยกเลิก"
+    });
+    if (!ok.isConfirmed) return;
+    busy(true,"กำลังสร้าง Backup…");
+    try {
+      const bundle = await rpc("backupExport", {}, true);
+      const blob = new Blob([JSON.stringify(bundle,null,2)], {type:"application/json;charset=utf-8"});
+      const url = URL.createObjectURL(blob), a=document.createElement("a");
+      a.href=url;
+      a.download="RSD-Clean-D1-backup-"+thaiDay()+".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
+      toast("สร้างไฟล์ Backup แล้ว");
+    } catch(e) {
+      error(e);
+    } finally {
+      busy(false);
+    }
   }
