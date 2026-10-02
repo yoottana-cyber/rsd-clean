@@ -64,7 +64,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -77,6 +77,7 @@ const adminTables = {
     $("trash-btn").onclick = trashModal;
     $("backup-btn").onclick = backupCenterModal;
     $("status-btn").onclick = systemStatusModal;
+    $("monitor-btn").onclick = systemMonitorModal;
     adminContent();
   }
   function adminContent() {
@@ -1443,6 +1444,66 @@ const adminTables = {
     }
   }
 
+  function systemEventTypeLabel(t){
+    return t==="error"?"Error":t==="slow"?"Slow API":t==="security"?"Security":String(t||"");
+  }
+  function systemEventBadge(t){
+    const map={
+      error:["#fff1f2","#be123c"],
+      slow:["#fff8e7","#a16207"],
+      security:["#eef2ff","#4338ca"]
+    };
+    const x=map[t]||["#f1f5f9","#475569"];
+    return '<span style="display:inline-block;padding:4px 8px;border-radius:999px;background:'+x[0]+';color:'+x[1]+';font-weight:700;font-size:11px">'+esc(systemEventTypeLabel(t))+'</span>';
+  }
+  async function systemMonitorModal(){
+    openModal(
+      "มอนิเตอร์ระบบ",
+      '<div id="system-monitor-body"><div class="muted">กำลังโหลด Error / Slow API / Security events…</div></div>'
+    );
+    await refreshSystemMonitor();
+  }
+  async function refreshSystemMonitor(type=""){
+    const box=$("system-monitor-body");
+    if(!box)return;
+    box.innerHTML='<div class="muted">กำลังโหลดข้อมูลมอนิเตอร์…</div>';
+    try{
+      const r=await rpc("systemEvents",{type,limit:100},true);
+      if(!box.isConnected)return;
+      const sum=r.summary||{},rows=Array.isArray(r.rows)?r.rows:[];
+      box.innerHTML=
+        '<div class="grid gap-3 md:grid-cols-3 mb-4">'+
+          '<div class="card"><div class="muted">Error · 24 ชม.</div><div class="kpi" style="font-size:30px">'+Number(sum.errors||0)+'</div></div>'+
+          '<div class="card"><div class="muted">Slow API · 24 ชม.</div><div class="kpi" style="font-size:30px">'+Number(sum.slow||0)+'</div></div>'+
+          '<div class="card"><div class="muted">Security · 24 ชม.</div><div class="kpi" style="font-size:30px">'+Number(sum.security||0)+'</div></div>'+
+        '</div>'+
+        '<div class="flex flex-wrap items-center justify-between gap-3 mb-3">'+
+          '<div class="muted">เก็บเฉพาะเหตุการณ์สำคัญย้อนหลัง 30 วัน · ไม่บันทึกรหัสผ่าน Token หรือข้อมูลฟอร์ม</div>'+
+          '<div class="flex gap-2"><select id="monitor-filter" class="control" style="width:170px">'+
+            '<option value="">ทุกประเภท</option><option value="error">Error</option><option value="slow">Slow API</option><option value="security">Security</option>'+
+          '</select><button class="btn secondary" id="monitor-refresh">รีเฟรช</button></div>'+
+        '</div>'+
+        (rows.length
+          ? table(
+              ["เวลา","ประเภท","API","เวลา","รายละเอียด"],
+              rows.map(x=>[
+                fmtStatusDate(x.Timestamp),
+                systemEventBadge(x.Type),
+                esc(x.Action||"—"),
+                Number(x.DurationMs||0).toLocaleString("th-TH")+" ms",
+                esc(x.Message||"—")
+              ])
+            )
+          : '<div class="empty card">ยังไม่พบเหตุการณ์ในหมวดนี้</div>');
+      $("monitor-filter").value=type||"";
+      $("monitor-filter").onchange=()=>refreshSystemMonitor($("monitor-filter").value);
+      $("monitor-refresh").onclick=()=>refreshSystemMonitor($("monitor-filter").value);
+    }catch(e){
+      box.innerHTML='<div class="warn"><b>โหลดมอนิเตอร์ไม่สำเร็จ</b><br>'+esc(e.message||String(e))+'</div><button class="btn mt-3" id="monitor-retry">ลองใหม่</button>';
+      if($("monitor-retry"))$("monitor-retry").onclick=()=>refreshSystemMonitor(type);
+    }
+  }
+
   function statusBadge(ok, okText, badText) {
     return ok
       ? '<span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:700">' + esc(okText) + '</span>'
@@ -1480,6 +1541,11 @@ const adminTables = {
           '<div class="card"><div class="muted">Google Drive Gateway</div><div class="mt-2">'+statusBadge(!!r.drive?.ok,"เชื่อมต่อแล้ว","มีปัญหา")+'</div><div class="muted mt-2">'+esc(r.drive?.message||"")+'</div></div>' +
           '<div class="card"><div class="muted">Backup ล่าสุด</div><div class="mt-2"><b>'+fmtStatusDate(b.lastAt)+'</b></div><div class="muted mt-2">Auto: '+esc(b.lastAutoDay||"—")+'</div></div>' +
         '</div>' +
+        '<div class="grid gap-3 md:grid-cols-3 mb-4">' +
+          '<div class="card"><div class="muted">Error · 24 ชม.</div><div class="kpi" style="font-size:28px">'+Number(r.monitor24h?.errors||0)+'</div></div>' +
+          '<div class="card"><div class="muted">Slow API · 24 ชม.</div><div class="kpi" style="font-size:28px">'+Number(r.monitor24h?.slow||0)+'</div></div>' +
+          '<div class="card"><div class="muted">Security · 24 ชม.</div><div class="kpi" style="font-size:28px">'+Number(r.monitor24h?.security||0)+'</div></div>' +
+        '</div>' +
         '<h3 class="text-lg font-medium mb-2">จำนวนข้อมูล</h3>' +
         table(
           ["รายการ","จำนวน"],
@@ -1492,6 +1558,7 @@ const adminTables = {
             ["ผลตรวจที่มีรูป",c.photos||0],
             ["Audit Log",c.auditLogs||0],
             ["ถังขยะ",c.recycleBin||0],
+            ["System Events",c.systemEvents||0],
             ["Session ที่ยังใช้งาน",c.activeSessions||0]
           ].map(x=>[esc(x[0]),String(x[1])])
         ) +
