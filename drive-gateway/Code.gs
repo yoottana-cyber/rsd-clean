@@ -10,7 +10,7 @@ function doPost(e){
     const p=PropertiesService.getScriptProperties();
     if(!body.gatewayKey || body.gatewayKey!==p.getProperty('DRIVE_GATEWAY_KEY')) throw Error('DRIVE_GATEWAY_DENIED');
     const action=String(body.action||''), x=body.payload||{};
-    const handlers={uploadStart:()=>uploadStart_(x),verifyUpload:()=>verifyUpload_(x),consumeUpload:()=>consumeUpload_(x),photo:()=>photo_(x),trashFiles:()=>trashFiles_(x),saveBackup:()=>saveBackup_(x)};
+    const handlers={ping:()=>({ok:true,service:'RSD Clean Drive Gateway',time:new Date().toISOString()}),uploadStart:()=>uploadStart_(x),verifyUpload:()=>verifyUpload_(x),consumeUpload:()=>consumeUpload_(x),photo:()=>photo_(x),trashFiles:()=>trashFiles_(x),saveBackup:()=>saveBackup_(x)};
     if(!handlers[action]) throw Error('ไม่พบ Drive API');
     return out_({ok:true,data:handlers[action]()});
   }catch(err){console.error(err);return out_({ok:false,error:err.message||String(err)});}
