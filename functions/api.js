@@ -31,6 +31,9 @@ export async function onRequest(context) {
       const job = autoBackupIfDue(env).catch(e => console.error("AUTO_BACKUP_FAILED", e));
       if (typeof context.waitUntil === "function") context.waitUntil(job);
     }
+    if (action === "saveInspection" && typeof context.waitUntil === "function") {
+      context.waitUntil(rebuildRewards(env).catch(e => console.error("REWARD_REBUILD_FAILED", e)));
+    }
     return jsonResponse({ ok: true, data }, 200, headers);
   } catch (err) {
     return jsonResponse({ ok: false, error: err?.message || String(err) }, 200, headers);
@@ -129,6 +132,7 @@ async function dispatch(env, action, p, token, request) {
     myRewards: async () => { role(u,["Inspector"]); return (await all(db,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id)).map(rewardRow); },
     dashboard: async () => dashboard(env,u,validateDate(p.date || thaiDay())),
     tasks: async () => tasks(env,u),
+    inspectorHome: async () => inspectorHome(env,u),
     qrTask: async () => qrTask(env,u,p),
     teacher: async () => teacher(env,u),
     qrAdmin: async () => qrAdmin(env,u,p),
@@ -630,6 +634,7 @@ async function restoreTrash(env,u,p){
     assert(await db.prepare("SELECT 1 x FROM areas WHERE area_id=?").bind(String(x.AreaID)).first(),"พื้นที่เดิมไม่มีอยู่แล้ว");
     assert(!(await db.prepare("SELECT 1 x FROM assignments WHERE assignment_id=? OR (user_id=? AND area_id=?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID)).first()),"มีงานมอบหมายนี้อยู่แล้ว");
     await db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID),String(x.Days||"1,2,3,4,5"),now,now).run();
+    await invalidateToday(env);
     await ensureToday(env);
   }else throw Error("ประเภทข้อมูลในถังขยะไม่รองรับ");
   await db.prepare("DELETE FROM recycle_bin WHERE recycle_id=?").bind(r.recycle_id).run();
@@ -642,11 +647,11 @@ async function purgeTrash(env,u,p){
   return true;
 }
 
-async function notifications(env,u){
+async function notifications(env,u,skipEnsure=false){
   const db=env.DB,items=[];
   const add=(type,title,message,action="",count=0)=>items.push({type,title,message,action,count});
   if(u.role==="Inspector"){
-    await ensureToday(env);
+    if(!skipEnsure)await ensureToday(env);
     const row=await db.prepare(`SELECT COUNT(*) total,
       SUM(CASE WHEN i.status='ตรวจแล้ว' THEN 1 ELSE 0 END) done
       FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id
@@ -656,7 +661,7 @@ async function notifications(env,u){
     else if(total) add("success","งานวันนี้ครบแล้ว","ตรวจครบ "+total+" พื้นที่แล้ว","tasks",0);
     else add("info","ไม่มีงานตรวจวันนี้","อาจเป็นวันหยุดหรือยังไม่ได้มอบหมายงาน","tasks",0);
   }else if(u.role==="Admin"||u.role==="Supervisor"){
-    await ensureToday(env);
+    if(!skipEnsure)await ensureToday(env);
     const day=thaiDay();
     const row=await db.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='ตรวจแล้ว' THEN 1 ELSE 0 END) done FROM inspections WHERE inspection_date=?").bind(day).first();
     const total=Number(row?.total||0),done=Number(row?.done||0),pending=Math.max(0,total-done);
@@ -682,8 +687,17 @@ async function schoolDay(env,date) {
   const w=weekday(date); if(w===0||w===6) return false;
   return !(await env.DB.prepare("SELECT 1 x FROM holidays WHERE holiday_date=?").bind(date).first());
 }
+async function invalidateToday(env){
+  await env.DB.prepare("DELETE FROM settings WHERE key='today_sync_marker'").run();
+}
 async function ensureToday(env) {
-  const db=env.DB,date=thaiDay(); if(!(await schoolDay(env,date))) return;
+  const db=env.DB,date=thaiDay(),markerValue="v3:"+date;
+  const marker=await db.prepare("SELECT value FROM settings WHERE key='today_sync_marker'").first();
+  if(String(marker?.value||"")===markerValue)return;
+  if(!(await schoolDay(env,date))){
+    await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('today_sync_marker',?)").bind(markerValue).run();
+    return;
+  }
   const w=weekday(date);
   const rows=await all(db,`SELECT a.area_id,a.area_name,a.responsible_classroom_id,c.class_name,
     asn.user_id,u.full_name,asn.assignment_id,asn.days
@@ -691,25 +705,30 @@ async function ensureToday(env) {
     JOIN areas a ON a.area_id=asn.area_id JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id
     WHERE u.role='Inspector' ORDER BY a.area_id,u.full_name`);
   const byArea=new Map();
-  for(const r of rows){ if(!dutyDays(r.days).includes(w)) continue; if(!byArea.has(r.area_id)) byArea.set(r.area_id,[]); byArea.get(r.area_id).push(r); }
+  for(const r of rows){if(!dutyDays(r.days).includes(w))continue;if(!byArea.has(r.area_id))byArea.set(r.area_id,[]);byArea.get(r.area_id).push(r);}
+  let existing=await all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date);
+  const map=new Map(existing.map(i=>[i.area_id,i])),create=[];
   for(const [areaId,team] of byArea){
-    let i=await db.prepare("SELECT * FROM inspections WHERE area_id=? AND inspection_date=?").bind(areaId,date).first();
-    if(!i){
-      const first=team[0], id=date+"_"+areaId, now=nowIso();
-      const meta={ note:"",areaId,areaName:first.area_name,classId:first.responsible_classroom_id,className:first.class_name,
-        inspectorIds:team.map(x=>x.user_id),inspectorNames:team.map(x=>x.full_name),createdAt:now,completedAt:"",version:0 };
-      await db.prepare(`INSERT OR IGNORE INTO inspections(inspection_id,area_id,inspection_date,status,rating,score,note,meta_json,photo_links_json,version,completed_at,completed_by_id,completed_by_name,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,areaId,date,"รอตรวจ","",0,"",JSON.stringify(meta),"[]",0,"","","",now,now).run();
-      i=await db.prepare("SELECT * FROM inspections WHERE area_id=? AND inspection_date=?").bind(areaId,date).first();
-    }
-    if(i.status === "รอตรวจ"){
-      await db.prepare("DELETE FROM inspection_inspectors WHERE inspection_id=?").bind(i.inspection_id).run();
-      const stmts=team.map(x=>db.prepare("INSERT OR IGNORE INTO inspection_inspectors(inspection_id,user_id,user_name) VALUES(?,?,?)").bind(i.inspection_id,x.user_id,x.full_name));
-      if(stmts.length) await db.batch(stmts);
-      const meta=parseJson(i.meta_json,{}); meta.inspectorIds=team.map(x=>x.user_id); meta.inspectorNames=team.map(x=>x.full_name);
-      await db.prepare("UPDATE inspections SET meta_json=?,updated_at=? WHERE inspection_id=?").bind(JSON.stringify(meta),nowIso(),i.inspection_id).run();
-    }
+    if(map.has(areaId))continue;
+    const first=team[0],id=date+"_"+areaId,now=nowIso();
+    const meta={note:"",areaId,areaName:first.area_name,classId:first.responsible_classroom_id,className:first.class_name,inspectorIds:team.map(x=>x.user_id),inspectorNames:team.map(x=>x.full_name),createdAt:now,completedAt:"",version:0};
+    create.push(db.prepare(`INSERT OR IGNORE INTO inspections(inspection_id,area_id,inspection_date,status,rating,score,note,meta_json,photo_links_json,version,completed_at,completed_by_id,completed_by_name,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,areaId,date,"รอตรวจ","",0,"",JSON.stringify(meta),"[]",0,"","","",now,now));
   }
+  if(create.length){
+    await runDbBatches(db,create,50);
+    existing=await all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date);
+  }
+  const current=new Map(existing.map(i=>[i.area_id,i])),sync=[];
+  for(const [areaId,team] of byArea){
+    const i=current.get(areaId); if(!i||i.status!=="รอตรวจ")continue;
+    sync.push(db.prepare("DELETE FROM inspection_inspectors WHERE inspection_id=?").bind(i.inspection_id));
+    for(const x of team)sync.push(db.prepare("INSERT OR IGNORE INTO inspection_inspectors(inspection_id,user_id,user_name) VALUES(?,?,?)").bind(i.inspection_id,x.user_id,x.full_name));
+    const meta=parseJson(i.meta_json,{});meta.inspectorIds=team.map(x=>x.user_id);meta.inspectorNames=team.map(x=>x.full_name);meta.areaName=team[0].area_name;meta.classId=team[0].responsible_classroom_id;meta.className=team[0].class_name;
+    sync.push(db.prepare("UPDATE inspections SET meta_json=?,updated_at=? WHERE inspection_id=?").bind(JSON.stringify(meta),nowIso(),i.inspection_id));
+  }
+  if(sync.length)await runDbBatches(db,sync,50);
+  await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('today_sync_marker',?)").bind(markerValue).run();
 }
 function inspectionDisplay(i, inspectors=[]) {
   const m=parseJson(i.meta_json,{}); m.note=i.note||m.note||""; m.version=Number(i.version||0); m.completedAt=i.completed_at||m.completedAt||"";
@@ -718,7 +737,34 @@ function inspectionDisplay(i, inspectors=[]) {
 }
 async function displayOne(db,i){ const team=await all(db,"SELECT user_id,user_name FROM inspection_inspectors WHERE inspection_id=? ORDER BY user_name",i.inspection_id); return inspectionDisplay(i,team); }
 async function ownedTask(env,u,id){ role(u,["Inspector"]); const db=env.DB; const i=await db.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_id=? AND ii.user_id=?`).bind(id,u.user_id).first(); assert(i,"งานนี้ไม่ใช่งานที่ได้รับมอบหมาย"); assert(i.inspection_date===thaiDay(),"แก้ไขได้เฉพาะงานวันนี้"); return i; }
-async function tasks(env,u){ role(u,["Inspector"]); await ensureToday(env); const rows=await all(env.DB,`SELECT DISTINCT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_date=? AND ii.user_id=? ORDER BY i.inspection_id`,thaiDay(),u.user_id); return Promise.all(rows.map(i=>displayOne(env.DB,i))); }
+async function tasksReady(env,u){
+  const day=thaiDay(),db=env.DB;
+  const [rows,teams]=await Promise.all([
+    all(db,`SELECT DISTINCT i.* FROM inspections i
+      JOIN inspection_inspectors mine ON mine.inspection_id=i.inspection_id
+      WHERE i.inspection_date=? AND mine.user_id=?
+      ORDER BY i.inspection_id`,day,u.user_id),
+    all(db,`SELECT team.inspection_id,team.user_id,team.user_name
+      FROM inspections i
+      JOIN inspection_inspectors mine ON mine.inspection_id=i.inspection_id AND mine.user_id=?
+      JOIN inspection_inspectors team ON team.inspection_id=i.inspection_id
+      WHERE i.inspection_date=?
+      ORDER BY team.inspection_id,team.user_name`,u.user_id,day)
+  ]);
+  const map=new Map();
+  teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);});
+  return rows.map(i=>inspectionDisplay(i,map.get(i.inspection_id)||[]));
+}
+async function tasks(env,u){ role(u,["Inspector"]); await ensureToday(env); return tasksReady(env,u); }
+async function inspectorHome(env,u){
+  role(u,["Inspector"]); await ensureToday(env);
+  const [taskRows,rewards,notice]=await Promise.all([
+    tasksReady(env,u),
+    all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id),
+    notifications(env,u,true)
+  ]);
+  return{tasks:taskRows,rewards:rewards.map(rewardRow),notifications:notice,updatedAt:nowIso()};
+}
 async function qrTask(env,u,p){ role(u,["Inspector"]); const aid=await qrAreaId(env,p.token); await ensureToday(env); const i=await env.DB.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_date=? AND i.area_id=? AND ii.user_id=?`).bind(thaiDay(),aid,u.user_id).first(); assert(i,"พื้นที่นี้ไม่ได้อยู่ในงานที่คุณได้รับมอบหมายวันนี้"); return displayOne(env.DB,i); }
 async function visible(env,u,i){ if(!u) return false; if(["Admin","Supervisor"].includes(u.role)) return true; if(u.role==="Inspector") return !!(await env.DB.prepare("SELECT 1 x FROM inspection_inspectors WHERE inspection_id=? AND user_id=?").bind(i.inspection_id,u.user_id).first()); const m=parseJson(i.meta_json,{}); return u.role==="Teacher" && m.classId===u.linked_classroom_id; }
 
@@ -746,7 +792,9 @@ async function saveMaster(env,u,p){
   } else {
     const id=text(p.row.AreaID||"")||uuid(), name=text(p.row.AreaName,200), cid=text(p.row.ResponsibleClassroomID,80); assert(name&&m.Classrooms.some(c=>c.ClassroomID===cid),"ระบุพื้นที่และห้องรับผิดชอบ"); assert(!m.Areas.some(x=>x.AreaName===name&&x.AreaID!==id),"ชื่อพื้นที่ซ้ำ");
     await db.prepare(`INSERT INTO areas(area_id,area_name,responsible_classroom_id,updated_at) VALUES(?,?,?,?) ON CONFLICT(area_id) DO UPDATE SET area_name=excluded.area_name,responsible_classroom_id=excluded.responsible_classroom_id,updated_at=excluded.updated_at`).bind(id,name,cid,nowIso()).run();
-  } return true;
+  }
+  await invalidateToday(env);
+  return true;
 }
 
 async function deleteMaster(env,u,p){
@@ -772,6 +820,7 @@ async function deleteMaster(env,u,p){
     await putRecycle(db,u,p.table,id,old);
     await db.prepare("DELETE FROM assignments WHERE assignment_id=?").bind(id).run();
   }
+  await invalidateToday(env);
   return true;
 }
 async function assign(env,u,p){
@@ -779,12 +828,12 @@ async function assign(env,u,p){
   assert(users.length&&areas.length,"เลือกผู้ตรวจและพื้นที่"); users.forEach(id=>assert(m.Users.some(x=>x.UserID===id&&x.Role==="Inspector"),"ผู้ตรวจไม่ถูกต้อง")); areas.forEach(id=>assert(m.Areas.some(x=>x.AreaID===id),"ไม่พบพื้นที่"));
   let added=0,merged=0; const stmts=[];
   for(const uid of users) for(const aid of areas){ const old=m.Assignments.find(a=>a.UserID===uid&&a.AreaID===aid); if(old){ const union=[...new Set([...dutyDays(old.Days),...dutyDays(days)])].sort().join(","); stmts.push(db.prepare("UPDATE assignments SET days=?,updated_at=? WHERE assignment_id=?").bind(union,nowIso(),old.AssignmentID)); merged++; } else { stmts.push(db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)").bind(uuid(),uid,aid,days,nowIso(),nowIso())); added++; } }
-  if(stmts.length) await db.batch(stmts); await ensureToday(env); return {added,merged};
+  if(stmts.length) await db.batch(stmts); await invalidateToday(env); await ensureToday(env); return {added,merged};
 }
-async function setAssignmentDays(env,u,p){ role(u,["Admin"]); const days=dutyText(Array.isArray(p.days)?p.days.join(","):p.days); const r=await env.DB.prepare("UPDATE assignments SET days=?,updated_at=? WHERE assignment_id=?").bind(days,nowIso(),String(p.id||"")).run(); assert(r.meta.changes,"ไม่พบรายการ"); await ensureToday(env); return true; }
+async function setAssignmentDays(env,u,p){ role(u,["Admin"]); const days=dutyText(Array.isArray(p.days)?p.days.join(","):p.days); const r=await env.DB.prepare("UPDATE assignments SET days=?,updated_at=? WHERE assignment_id=?").bind(days,nowIso(),String(p.id||"")).run(); assert(r.meta.changes,"ไม่พบรายการ"); await invalidateToday(env); await ensureToday(env); return true; }
 
 async function password(env,u,p){ const c=parseJson(u.password,{}); assert(equalLoose(c.hash,await hmac(env,text(p.oldProof,200))),"รหัสผ่านเดิมไม่ถูกต้อง"); const pass=await credentialJson(env,p.credential); await env.DB.prepare("UPDATE users SET password=?,updated_at=? WHERE user_id=?").bind(pass,nowIso(),u.user_id).run(); await env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(u.user_id).run(); return true; }
-async function saveHolidays(env,u,p){ role(u,["Admin"]); assert(Array.isArray(p.dates)&&p.dates.length<=400,"วันหยุดมากเกินไป"); const dates=[...new Set(p.dates.map(validateDate))]; await env.DB.prepare("DELETE FROM holidays").run(); if(dates.length) await env.DB.batch(dates.map(d=>env.DB.prepare("INSERT INTO holidays(holiday_date) VALUES(?)").bind(d))); return true; }
+async function saveHolidays(env,u,p){ role(u,["Admin"]); assert(Array.isArray(p.dates)&&p.dates.length<=400,"วันหยุดมากเกินไป"); const dates=[...new Set(p.dates.map(validateDate))]; await env.DB.prepare("DELETE FROM holidays").run(); if(dates.length) await env.DB.batch(dates.map(d=>env.DB.prepare("INSERT INTO holidays(holiday_date) VALUES(?)").bind(d))); await invalidateToday(env); return true; }
 
 async function bulkPlan(env,table,inputs,needCred){
   const m=await masterData(env.DB), rows=[], prepared=[]; assert(["Users","Classrooms","Areas"].includes(table),"ตารางไม่ถูกต้อง"); assert(Array.isArray(inputs)&&inputs.length>=1&&inputs.length<=100,"นำเข้าได้ครั้งละ 1–100 รายการ");
@@ -803,7 +852,7 @@ async function bulkCreate(env,u,p){ role(u,["Admin"]); const r=await bulkPlan(en
   if(p.table==="Classrooms") r.prepared.forEach(x=>stmts.push(db.prepare("INSERT INTO classrooms(classroom_id,class_name,created_at,updated_at) VALUES(?,?,?,?)").bind(x.classroom_id,x.class_name,nowIso(),nowIso())));
   if(p.table==="Areas") r.prepared.forEach(x=>stmts.push(db.prepare("INSERT INTO areas(area_id,area_name,responsible_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?)").bind(x.area_id,x.area_name,x.responsible_classroom_id,nowIso(),nowIso())));
   if(p.table==="Users") for(const x of r.prepared) stmts.push(db.prepare("INSERT INTO users(user_id,username,password,full_name,role,linked_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").bind(x.user_id,x.username,await credentialJson(env,x.credential),x.full_name,x.role,x.linked_classroom_id,nowIso(),nowIso()));
-  await db.batch(stmts); return {saved:true,count:r.prepared.length}; }
+  await db.batch(stmts); await invalidateToday(env); return {saved:true,count:r.prepared.length}; }
 
 async function uploadStart(env,u,p,request){
   const i=await ownedTask(env,u,p.id); const mime=String(p.mime||""), size=Number(p.size), origin=String(p.origin||new URL(request.url).origin);
@@ -827,8 +876,8 @@ async function saveInspection(env,u,p){
     .bind(p.status,["","ปรับปรุง","ปานกลาง","ยอดเยี่ยม"][score],score,meta.note,JSON.stringify(meta),JSON.stringify(photos),meta.version,meta.completedAt,meta.completedById,meta.completedByName,stamp,i.inspection_id).run();
   if(p.uploadTicket) { await db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).run(); gasDrive(env,"consumeUpload",{ticket:String(p.uploadTicket)}).catch(()=>{}); }
   const trash=oldPhotos.filter(id=>!photos.includes(id)); if(trash.length&&env.GAS_DRIVE_URL) gasDrive(env,"trashFiles",{fileIds:trash}).catch(()=>{});
-  let warning=""; try{await rebuildRewards(env);}catch(e){warning="บันทึกสำเร็จ แต่รางวัลรอประมวลผลใหม่";}
-  const updated=await db.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(i.inspection_id).first(); return {inspection:await displayOne(db,updated),warning};
+  const updated=await db.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(i.inspection_id).first();
+  return {inspection:await displayOne(db,updated),warning:""};
 }
 async function photo(env,u,p){ const i=await env.DB.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(String(p.inspectionId||"")).first(); assert(i&&await visible(env,u,i),"ไม่มีสิทธิ์ดูรูป"); const ids=parseJson(i.photo_links_json,[]); assert(ids.includes(String(p.fileId||"")),"ไม่พบรูปในรายการ"); return gasDrive(env,"photo",{fileId:String(p.fileId)}); }
 
@@ -837,6 +886,22 @@ function metaOf(i){ const m=parseJson(i.meta_json,{}); m.note=i.note||m.note||""
 function inspectorIdsFrom(i, teamMap){ const t=teamMap.get(i.inspection_id)||[]; if(t.length) return t.map(x=>x.user_id); const m=metaOf(i); return Array.isArray(m.inspectorIds)?m.inspectorIds.map(String):(m.userId?[String(m.userId)]:[]); }
 function inspectorNamesFrom(i, teamMap){ const t=teamMap.get(i.inspection_id)||[]; if(t.length) return t.map(x=>x.user_name); const m=metaOf(i); return Array.isArray(m.inspectorNames)?m.inspectorNames.map(String):(m.userName?[String(m.userName)]:[]); }
 async function inspectionBundle(db){ const ins=await all(db,"SELECT * FROM inspections ORDER BY inspection_date,inspection_id"), teams=await all(db,"SELECT * FROM inspection_inspectors ORDER BY inspection_id,user_name"), map=new Map(); teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);}); return {ins,teamMap:map}; }
+async function inspectionBundleRange(db,start,end){
+  const [ins,teams]=await Promise.all([
+    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,end),
+    all(db,`SELECT ii.* FROM inspection_inspectors ii
+      JOIN inspections i ON i.inspection_id=ii.inspection_id
+      WHERE i.inspection_date>=? AND i.inspection_date<=?
+      ORDER BY ii.inspection_id,ii.user_name`,start,end)
+  ]);
+  const map=new Map();
+  teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);});
+  return{ins,teamMap:map};
+}
+function monthLastDay(month){
+  const y=Number(month.slice(0,4)),m=Number(month.slice(5,7));
+  return new Date(Date.UTC(y,m,0)).toISOString().slice(0,10);
+}
 function activeDates(ins){ return new Set(ins.filter(i=>i.status==="ตรวจแล้ว").map(i=>i.inspection_date)); }
 async function rewardRecords(env,ins,teamMap){
   const ad=activeDates(ins); ins=ins.filter(i=>ad.has(i.inspection_date)); const rewards=[],classes={},inspectors={};
@@ -852,7 +917,31 @@ async function rewardRecords(env,ins,teamMap){
 async function rebuildRewards(env){ const {ins,teamMap}=await inspectionBundle(env.DB), desired=await rewardRecords(env,ins,teamMap), existing=await all(env.DB,"SELECT * FROM rewards_log"), old=new Map(existing.map(x=>[x.log_id,x.timestamp])); const stmts=[env.DB.prepare("DELETE FROM rewards_log")]; for(const r of desired) stmts.push(env.DB.prepare("INSERT INTO rewards_log(log_id,timestamp,reference_id,achievement,details_json) VALUES(?,?,?,?,?)").bind(r.log_id,old.get(r.log_id)||r.timestamp,r.reference_id,r.achievement,r.details_json)); await env.DB.batch(stmts); }
 function leaderboard(ins){ const groups={}; ins.filter(i=>i.status==="ตรวจแล้ว").forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,score:0});g.total++;g.score+=Number(i.score||0);}); return Object.values(groups).map(g=>({...g,avg:g.total?g.score/g.total:0})).sort((a,b)=>b.avg-a.avg||b.total-a.total||a.name.localeCompare(b.name,"th")); }
 async function monthly(env,allIns,month){ const ad=activeDates(allIns), firstNext=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),1)), last=new Date(firstNext.getTime()-86400000).toISOString().slice(0,10), cutoff=last<thaiDay()?last:thaiDay(), expected=[...ad].filter(d=>d.startsWith(month)&&d<=cutoff).sort(),groups={}; allIns.filter(i=>i.inspection_date.startsWith(month)&&i.inspection_date<=cutoff).forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,done:0,improve:0,days:new Set()}); if(!ad.has(i.inspection_date))return;g.total++;g.days.add(i.inspection_date);if(i.status==="ตรวจแล้ว"){g.done++;if(Number(i.score)===1)g.improve++;}}); return Object.values(groups).map(g=>{const missingDays=expected.filter(d=>!g.days.has(d)).length,complete=expected.length>0&&g.total>0&&g.done===g.total&&missingDays===0;return{id:g.id,name:g.name,total:g.total,done:g.done,improve:g.improve,missingDays,inspectionDays:expected.length,provisional:last>=thaiDay(),medal:expected.length===0?"ไม่มีการตรวจในเดือนนี้":!complete?"ข้อมูลไม่ครบ":g.improve===0?"เหรียญทอง":g.improve<=3?"เหรียญเงิน":g.improve<=5?"เหรียญทองแดง":"ไม่ผ่านเกณฑ์"};}); }
-async function dashboard(env,u,d){ if(d===thaiDay())await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins),isHoliday=d<thaiDay()&&!ad.has(d), selected=ins.filter(i=>i.inspection_date===d&&!isHoliday&&(!u||u.role!=="Teacher"||metaOf(i).classId===u.linked_classroom_id)),done=selected.filter(i=>i.status==="ตรวจแล้ว"),counts=[3,2,1].map(n=>done.filter(i=>Number(i.score)===n).length),areas=await env.DB.prepare("SELECT COUNT(*) n FROM areas").first(); const recent=done.sort((a,b)=>String(metaOf(b).completedAt).localeCompare(String(metaOf(a).completedAt))).slice(0,50).map(i=>({date:i.inspection_date,area:metaOf(i).areaName,className:metaOf(i).className,rating:i.rating,score:i.score})); return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,pending:selected.length-done.length,counts,feed:u?recent:[],leaders:leaderboard(ins.filter(i=>i.inspection_date>=shiftDate(d,-29)&&i.inspection_date<=d)).slice(0,5),updatedAt:nowIso()}; }
+async function dashboard(env,u,d){
+  if(d===thaiDay())await ensureToday(env);
+  const start=shiftDate(d,-29);
+  const [{ins},areas]=await Promise.all([
+    inspectionBundleRange(env.DB,start,d),
+    env.DB.prepare("SELECT COUNT(*) n FROM areas").first()
+  ]);
+  const ad=activeDates(ins),isHoliday=d<thaiDay()&&!ad.has(d);
+  const selected=ins.filter(i=>i.inspection_date===d&&!isHoliday&&(!u||u.role!=="Teacher"||metaOf(i).classId===u.linked_classroom_id));
+  const done=selected.filter(i=>i.status==="ตรวจแล้ว"),counts=[3,2,1].map(n=>done.filter(i=>Number(i.score)===n).length);
+  const recent=done.sort((a,b)=>String(metaOf(b).completedAt).localeCompare(String(metaOf(a).completedAt))).slice(0,50).map(i=>({date:i.inspection_date,area:metaOf(i).areaName,className:metaOf(i).className,rating:i.rating,score:i.score}));
+  return{date:d,isHoliday,areas:Number(areas?.n||0),scheduled:selected.length,done:done.length,pending:selected.length-done.length,counts,feed:u?recent:[],leaders:leaderboard(ins).slice(0,5),updatedAt:nowIso()};
+}
 async function teacher(env,u){ role(u,["Teacher"]); await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins); const filtered=ins.filter(i=>metaOf(i).classId===u.linked_classroom_id&&(i.inspection_date===thaiDay()||ad.has(i.inspection_date))).sort((a,b)=>b.inspection_date.localeCompare(a.inspection_date)).slice(0,200); return{inspections:await Promise.all(filtered.map(i=>displayOne(env.DB,i))),rewards:(await all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=?",u.linked_classroom_id)).map(rewardRow),monthly:(await monthly(env,ins,thaiDay().slice(0,7))).filter(r=>r.id===u.linked_classroom_id)}; }
-async function report(env,u,start,end){ role(u,["Admin","Supervisor"]); assert(start<=end&&end<=thaiDay(),"ช่วงวันที่ไม่ถูกต้อง"); assert((new Date(end)-new Date(start))<=366*86400000,"เลือกช่วงไม่เกิน 366 วัน"); await ensureToday(env); const {ins,teamMap}=await inspectionBundle(env.DB),ad=activeDates(ins),filtered=ins.filter(i=>i.inspection_date>=start&&i.inspection_date<=end&&ad.has(i.inspection_date)),done=filtered.filter(i=>i.status==="ตรวจแล้ว"),areas={},people={},users=await all(env.DB,"SELECT user_id,full_name FROM users"),um=new Map(users.map(x=>[x.user_id,x.full_name])); for(const i of filtered){const m=metaOf(i),ids=inspectorIdsFrom(i,teamMap),names=inspectorNamesFrom(i,teamMap);ids.forEach((uid,idx)=>{const g=people[uid]||(people[uid]={name:names[idx]||um.get(uid)||"—",scheduled:0,done:0});g.scheduled++;if(i.status==="ตรวจแล้ว")g.done++;});if(i.status==="ตรวจแล้ว"&&Number(i.score)===1){const a=areas[m.areaId]||(areas[m.areaId]={name:m.areaName,count:0});a.count++;}}
-  return{start,end,leaders:leaderboard(done),watch:Object.values(areas).sort((a,b)=>b.count-a.count),inspectors:Object.values(people),monthly:await monthly(env,ins,end.slice(0,7)),month:end.slice(0,7),rewards:(await all(env.DB,"SELECT * FROM rewards_log ORDER BY timestamp")).map(rewardRow)}; }
+async function report(env,u,start,end){
+  role(u,["Admin","Supervisor"]); assert(start<=end&&end<=thaiDay(),"ช่วงวันที่ไม่ถูกต้อง"); assert((new Date(end)-new Date(start))<=366*86400000,"เลือกช่วงไม่เกิน 366 วัน");
+  await ensureToday(env);
+  const month=end.slice(0,7),monthStart=month+"-01",monthEnd=monthLastDay(month)<thaiDay()?monthLastDay(month):thaiDay();
+  const [{ins,teamMap},{ins:monthIns},users,rewardRows]=await Promise.all([
+    inspectionBundleRange(env.DB,start,end),
+    inspectionBundleRange(env.DB,monthStart,monthEnd),
+    all(env.DB,"SELECT user_id,full_name FROM users"),
+    all(env.DB,"SELECT * FROM rewards_log ORDER BY timestamp")
+  ]);
+  const ad=activeDates(ins),filtered=ins.filter(i=>ad.has(i.inspection_date)),done=filtered.filter(i=>i.status==="ตรวจแล้ว"),areas={},people={},um=new Map(users.map(x=>[x.user_id,x.full_name]));
+  for(const i of filtered){const m=metaOf(i),ids=inspectorIdsFrom(i,teamMap),names=inspectorNamesFrom(i,teamMap);ids.forEach((uid,idx)=>{const g=people[uid]||(people[uid]={name:names[idx]||um.get(uid)||"—",scheduled:0,done:0});g.scheduled++;if(i.status==="ตรวจแล้ว")g.done++;});if(i.status==="ตรวจแล้ว"&&Number(i.score)===1){const a=areas[m.areaId]||(areas[m.areaId]={name:m.areaName,count:0});a.count++;}}
+  return{start,end,leaders:leaderboard(done),watch:Object.values(areas).sort((a,b)=>b.count-a.count),inspectors:Object.values(people),monthly:await monthly(env,monthIns,month),month,rewards:rewardRows.map(rewardRow)};
+}
