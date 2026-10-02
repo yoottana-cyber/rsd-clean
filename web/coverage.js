@@ -104,6 +104,7 @@ async function appSettingsModal(){
       try{
         const saved=await rpc("saveAppSettings",{settings});S.config=saved;
         try{localStorage.setItem("rsd-config-cache",JSON.stringify(saved));}catch(e){}
+        if(typeof applyBrandSettings==="function")applyBrandSettings();
         toast("บันทึกการตั้งค่าระบบแล้ว");closeModal();
       }catch(err){error(err);}
     };
