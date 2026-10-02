@@ -223,12 +223,14 @@
   }
   function toast(text) {
     Swal.fire({
-      toast: true,
-      position: "top-end",
+      position: "center",
       icon: "success",
       title: text,
       showConfirmButton: false,
-      timer: 2500,
+      timer: 1800,
+      timerProgressBar: true,
+      width: 340,
+      customClass: { popup: "center-notification" },
     });
   }
   function icons() {
@@ -423,30 +425,36 @@
     if (S.user?.Role === "Inspector") mobileItems = ["dashboard","tasks"];
     if (S.user?.Role === "Teacher") mobileItems = ["teacher"];
 
-    const leftCount = Math.ceil(mobileItems.length / 2);
-    const left = mobileItems.slice(0,leftCount);
-    const right = mobileItems.slice(leftCount);
-    const mobileLink = (k) =>
-      '<a class="mobile-nav-item ' + (S.route === k ? "active" : "") +
+    const mobileLink = (k, slot) =>
+      '<a class="mobile-nav-item mobile-slot-' + slot + ' ' + (S.route === k ? "active" : "") +
       '" href="#' + k + '" aria-label="' + esc(pages[k].title) + '">' +
       '<i data-lucide="' + pages[k].icon + '"></i><span>' + esc(pages[k].title) + '</span></a>';
+    const spacer = (slot) => '<span class="mobile-nav-spacer mobile-slot-' + slot + '" aria-hidden="true"></span>';
 
-    const installUtility = !S.user
-      ? '<button class="mobile-nav-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้ง</span></button>'
-      : "";
+    let slot1 = mobileItems[0] ? mobileLink(mobileItems[0],1) : spacer(1);
+    let slot2 = spacer(2);
+    let slot4 = spacer(4);
+    if (mobileItems.length >= 3) {
+      slot2 = mobileLink(mobileItems[1],2);
+      slot4 = mobileLink(mobileItems[2],4);
+    } else if (mobileItems.length === 2) {
+      slot4 = mobileLink(mobileItems[1],4);
+    }
+    if (!S.user) {
+      slot2 = '<button class="mobile-nav-item mobile-slot-2 install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้ง</span></button>';
+    }
 
     $("nav").innerHTML =
       '<div class="desktop-nav">' + desktopLinks + '</div>' +
       '<div class="mobile-bottom-nav">' +
-        left.map(mobileLink).join("") +
-        installUtility +
-        '<button class="mobile-fab" id="mobile-fab" type="button" aria-label="ทางลัด"><i data-lucide="' +
+        slot1 + slot2 +
+        '<button class="mobile-fab mobile-slot-3" id="mobile-fab" type="button" aria-label="ทางลัด"><i data-lucide="' +
           (S.user?.Role === "Inspector" ? "scan-line" : S.user?.Role === "Admin" ? "plus" : S.user?.Role === "Teacher" ? "refresh-cw" : "chart-no-axes-column-increasing") +
         '"></i><span>' +
           (S.user?.Role === "Inspector" ? "สแกน" : S.user?.Role === "Admin" ? "เพิ่ม" : S.user?.Role === "Teacher" ? "รีเฟรช" : "รายงาน") +
         '</span></button>' +
-        right.map(mobileLink).join("") +
-        (S.user ? '<button class="mobile-nav-item" id="mobile-more" type="button"><i data-lucide="menu"></i><span>เมนู</span></button>' : '<a class="mobile-nav-item" href="#login"><i data-lucide="log-in"></i><span>เข้าสู่ระบบ</span></a>') +
+        slot4 +
+        (S.user ? '<button class="mobile-nav-item mobile-slot-5" id="mobile-more" type="button"><i data-lucide="menu"></i><span>เมนู</span></button>' : '<a class="mobile-nav-item mobile-slot-5" href="#login"><i data-lucide="log-in"></i><span>เข้าสู่ระบบ</span></a>') +
       '</div>';
 
     const install = !isStandaloneApp()
