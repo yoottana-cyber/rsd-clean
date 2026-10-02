@@ -122,3 +122,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_user_id, timestamp DESC);
+
+
+CREATE TABLE IF NOT EXISTS recycle_bin (
+  recycle_id TEXT PRIMARY KEY,
+  deleted_at TEXT NOT NULL,
+  deleted_by_user_id TEXT NOT NULL DEFAULT '',
+  deleted_by_name TEXT NOT NULL DEFAULT '',
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  snapshot_json TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recycle_expires ON recycle_bin(expires_at);
+CREATE INDEX IF NOT EXISTS idx_recycle_deleted ON recycle_bin(deleted_at DESC);
