@@ -1,7 +1,19 @@
 const headers={"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"};
 export async function onRequest(context){
   const {request,env}=context;
-  if(request.method!=="POST") return Response.json({ok:false,error:"METHOD_NOT_ALLOWED"},{status:405,headers});
+  if (request.method === "GET") {
+  return Response.redirect(
+    new URL("/migrate.html", request.url).toString(),
+    302
+  );
+}
+
+if (request.method !== "POST") {
+  return Response.json(
+    { ok: false, error: "METHOD_NOT_ALLOWED" },
+    { status: 405, headers }
+  );
+}
   try{
     if(!env.DB||!env.MIGRATION_SECRET) throw Error("ยังไม่ได้ตั้งค่า DB/MIGRATION_SECRET");
     const body=await request.json();
