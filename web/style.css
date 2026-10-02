@@ -470,16 +470,17 @@ tbody tr:hover td{background:#fbfefe}
   }
   #nav .desktop-nav{display:none!important}
   #nav .mobile-bottom-nav{
-    display:flex;
-    align-items:flex-end;
-    justify-content:space-around;
+    position:relative;
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    align-items:end;
     gap:2px;
     width:100%;
     min-height:78px;
     padding:7px 5px 8px;
   }
   .mobile-nav-item{
-    flex:1 1 0;
+    width:100%;
     min-width:0;
     height:62px;
     padding:7px 3px 5px;
@@ -512,10 +513,11 @@ tbody tr:hover td{background:#fbfefe}
     background:#eef8ff;
   }
   .mobile-fab{
-    flex:0 0 68px;
+    justify-self:center;
+    align-self:end;
     width:68px;
     height:68px;
-    margin:0 5px 13px;
+    margin:0 0 13px;
     padding:0;
     border:5px solid #fff;
     border-radius:50%;
@@ -601,7 +603,7 @@ tbody tr:hover td{background:#fbfefe}
   .app-main{padding-left:10px;padding-right:10px}
   .card{padding:15px}
   .mobile-nav-item{font-size:9.5px}
-  .mobile-fab{flex-basis:62px;width:62px;height:62px;margin-left:2px;margin-right:2px}
+  .mobile-fab{width:62px;height:62px;margin-left:0;margin-right:0}
   .mobile-fab svg{width:28px;height:28px}
 }
 
@@ -622,6 +624,19 @@ tbody tr:hover td{background:#fbfefe}
   body > #nav{display:none!important}
 }
 
+
+.mobile-nav-spacer{display:block;min-width:0;height:62px}
+.mobile-slot-1{grid-column:1}
+.mobile-slot-2{grid-column:2}
+.mobile-slot-3{grid-column:3}
+.mobile-slot-4{grid-column:4}
+.mobile-slot-5{grid-column:5}
+.center-notification{
+  text-align:center!important;
+  max-width:calc(100vw - 36px)!important;
+}
+.center-notification .swal2-title{font-size:20px!important}
+.center-notification .swal2-icon{margin-top:1.5em!important}
 
 .mobile-more-user{
   display:flex;
