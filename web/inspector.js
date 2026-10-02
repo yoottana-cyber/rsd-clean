@@ -4,17 +4,68 @@ let taskRows = [];
     if (names.length > 1) return "ทีมผู้ตรวจ: " + names.join(", ");
     return names.length === 1 ? "ผู้ตรวจ: " + names[0] : "";
   }
+  function taskCacheKey(){
+    return "rsd-task-cache:" + (S.user?.UserID||"") + ":" + thaiDay();
+  }
+  function saveTaskCache(rows,rewards){
+    try{localStorage.setItem(taskCacheKey(),JSON.stringify({at:Date.now(),rows,rewards}));}catch(e){}
+  }
+  function loadTaskCache(){
+    try{
+      const x=JSON.parse(localStorage.getItem(taskCacheKey())||"null");
+      return x&&Array.isArray(x.rows)&&Array.isArray(x.rewards)?x:null;
+    }catch(e){return null;}
+  }
+  async function offlinePendingMap(){
+    if(!window.rsdOfflineQueue||!S.user)return new Map();
+    try{
+      const rows=await window.rsdOfflineQueue.list(S.user.UserID);
+      return new Map(rows.map(x=>[x.inspectionId,x]));
+    }catch(e){return new Map();}
+  }
+  function offlineNetworkError(e){
+    const m=String(e?.message||e||"");
+    return !navigator.onLine || /Failed to fetch|Load failed|NetworkError|เชื่อมต่อ API|API HTTP|Drive ชั่วคราว|นานเกินไป/i.test(m);
+  }
   async function renderTasks(seq) {
-    const [rows, rewards] = await Promise.all([rpc("tasks"), rpc("myRewards")]);
+    let rows,rewards,offlineView=false;
+    try{
+      [rows,rewards]=await Promise.all([rpc("tasks"),rpc("myRewards")]);
+      saveTaskCache(rows,rewards);
+    }catch(e){
+      const cached=loadTaskCache();
+      if(!cached) throw e;
+      rows=cached.rows;
+      rewards=cached.rewards;
+      offlineView=true;
+    }
     if (seq !== S.seq) return;
+
+    const pending=await offlinePendingMap();
+    rows=rows.map(i=>{
+      const q=pending.get(i.InspectionID);
+      if(!q)return i;
+      return {
+        ...i,
+        Status:q.payload.status,
+        Score:Number(q.payload.score||0),
+        Notes:q.payload.notes||"",
+        _offlinePending:true,
+        _offlineCreatedAt:q.createdAt,
+        _offlineError:q.lastError||""
+      };
+    });
     taskRows = rows;
     const done = rows.filter((i) => i.Status === "ตรวจแล้ว").length;
+    const pendingCount=[...pending.values()].length;
     $("app").innerHTML =
       heading(
         "งานตรวจของฉัน 🔎",
         "งานประจำวันที่ " + thaiDay() + " · สำเร็จ " + done + " จาก " + rows.length + " พื้นที่",
         '<div class="flex flex-wrap gap-2"><button class="btn" id="scan-qr"><span aria-hidden="true">▦</span> สแกน QR ณ จุดตรวจ</button><button class="btn secondary" id="refresh-tasks">รีเฟรช</button></div>',
       ) +
+      (offlineView?'<div class="offline-work-notice mb-4"><b>โหมดออฟไลน์</b><span>กำลังใช้รายการงานล่าสุดที่เก็บไว้ในเครื่อง ผลตรวจใหม่จะซิงก์เมื่ออินเทอร์เน็ตกลับมา</span></div>':'') +
+      (pendingCount?'<div class="offline-work-notice pending mb-4"><b>รอซิงก์ '+pendingCount+' รายการ</b><button class="btn small secondary" id="sync-now" type="button">ซิงก์ตอนนี้</button></div>':'') +
       '<div class="flex flex-wrap gap-2 mb-5">' +
       rewards
         .slice(-10)
@@ -32,23 +83,24 @@ let taskRows = [];
         ? rows
             .map(
               (i, index) =>
-                '<article class="card"><div class="flex justify-between items-center mb-4"><span class="muted">' +
+                '<article class="card'+(i._offlinePending?' offline-pending-card':'')+'"><div class="flex justify-between items-center mb-4"><span class="muted">' +
                 esc(i.meta.className) +
                 "</span>" +
-                pill(i.Score) +
+                (i._offlinePending?'<span class="pill offline-pill">รอซิงก์</span>':pill(i.Score)) +
                 '</div><h2 class="text-xl font-medium mb-2">' +
                 esc(i.meta.areaName) +
                 '</h2>' +
                 (inspectorTeamLabel(i) ? '<p class="muted mb-2">' + esc(inspectorTeamLabel(i)) + '</p>' : '') +
-                (i.meta.completedByName ? '<p class="muted mb-2">ตรวจล่าสุดโดย ' + esc(i.meta.completedByName) + '</p>' : '') +
+                (i.meta.completedByName && !i._offlinePending ? '<p class="muted mb-2">ตรวจล่าสุดโดย ' + esc(i.meta.completedByName) + '</p>' : '') +
+                (i._offlineError?'<p class="offline-error mb-2">ซิงก์ล่าสุดไม่สำเร็จ: '+esc(i._offlineError)+'</p>':'') +
                 '<p class="muted min-h-10">' +
                 esc(i.Notes || "ยังไม่มีหมายเหตุ") +
                 '</p><div class="flex gap-2 mt-5"><button class="btn inspect-btn" data-index="' +
                 index +
                 '">' +
-                (i.Status === "ตรวจแล้ว" ? "แก้ไขผลตรวจ" : "เริ่มตรวจพื้นที่") +
+                (i._offlinePending ? "แก้ไขรายการรอซิงก์" : i.Status === "ตรวจแล้ว" ? "แก้ไขผลตรวจ" : "เริ่มตรวจพื้นที่") +
                 "</button>" +
-                (i.PhotoLinks.length
+                (i.PhotoLinks.length && !i._offlinePending
                   ? '<button class="btn secondary task-photo" data-index="' +
                     index +
                     '">ดูรูป</button>'
@@ -60,9 +112,17 @@ let taskRows = [];
       "</div>";
     $("refresh-tasks").onclick = route;
     $("scan-qr").onclick = scanQrModal;
+    if($("sync-now")) $("sync-now").onclick=()=>window.syncOfflineInspections?.(true);
     document
       .querySelectorAll(".inspect-btn")
-      .forEach((b) => (b.onclick = () => inspectionModal(rows[Number(b.dataset.index)])));
+      .forEach(
+        (b) =>
+          (b.onclick = () => {
+            const row=rows[Number(b.dataset.index)];
+            const queued=pending.get(row.InspectionID);
+            inspectionModal(row,queued||null);
+          }),
+      );
     document
       .querySelectorAll(".task-photo")
       .forEach((b) => (b.onclick = () => showPhoto(rows[Number(b.dataset.index)])));
@@ -267,7 +327,7 @@ let taskRows = [];
       }
     };
   }
-  function inspectionModal(i) {
+  function inspectionModal(i, queuedRecord = null) {
     openModal(
       "ประเมิน: " + i.meta.areaName,
       '<form id="inspection-form"><p class="muted">ห้องรับผิดชอบ ' +
@@ -315,14 +375,49 @@ let taskRows = [];
       sending = true;
       const button = form.querySelector("button");
       button.disabled = true;
-      busy(true, "กำลังบันทึกผลตรวจ…");
+      busy(true, navigator.onLine ? "กำลังบันทึกผลตรวจ…" : "กำลังเก็บผลตรวจไว้ในเครื่อง…");
+      const f=form.elements;
+      const selectedPhoto=f.photo.files[0] || null;
+      const basePayload={
+        id:i.InspectionID,
+        version:Number(queuedRecord?.payload?.version ?? i.meta.version),
+        status:f.status.value,
+        score:Number(f.score.value),
+        notes:f.notes.value,
+        removePhoto:f.removePhoto?.checked||false
+      };
+      const queueRecord=async(reason="")=>{
+        if(!window.rsdOfflineQueue) throw Error("อุปกรณ์นี้ไม่รองรับการเก็บงานแบบออฟไลน์");
+        const prior=queuedRecord?.photo||null;
+        const photo=selectedPhoto||prior||null;
+        const record={
+          key:String(S.user.UserID)+":"+String(i.InspectionID),
+          userId:String(S.user.UserID),
+          inspectionId:String(i.InspectionID),
+          createdAt:Number(queuedRecord?.createdAt||Date.now()),
+          updatedAt:Date.now(),
+          payload:basePayload,
+          photo:photo,
+          photoName:selectedPhoto?.name||queuedRecord?.photoName||"",
+          photoType:selectedPhoto?.type||queuedRecord?.photoType||"",
+          lastError:reason
+        };
+        await window.rsdOfflineQueue.queue(record);
+        closeModal();
+        toast("บันทึกไว้ในเครื่องแล้ว · รอซิงก์");
+        await route();
+      };
       try {
-        const f = form.elements,
-          photo = f.photo.files[0];
+        if(!navigator.onLine){
+          await queueRecord();
+          return;
+        }
+        let photo=selectedPhoto;
+        if(!photo && queuedRecord?.photo) photo=queuedRecord.photo;
         if (photo && !ticket) {
           const upload = await rpc(
             "uploadStart",
-            { id: i.InspectionID, mime: photo.type, size: photo.size, origin: location.origin },
+            { id: i.InspectionID, mime: photo.type||queuedRecord?.photoType, size: photo.size, origin: location.origin },
             true,
           );
           await uploadChunks(upload.url, photo, (percent) => {
@@ -334,25 +429,25 @@ let taskRows = [];
         const result = await rpc(
           "saveInspection",
           {
-            id: i.InspectionID,
-            version: i.meta.version,
-            status: f.status.value,
-            score: Number(f.score.value),
-            notes: f.notes.value,
+            ...basePayload,
             uploadTicket: ticket,
-            removePhoto: f.removePhoto?.checked || false,
           },
           true,
         );
+        if(queuedRecord?.key) await window.rsdOfflineQueue.remove(queuedRecord.key);
         closeModal();
         await route();
         if (result.warning) await Swal.fire({ icon: "info", text: result.warning });
         else toast("บันทึกผลตรวจแล้ว");
       } catch (e) {
-        error(e);
+        if(offlineNetworkError(e)){
+          await queueRecord(String(e.message||e));
+        }else{
+          error(e);
+        }
       } finally {
         sending = false;
-        button.disabled = false;
+        if(button?.isConnected) button.disabled = false;
         busy(false);
       }
     };
@@ -433,6 +528,44 @@ let taskRows = [];
       }
     }
   }
+  window.syncOfflineInspections = async function(manual=false){
+    if(!navigator.onLine||!S.user||S.user.Role!=="Inspector"||!window.rsdOfflineQueue)return{synced:0,pending:0};
+    const rows=await window.rsdOfflineQueue.list(S.user.UserID);
+    if(!rows.length){if(manual)toast("ไม่มีรายการรอซิงก์");return{synced:0,pending:0};}
+    let synced=0,failed=0;
+    if(manual)busy(true,"กำลังซิงก์ผลตรวจ…");
+    for(const q of rows){
+      try{
+        let uploadTicket="";
+        if(q.photo){
+          const upload=await rpc("uploadStart",{id:q.inspectionId,mime:q.photo.type||q.photoType,size:q.photo.size,origin:location.origin},true);
+          await uploadChunks(upload.url,q.photo,percent=>{
+            if(manual&&$("loading-text"))$("loading-text").textContent="ซิงก์รูปภาพ "+percent+"%";
+          });
+          uploadTicket=upload.ticket;
+        }
+        await rpc("saveInspection",{...q.payload,uploadTicket},true);
+        await window.rsdOfflineQueue.remove(q.key);
+        synced++;
+      }catch(e){
+        failed++;
+        q.lastError=String(e.message||e);
+        q.updatedAt=Date.now();
+        await window.rsdOfflineQueue.queue(q);
+        if(/ข้อมูลถูกเปลี่ยนแล้ว|งานนี้ไม่ใช่งานที่ได้รับมอบหมาย|แก้ไขได้เฉพาะงานวันนี้|SESSION_EXPIRED/i.test(q.lastError)) break;
+      }
+    }
+    if(manual)busy(false);
+    if(synced){
+      toast("ซิงก์สำเร็จ "+synced+" รายการ");
+      if(S.route==="tasks") await route();
+    }else if(manual&&failed){
+      await Swal.fire({icon:"warning",title:"ยังซิงก์ไม่ได้",text:"รายการยังเก็บอยู่ในเครื่อง กรุณาตรวจอินเทอร์เน็ตหรือเปิดรายการเพื่อดูรายละเอียด"});
+    }
+    window.dispatchEvent(new CustomEvent("rsd-offline-queue-change"));
+    return{synced,pending:Math.max(0,rows.length-synced)};
+  };
+
   async function showPhoto(i) {
     try {
       const src = await rpc("photo", { inspectionId: i.InspectionID, fileId: i.PhotoLinks[0].id });
