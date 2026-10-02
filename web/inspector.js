@@ -129,6 +129,7 @@ let taskRows = [];
                 '">' +
                 (i._offlinePending ? "แก้ไขรายการรอซิงก์" : i.Status === "ตรวจแล้ว" ? "แก้ไขผลตรวจ" : "เริ่มตรวจพื้นที่") +
                 "</button>" +
+                '<a class="btn secondary" href="#history" data-history-type="area" data-history-id="'+esc(i.meta.areaId||"")+'">ประวัติพื้นที่</a>' +
                 (i.PhotoLinks.length && !i._offlinePending
                   ? '<button class="btn secondary task-photo" data-index="' +
                     index +
