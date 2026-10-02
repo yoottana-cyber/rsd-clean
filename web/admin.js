@@ -840,7 +840,7 @@ const adminTables = {
       heading(
         "Dashboard ผู้บริหาร",
         "สรุปสถานะวันนี้และแนวโน้มโรงเรียนแบบกระชับ",
-        '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานรายวัน</a><a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานละเอียด</a><button class="btn" id="exec-refresh" type="button"><i data-lucide="refresh-cw"></i> รีเฟรช</button></div>'
+        '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#review"><i data-lucide="badge-check"></i> รับรองผล</a><a class="btn secondary" href="#history"><i data-lucide="history"></i> ประวัติ</a><a class="btn secondary" href="#exports"><i data-lucide="file-down"></i> ส่งออก</a><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานรายวัน</a><a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานละเอียด</a><button class="btn" id="exec-refresh" type="button"><i data-lucide="refresh-cw"></i> รีเฟรช</button></div>'
       )+
       '<div id="executive-content"><div class="card empty">กำลังสรุปข้อมูลสำหรับผู้บริหาร…</div></div>';
     $("exec-refresh").onclick=()=>loadExecutiveDashboard(S.seq).catch(error);
