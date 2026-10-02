@@ -1728,6 +1728,7 @@ const adminTables = {
             ["Audit Log",c.auditLogs||0],
             ["ถังขยะ",c.recycleBin||0],
             ["System Events",c.systemEvents||0],
+            ["เวรทดแทนวันนี้/ล่วงหน้า",c.dutyOverrides||0],
             ["Session ที่ยังใช้งาน",c.activeSessions||0]
           ].map(x=>[esc(x[0]),String(x[1])])
         ) +
