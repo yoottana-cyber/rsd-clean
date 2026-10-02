@@ -482,7 +482,6 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
-        '<button class="mobile-more-item" id="mobile-notifications" type="button"><span class="menu-icon-with-badge"><i data-lucide="bell"></i><b class="notification-badge hidden">0</b></span><span>แจ้งเตือน</span></button>' +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
         '<button class="mobile-more-item" id="mobile-change-pass" type="button"><i data-lucide="key-round"></i><span>เปลี่ยนรหัสผ่าน</span></button>' +
         '<button class="mobile-more-item" id="mobile-refresh" type="button"><i data-lucide="refresh-cw"></i><span>รีเฟรชข้อมูล</span></button>' +
@@ -491,7 +490,6 @@
     );
     wireInstallButtons();
     icons();
-    if ($("mobile-notifications")) $("mobile-notifications").onclick = () => { closeModal(); notificationCenterModal(); };
     refreshNotificationBadge();
     if ($("mobile-change-pass")) $("mobile-change-pass").onclick = () => {
       closeModal();
@@ -526,42 +524,59 @@
       )
       .join("");
 
-    let mobileItems = keys.slice();
-    if (S.user?.Role === "Admin") mobileItems = ["dashboard","admin","reports"];
-    if (S.user?.Role === "Supervisor") mobileItems = ["dashboard","reports"];
-    if (S.user?.Role === "Inspector") mobileItems = ["dashboard","tasks"];
-    if (S.user?.Role === "Teacher") mobileItems = ["teacher"];
-
     const mobileLink = (k, slot) =>
       '<a class="mobile-nav-item mobile-slot-' + slot + ' ' + (S.route === k ? "active" : "") +
       '" href="#' + k + '" aria-label="' + esc(pages[k].title) + '">' +
       '<i data-lucide="' + pages[k].icon + '"></i><span>' + esc(pages[k].title) + '</span></a>';
     const spacer = (slot) => '<span class="mobile-nav-spacer mobile-slot-' + slot + '" aria-hidden="true"></span>';
+    const notificationItem = S.user
+      ? '<button class="mobile-nav-item mobile-slot-2 notification-mobile-btn" id="mobile-notification-btn" type="button" aria-label="แจ้งเตือน">' +
+          '<span class="menu-icon-with-badge"><i data-lucide="bell"></i><b class="notification-badge hidden">0</b></span><span>แจ้งเตือน</span></button>'
+      : '<button class="mobile-nav-item mobile-slot-2 install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้ง</span></button>';
 
-    let slot1 = mobileItems[0] ? mobileLink(mobileItems[0],1) : spacer(1);
-    let slot2 = spacer(2);
+    let slot1 = mobileLink("dashboard",1);
     let slot4 = spacer(4);
-    if (mobileItems.length >= 3) {
-      slot2 = mobileLink(mobileItems[1],2);
-      slot4 = mobileLink(mobileItems[2],4);
-    } else if (mobileItems.length === 2) {
-      slot4 = mobileLink(mobileItems[1],4);
-    }
-    if (!S.user) {
-      slot2 = '<button class="mobile-nav-item mobile-slot-2 install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้ง</span></button>';
+    let fabIcon = "layout-dashboard";
+    let fabText = "ภาพรวม";
+
+    if (S.user?.Role === "Inspector") {
+      slot1 = mobileLink("dashboard",1);
+      slot4 = mobileLink("tasks",4);
+      fabIcon = "scan-line";
+      fabText = "สแกน";
+    } else if (S.user?.Role === "Admin") {
+      slot1 = mobileLink("dashboard",1);
+      slot4 = mobileLink("reports",4);
+      fabIcon = "plus";
+      fabText = "เพิ่ม";
+    } else if (S.user?.Role === "Supervisor") {
+      slot1 = mobileLink("dashboard",1);
+      slot4 = spacer(4);
+      fabIcon = "chart-no-axes-column-increasing";
+      fabText = "รายงาน";
+    } else if (S.user?.Role === "Teacher") {
+      slot1 = mobileLink("teacher",1);
+      slot4 = spacer(4);
+      fabIcon = "refresh-cw";
+      fabText = "รีเฟรช";
+    } else if (!S.user) {
+      slot1 = mobileLink("dashboard",1);
+      slot4 = spacer(4);
+      fabIcon = "log-in";
+      fabText = "เข้าสู่ระบบ";
     }
 
     $("nav").innerHTML =
       '<div class="desktop-nav">' + desktopLinks + '</div>' +
       '<div class="mobile-bottom-nav">' +
-        slot1 + slot2 +
-        '<button class="mobile-fab mobile-slot-3" id="mobile-fab" type="button" aria-label="ทางลัด"><i data-lucide="' +
-          (S.user?.Role === "Inspector" ? "scan-line" : S.user?.Role === "Admin" ? "plus" : S.user?.Role === "Teacher" ? "refresh-cw" : "chart-no-axes-column-increasing") +
-        '"></i><span>' +
-          (S.user?.Role === "Inspector" ? "สแกน" : S.user?.Role === "Admin" ? "เพิ่ม" : S.user?.Role === "Teacher" ? "รีเฟรช" : "รายงาน") +
-        '</span></button>' +
+        slot1 +
+        notificationItem +
+        '<button class="mobile-fab mobile-slot-3" id="mobile-fab" type="button" aria-label="' + esc(fabText) + '">' +
+          '<i data-lucide="' + fabIcon + '"></i><span>' + esc(fabText) + '</span></button>' +
         slot4 +
-        (S.user ? '<button class="mobile-nav-item mobile-slot-5" id="mobile-more" type="button"><span class="menu-icon-with-badge"><i data-lucide="menu"></i><b class="notification-badge hidden">0</b></span><span>เมนู</span></button>' : '<a class="mobile-nav-item mobile-slot-5" href="#login"><i data-lucide="log-in"></i><span>เข้าสู่ระบบ</span></a>') +
+        (S.user
+          ? '<button class="mobile-nav-item mobile-slot-5" id="mobile-more" type="button"><i data-lucide="menu"></i><span>เมนู</span></button>'
+          : '<a class="mobile-nav-item mobile-slot-5" href="#login"><i data-lucide="user-round"></i><span>เข้าสู่ระบบ</span></a>') +
       '</div>';
 
     const install = !isStandaloneApp()
@@ -577,6 +592,7 @@
 
     if ($("mobile-fab")) $("mobile-fab").onclick = mobileQuickAction;
     if ($("mobile-more")) $("mobile-more").onclick = mobileMoreMenu;
+    if ($("mobile-notification-btn")) $("mobile-notification-btn").onclick = notificationCenterModal;
     if ($("notification-btn")) $("notification-btn").onclick = notificationCenterModal;
 
     if (S.user) {
