@@ -1395,7 +1395,7 @@ function monthLastDay(month){
 }
 function activeDates(ins){ return new Set(ins.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ").map(i=>i.inspection_date)); }
 async function rewardRecords(env,ins,teamMap){
-  const cfg=await getAppSettings(env.DB),ad=activeDates(ins); ins=ins.filter(i=>ad.has(i.inspection_date)&&(!cfg.approvalEnabled||i.status!=="ตรวจแล้ว"||String(metaOf(i).approvalStatus||"")==="รับรองแล้ว")); const rewards=[],classes={},inspectors={};
+  const cfg=await getAppSettings(env.DB),ad=activeDates(ins); ins=ins.filter(i=>ad.has(i.inspection_date)&&(i.status!=="ตรวจแล้ว"||approvedForScoring(i,cfg))); const rewards=[],classes={},inspectors={};
   const add=async(ref,key,name,details)=>rewards.push({log_id:await digest(ref+"|"+key),timestamp:details.at||nowIso(),reference_id:ref,achievement:name,details_json:JSON.stringify(details)});
   for(const i of ins){ const m=metaOf(i); (classes[m.classId]||(classes[m.classId]=[])).push(i); for(const uid of inspectorIdsFrom(i,teamMap)){ const k=uid+"|"+i.inspection_date; (inspectors[k]||(inspectors[k]=[])).push(i); } }
   for(const [ref,list] of Object.entries(classes)){
@@ -1407,7 +1407,9 @@ async function rewardRecords(env,ins,teamMap){
 }
 async function rebuildRewards(env){ const {ins,teamMap}=await inspectionBundle(env.DB), desired=await rewardRecords(env,ins,teamMap), existing=await all(env.DB,"SELECT * FROM rewards_log"), old=new Map(existing.map(x=>[x.log_id,x.timestamp])); const stmts=[env.DB.prepare("DELETE FROM rewards_log")]; for(const r of desired) stmts.push(env.DB.prepare("INSERT INTO rewards_log(log_id,timestamp,reference_id,achievement,details_json) VALUES(?,?,?,?,?)").bind(r.log_id,old.get(r.log_id)||r.timestamp,r.reference_id,r.achievement,r.details_json)); await env.DB.batch(stmts); }
 function approvedForScoring(i,cfg){
-  return i.status==="ตรวจแล้ว" && (!cfg?.approvalEnabled || String(metaOf(i).approvalStatus||"")==="รับรองแล้ว");
+  if(i.status!=="ตรวจแล้ว")return false;
+  const status=String(metaOf(i).approvalStatus||"");
+  return !cfg?.approvalEnabled || status==="" || status==="รับรองแล้ว";
 }
 function leaderboard(ins,cfg=null){ const groups={}; ins.filter(i=>approvedForScoring(i,cfg)).forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,score:0});g.total++;g.score+=Number(i.score||0);}); return Object.values(groups).map(g=>({...g,avg:g.total?g.score/g.total:0})).sort((a,b)=>b.avg-a.avg||b.total-a.total||a.name.localeCompare(b.name,"th")); }
 async function monthly(env,allIns,month){ const cfg=await getAppSettings(env.DB),ad=activeDates(allIns), firstNext=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),1)), last=new Date(firstNext.getTime()-86400000).toISOString().slice(0,10), cutoff=last<thaiDay()?last:thaiDay(), expected=[...ad].filter(d=>d.startsWith(month)&&d<=cutoff).sort(),groups={}; allIns.filter(i=>i.inspection_date.startsWith(month)&&i.inspection_date<=cutoff).forEach(i=>{const m=metaOf(i),g=groups[m.classId]||(groups[m.classId]={id:m.classId,name:m.className,total:0,done:0,resolved:0,skipped:0,improve:0,days:new Set()}); if(!ad.has(i.inspection_date))return;g.total++;g.days.add(i.inspection_date);if(i.status==="ตรวจแล้ว"&&approvedForScoring(i,cfg)){g.done++;g.resolved++;if(Number(i.score)===1)g.improve++;}else if(i.status==="งดตรวจ"){g.skipped++;g.resolved++;}}); return Object.values(groups).map(g=>{const missingDays=expected.filter(d=>!g.days.has(d)).length,complete=expected.length>0&&g.total>0&&g.resolved===g.total&&missingDays===0;return{id:g.id,name:g.name,total:g.total,done:g.done,skipped:g.skipped,improve:g.improve,missingDays,inspectionDays:expected.length,provisional:last>=thaiDay(),medal:expected.length===0?"ไม่มีการตรวจในเดือนนี้":!complete?"ข้อมูลไม่ครบ":g.improve===0?"เหรียญทอง":g.improve<=cfg.certificateSilverMax?"เหรียญเงิน":g.improve<=cfg.certificateBronzeMax?"เหรียญทองแดง":"ไม่ผ่านเกณฑ์"};}); }
