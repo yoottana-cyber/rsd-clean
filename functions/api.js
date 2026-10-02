@@ -164,7 +164,7 @@ async function login(env,p) {
   const u=await db.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
   const c=parseJson(u?.password,{});
   assert(u && equalLoose(c.hash, await hmac(env,text(p.proof,200))), "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
-  await db.prepare("DELETE FROM sessions WHERE user_id=? OR expires_at<?").bind(u.user_id,Date.now()).run();
+  await db.prepare("DELETE FROM sessions WHERE expires_at<?").bind(Date.now()).run();
   const token=uuid()+uuid(), th=await digest(token), exp=Date.now()+(p.remember===true?REMEMBER_SESSION_MS:SESSION_MS);
   await db.prepare("INSERT INTO sessions(token_hash,user_id,expires_at,credential_hash,created_at) VALUES(?,?,?,?,?)")
     .bind(th,u.user_id,exp,await digest(u.password),Date.now()).run();
