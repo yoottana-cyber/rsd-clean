@@ -857,7 +857,7 @@ const adminTables = {
     const d=await rpc("executiveDashboard",{},true);
     if(seq!==S.seq)return;
     if(d.settings){S.config=d.settings;try{localStorage.setItem("rsd-config-cache",JSON.stringify(d.settings));}catch(e){}}
-    const t=d.todayStats||{},w=d.currentWeek||{},pw=d.previousWeek||{},m=d.currentMonth||{},pm=d.previousMonth||{},l=d.last30||{};
+    const t=d.todayStats||{},w=d.currentWeek||{},pw=d.previousWeek||{},m=d.currentMonth||{},pm=d.previousMonth||{},l=d.last30||{},labels=d.settings?.scoreLabels||S.config?.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
     const watch=d.watchAreas||[],leaders=d.leaders||[];
     const statusClass=!t.scheduled?"neutral":t.pending?"warning":"good";
     const statusText=!t.scheduled?"ไม่มีงานวันนี้":t.pending?"ยังมีงานรอตรวจ":"ตรวจครบแล้ว";
@@ -868,8 +868,8 @@ const adminTables = {
       '</section>'+
       '<div class="exec-kpi-grid">'+
         '<article class="exec-kpi"><span>คะแนนเฉลี่ย 30 วัน</span><b>'+execScore(l.averageScore)+'</b><small>จากคะแนนเต็ม 3</small></article>'+
-        '<article class="exec-kpi excellent"><span>ยอดเยี่ยม 30 วัน</span><b>'+execPct(l.excellentRate)+'</b><small>'+Number(l.excellent||0)+' จาก '+Number(l.done||0)+' ผลตรวจ</small></article>'+
-        '<article class="exec-kpi improve"><span>ปรับปรุง 30 วัน</span><b>'+execPct(l.improveRate)+'</b><small>'+Number(l.improve||0)+' ครั้ง</small></article>'+
+        '<article class="exec-kpi excellent"><span>'+esc(labels["3"])+' 30 วัน</span><b>'+execPct(l.excellentRate)+'</b><small>'+Number(l.excellent||0)+' จาก '+Number(l.done||0)+' ผลตรวจ</small></article>'+
+        '<article class="exec-kpi improve"><span>'+esc(labels["1"])+' 30 วัน</span><b>'+execPct(l.improveRate)+'</b><small>'+Number(l.improve||0)+' ครั้ง</small></article>'+
         '<article class="exec-kpi"><span>พื้นที่ต้องติดตาม</span><b>'+watch.length+'</b><small>มีผลระดับปรับปรุงใน 30 วัน</small></article>'+
       '</div>'+
       '<div class="exec-period-grid">'+
@@ -896,9 +896,9 @@ const adminTables = {
       '</div>'+
       '<section class="card exec-quality-card"><div class="exec-section-title"><div><span class="muted">วันนี้</span><h2>สัดส่วนผลประเมิน</h2></div><span class="muted">อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</span></div>'+
         '<div class="exec-quality-grid">'+
-          '<div class="excellent"><span>ยอดเยี่ยม</span><b>'+t.excellent+'</b></div>'+
-          '<div class="medium"><span>ปานกลาง</span><b>'+t.medium+'</b></div>'+
-          '<div class="improve"><span>ปรับปรุง</span><b>'+t.improve+'</b></div>'+
+          '<div class="excellent"><span>'+esc(labels["3"])+'</span><b>'+t.excellent+'</b></div>'+
+          '<div class="medium"><span>'+esc(labels["2"])+'</span><b>'+t.medium+'</b></div>'+
+          '<div class="improve"><span>'+esc(labels["1"])+'</span><b>'+t.improve+'</b></div>'+
           '<div class="pending"><span>รอตรวจ</span><b>'+t.pending+'</b></div>'+
         '</div>'+
       '</section>';
@@ -932,9 +932,9 @@ const adminTables = {
         data:{
           labels:months.map(x=>execMonthLabel(x.month)),
           datasets:[
-            {label:"ยอดเยี่ยม",data:months.map(x=>Number(x.excellent||0)),backgroundColor:"#86efac",borderRadius:5},
-            {label:"ปานกลาง",data:months.map(x=>Number(x.medium||0)),backgroundColor:"#fde68a",borderRadius:5},
-            {label:"ปรับปรุง",data:months.map(x=>Number(x.improve||0)),backgroundColor:"#fda4af",borderRadius:5}
+            {label:labels["3"],data:months.map(x=>Number(x.excellent||0)),backgroundColor:"#86efac",borderRadius:5},
+            {label:labels["2"],data:months.map(x=>Number(x.medium||0)),backgroundColor:"#fde68a",borderRadius:5},
+            {label:labels["1"],data:months.map(x=>Number(x.improve||0)),backgroundColor:"#fda4af",borderRadius:5}
           ]
         },
         options:{
