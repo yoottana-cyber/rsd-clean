@@ -913,3 +913,159 @@ tbody tr:hover td{background:#fbfefe}
   .device-icon{width:42px;height:42px}
   .onboarding-wrap h3{font-size:21px}
 }
+
+
+/* Daily report for classroom leaders */
+.daily-filter{
+  display:flex;
+  align-items:end;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.daily-filter .field{min-width:220px}
+.daily-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.daily-share-card{
+  width:min(920px,100%);
+  margin:0 auto;
+  overflow:hidden;
+  background:#fff;
+  border:1px solid #dcebed;
+  border-radius:26px;
+  box-shadow:0 18px 50px rgba(15,75,80,.10);
+}
+.daily-share-head{
+  display:flex;
+  align-items:center;
+  gap:18px;
+  padding:26px 28px;
+  color:#fff;
+  background:
+    radial-gradient(circle at 6% 10%,rgba(255,255,255,.18),transparent 12rem),
+    linear-gradient(135deg,#0f766e,#0891b2);
+}
+.daily-logo-box{
+  width:84px;height:84px;border-radius:22px;
+  display:grid;place-items:center;flex:0 0 auto;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 12px 28px rgba(0,0,0,.13)
+}
+.daily-logo-box img{width:72px;height:72px;object-fit:contain}
+.daily-share-head span{font-size:11px;letter-spacing:.08em;color:rgba(255,255,255,.82)}
+.daily-share-head h2{font-size:27px;line-height:1.3;margin:5px 0;color:#fff;font-weight:700}
+.daily-share-head p{margin:0;color:rgba(255,255,255,.9);font-size:14px}
+.daily-stat-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  padding:22px 24px 10px;
+}
+.daily-stat-grid>div{
+  min-height:105px;
+  display:flex;flex-direction:column;justify-content:center;
+  padding:15px 17px;
+  border-radius:18px;
+  background:#edf8f6;color:#0f766e
+}
+.daily-stat-grid span{font-size:12px;font-weight:500}
+.daily-stat-grid b{font-size:32px;line-height:1.1;margin-top:7px}
+.daily-stat-grid .excellent{background:#ecfdf5;color:#15803d}
+.daily-stat-grid .medium{background:#fff8e7;color:#a16207}
+.daily-stat-grid .improve{background:#fff1f2;color:#be123c}
+.daily-pending{
+  margin:2px 24px 10px;
+  padding:11px 14px;
+  display:flex;align-items:center;gap:8px;
+  border-radius:13px;
+  background:#fff9e9;color:#8a671b;border:1px solid #f6e2a8
+}
+.daily-pending svg{width:17px;height:17px}
+.daily-section{
+  margin:18px 24px 0;
+  border:1px solid #e5eef0;
+  border-radius:18px;
+  overflow:hidden
+}
+.daily-section h3{
+  display:flex;align-items:center;gap:9px;
+  margin:0;
+  padding:13px 15px;
+  font-size:16px;
+  font-weight:600;
+  background:#f8fbfc;
+  color:#385666
+}
+.daily-section h3>span{width:10px;height:10px;border-radius:50%;background:#94a3b8}
+.daily-section h3 b{margin-left:auto;font-size:13px;min-width:28px;height:28px;border-radius:999px;display:grid;place-items:center;background:#fff}
+.daily-section.excellent h3{background:#f0fdf4;color:#166534}
+.daily-section.excellent h3>span,.daily-dot.excellent{background:#22c55e}
+.daily-section.medium h3{background:#fffbeb;color:#92400e}
+.daily-section.medium h3>span,.daily-dot.medium{background:#f59e0b}
+.daily-section.improve h3{background:#fff1f2;color:#9f1239}
+.daily-section.improve h3>span,.daily-dot.improve{background:#f43f5e}
+.daily-section.pending h3{background:#f8fafc;color:#64748b}
+.daily-section.pending h3>span,.daily-dot.pending{background:#94a3b8}
+.daily-result-list{display:grid}
+.daily-result-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 12px;
+  align-items:center;
+  gap:12px;
+  padding:13px 15px;
+  border-top:1px solid #eef3f4
+}
+.daily-result-row:first-child{border-top:0}
+.daily-result-row div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.daily-result-row b{font-size:14px;color:#29495b}
+.daily-result-row span:not(.daily-dot){font-size:12px;color:#6e8492}
+.daily-result-row small{font-size:11px;color:#8c6a34;line-height:1.5}
+.daily-dot{width:10px;height:10px;border-radius:50%}
+.daily-empty{padding:18px;text-align:center;color:#94a3b8;font-size:12px}
+.daily-share-footer{
+  margin-top:20px;
+  padding:15px 24px 18px;
+  text-align:center;
+  color:#8797a3;
+  font-size:11px;
+  border-top:1px solid #eef3f4
+}
+.daily-holiday{
+  margin:28px;
+  padding:42px 20px;
+  text-align:center;
+  border-radius:22px;
+  background:#f0fdfa;
+  color:#0f766e
+}
+.daily-holiday svg{width:44px;height:44px;margin:auto}
+.daily-holiday h3{font-size:24px;margin:12px 0 5px}
+.daily-holiday p{margin:0;color:#608087}
+
+@media(max-width:760px){
+  .daily-filter{display:grid;grid-template-columns:1fr}
+  .daily-filter .field{min-width:0}
+  .daily-filter .btn{width:100%}
+  .daily-actions{display:grid;grid-template-columns:1fr 1fr}
+  .daily-actions .btn:first-child{grid-column:1 / -1}
+  .daily-share-card{border-radius:20px}
+  .daily-share-head{padding:20px 17px;gap:12px}
+  .daily-logo-box{width:62px;height:62px;border-radius:17px}
+  .daily-logo-box img{width:54px;height:54px}
+  .daily-share-head h2{font-size:20px}
+  .daily-share-head p{font-size:12px}
+  .daily-share-head span{font-size:9px}
+  .daily-stat-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    padding:16px 14px 7px;
+    gap:9px
+  }
+  .daily-stat-grid>div{min-height:88px;padding:12px 13px}
+  .daily-stat-grid b{font-size:27px}
+  .daily-pending{margin:2px 14px 8px}
+  .daily-section{margin:14px 14px 0}
+  .daily-share-footer{padding-left:14px;padding-right:14px}
+  .daily-holiday{margin:18px 14px;padding:34px 14px}
+}
