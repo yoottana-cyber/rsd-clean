@@ -24,6 +24,10 @@ export async function onRequest(context) {
     const payload = input?.payload || {};
     const token = String(input?.token || "");
     const data = await dispatch(env, action, payload, token, request);
+    if (!["challenge","login","publicDashboard"].includes(action)) {
+      const job = autoBackupIfDue(env).catch(e => console.error("AUTO_BACKUP_FAILED", e));
+      if (typeof context.waitUntil === "function") context.waitUntil(job);
+    }
     return jsonResponse({ ok: true, data }, 200, headers);
   } catch (err) {
     return jsonResponse({ ok: false, error: err?.message || String(err) }, 200, headers);
@@ -147,8 +151,6 @@ async function dispatch(env, action, p, token, request) {
     try { await writeAudit(env,u,action,p,result); }
     catch (e) { console.error("AUDIT_WRITE_FAILED",e); }
   }
-  try { await autoBackupIfDue(env); }
-  catch (e) { console.error("AUTO_BACKUP_FAILED",e); }
   return result;
 }
 
@@ -243,9 +245,8 @@ async function backupExport(env,u){role(u,["Admin"]);return buildBackupBundle(en
 async function autoBackupIfDue(env){
   if(!env.GAS_DRIVE_URL||!env.DRIVE_GATEWAY_KEY)return;
   const day=thaiDay(),key="last_auto_backup_day";
-  const old=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();
-  if(String(old?.value||"")===day)return;
-  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind(key,day).run();
+  const lock=await env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE settings.value<>excluded.value").bind(key,day).run();
+  if(!Number(lock?.meta?.changes||0))return;
   try{
     const bundle=await buildBackupBundle(env),content=JSON.stringify(bundle),filename="RSD-Clean-D1-auto-"+day+".json";
     const saved=await gasDrive(env,"saveBackup",{filename,content});
