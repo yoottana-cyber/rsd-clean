@@ -10,6 +10,7 @@ let autoBackupCheckedDay = "";
 let systemEventsReady = false;
 let systemEventsCleanupDay = "";
 const rateBuckets = new Map();
+const rateEventLast = new Map();
 let rateSweepAt = 0;
 
 function clientAddress(request){
@@ -59,6 +60,16 @@ function enforceRateLimit(request,action,payload,token){
     return;
   }
   consumeRateBucket("anon:"+ip,60,60000);
+}
+function shouldLogRateEvent(request,action){
+  const key=clientAddress(request)+"|"+String(action||"unknown");
+  const now=Date.now(),last=Number(rateEventLast.get(key)||0);
+  if(now-last<60000)return false;
+  rateEventLast.set(key,now);
+  if(rateEventLast.size>2000){
+    for(const [k,v] of rateEventLast){if(now-Number(v)>5*60000)rateEventLast.delete(k);}
+  }
+  return true;
 }
 function expectedClientError(message){
   return /SESSION_EXPIRED|ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง|วันที่ไม่ถูกต้อง|ช่วงวันที่ไม่ถูกต้อง|ไม่มีสิทธิ์|ไม่พบรายการ|ไม่พบ API|ไม่ถูกต้อง|ต้องยืนยัน|กรุณา|เลือก|ซ้ำ|ว่าง|หมดอายุ|ไม่ได้อยู่ในงาน|แก้ไขได้เฉพาะงานวันนี้|ข้อมูลถูกเปลี่ยนแล้ว|คำขอใหญ่เกินไป|รองรับ JPG|รูปภาพต้องไม่เกิน/i.test(String(message||""));
@@ -111,7 +122,7 @@ export async function onRequest(context) {
     return jsonResponse({ ok: true, data }, 200, headers);
   } catch (err) {
     const message=err?.message||String(err),duration=Date.now()-started;
-    if(err?.rateLimited){
+    if(err?.rateLimited && shouldLogRateEvent(request,action)){
       background(context,writeSystemEvent(env,{
         eventType:"security",
         action:action||"unknown",
