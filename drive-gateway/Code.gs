@@ -10,7 +10,7 @@ function doPost(e){
     const p=PropertiesService.getScriptProperties();
     if(!body.gatewayKey || body.gatewayKey!==p.getProperty('DRIVE_GATEWAY_KEY')) throw Error('DRIVE_GATEWAY_DENIED');
     const action=String(body.action||''), x=body.payload||{};
-    const handlers={uploadStart:()=>uploadStart_(x),verifyUpload:()=>verifyUpload_(x),consumeUpload:()=>consumeUpload_(x),photo:()=>photo_(x),trashFiles:()=>trashFiles_(x)};
+    const handlers={uploadStart:()=>uploadStart_(x),verifyUpload:()=>verifyUpload_(x),consumeUpload:()=>consumeUpload_(x),photo:()=>photo_(x),trashFiles:()=>trashFiles_(x),saveBackup:()=>saveBackup_(x)};
     if(!handlers[action]) throw Error('ไม่พบ Drive API');
     return out_({ok:true,data:handlers[action]()});
   }catch(err){console.error(err);return out_({ok:false,error:err.message||String(err)});}
@@ -53,11 +53,28 @@ function photo_(p){
 function trashFiles_(p){
   const ids=Array.isArray(p.fileIds)?p.fileIds.slice(0,20):[];ids.forEach(id=>{try{DriveApp.getFileById(String(id)).setTrashed(true);}catch(e){console.warn(e.message)}});return true;
 }
+function backupFolder_(){
+  const p=props_();let id=p.getProperty('BACKUP_FOLDER_ID');
+  if(!id){id=DriveApp.createFolder('RSD-Clean-D1-Backups').getId();p.setProperty('BACKUP_FOLDER_ID',id);}
+  return DriveApp.getFolderById(id);
+}
+function saveBackup_(p){
+  const content=String(p.content||''),name=String(p.filename||'RSD-Clean-D1-backup.json').replace(/[^A-Za-z0-9._-]/g,'_');
+  if(!content||content.length>25*1024*1024)throw Error('Backup ว่างหรือใหญ่เกิน 25 MB');
+  const folder=backupFolder_(),blob=Utilities.newBlob(content,'application/json',name),file=folder.createFile(blob);
+  const files=[],it=folder.getFiles();
+  while(it.hasNext())files.push(it.next());
+  files.sort((a,b)=>b.getDateCreated().getTime()-a.getDateCreated().getTime());
+  files.slice(30).forEach(f=>{try{f.setTrashed(true);}catch(e){console.warn(e.message);}});
+  return {fileId:file.getId(),name:file.getName(),url:file.getUrl(),size:blob.getBytes().length,kept:Math.min(files.length,30)};
+}
 function driveGatewaySetup(){
   const p=props_();
   if(!p.getProperty('DRIVE_GATEWAY_KEY'))p.setProperty('DRIVE_GATEWAY_KEY',Utilities.getUuid()+Utilities.getUuid());
   if(!p.getProperty('PHOTO_FOLDER_ID'))p.setProperty('PHOTO_FOLDER_ID',DriveApp.createFolder('RSD-Clean-D1-Photos').getId());
+  if(!p.getProperty('BACKUP_FOLDER_ID'))p.setProperty('BACKUP_FOLDER_ID',DriveApp.createFolder('RSD-Clean-D1-Backups').getId());
   console.log('DRIVE_GATEWAY_KEY='+p.getProperty('DRIVE_GATEWAY_KEY'));
   console.log('PHOTO_FOLDER_ID='+p.getProperty('PHOTO_FOLDER_ID'));
+  console.log('BACKUP_FOLDER_ID='+p.getProperty('BACKUP_FOLDER_ID'));
   console.log('Deploy เป็น Web app: Execute as Me / Anyone แล้วนำ URL /exec ไปตั้ง GAS_DRIVE_URL ใน Cloudflare');
 }
