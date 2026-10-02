@@ -83,7 +83,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id TEXT NOT NULL,
   expires_at INTEGER NOT NULL,
   credential_hash TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  device_id TEXT NOT NULL DEFAULT '',
+  device_label TEXT NOT NULL DEFAULT '',
+  last_seen INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at);
