@@ -561,7 +561,7 @@
           (S.user?.Role === "Inspector" ? "สแกน" : S.user?.Role === "Admin" ? "เพิ่ม" : S.user?.Role === "Teacher" ? "รีเฟรช" : "รายงาน") +
         '</span></button>' +
         slot4 +
-        (S.user ? '<button class="mobile-nav-item mobile-slot-5" id="mobile-more" type="button"><i data-lucide="menu"></i><span>เมนู</span></button>' : '<a class="mobile-nav-item mobile-slot-5" href="#login"><i data-lucide="log-in"></i><span>เข้าสู่ระบบ</span></a>') +
+        (S.user ? '<button class="mobile-nav-item mobile-slot-5" id="mobile-more" type="button"><span class="menu-icon-with-badge"><i data-lucide="menu"></i><b class="notification-badge hidden">0</b></span><span>เมนู</span></button>' : '<a class="mobile-nav-item mobile-slot-5" href="#login"><i data-lucide="log-in"></i><span>เข้าสู่ระบบ</span></a>') +
       '</div>';
 
     const install = !isStandaloneApp()
