@@ -140,3 +140,17 @@ CREATE TABLE IF NOT EXISTS recycle_bin (
 );
 CREATE INDEX IF NOT EXISTS idx_recycle_expires ON recycle_bin(expires_at);
 CREATE INDEX IF NOT EXISTS idx_recycle_deleted ON recycle_bin(deleted_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS system_events (
+  event_id TEXT PRIMARY KEY,
+  timestamp TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  message TEXT NOT NULL DEFAULT '',
+  client_hash TEXT NOT NULL DEFAULT '',
+  details_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_system_events_timestamp ON system_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_system_events_type_time ON system_events(event_type, timestamp DESC);
