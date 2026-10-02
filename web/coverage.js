@@ -73,7 +73,11 @@ async function appSettingsModal(){
       '<form id="app-settings-form">'+
         '<div class="coverage-settings-grid">'+
           '<div class="field"><label>ชื่อโรงเรียน</label><input name="schoolName" maxlength="200" value="'+esc(cfg.schoolName||"")+'" required></div>'+
+          '<div class="field"><label>URL โลโก้โรงเรียน</label><input name="schoolLogoUrl" maxlength="500" value="'+esc(cfg.schoolLogoUrl||"/school-logo")+'" placeholder="/school-logo"></div>'+
           '<div class="field"><label>ข้อความท้ายรายงาน</label><input name="reportFooter" maxlength="300" value="'+esc(cfg.reportFooter||"")+'"></div>'+
+          '<div class="field"><label>ชื่อระดับ 3 คะแนน</label><input name="score3" maxlength="50" value="'+esc(cfg.scoreLabels?.["3"]||"ยอดเยี่ยม")+'"></div>'+
+          '<div class="field"><label>ชื่อระดับ 2 คะแนน</label><input name="score2" maxlength="50" value="'+esc(cfg.scoreLabels?.["2"]||"ปานกลาง")+'"></div>'+
+          '<div class="field"><label>ชื่อระดับ 1 คะแนน</label><input name="score1" maxlength="50" value="'+esc(cfg.scoreLabels?.["1"]||"ปรับปรุง")+'"></div>'+
           '<div class="field"><label>เวลาเริ่มตรวจ</label><input name="inspectionStart" type="time" value="'+esc(cfg.inspectionStart||"07:30")+'" required></div>'+
           '<div class="field"><label>เวลาสิ้นสุดการตรวจ</label><input name="inspectionEnd" type="time" value="'+esc(cfg.inspectionEnd||"16:30")+'" required></div>'+
           '<div class="field"><label>เก็บถังขยะ (วัน)</label><input name="recycleDays" type="number" min="1" max="180" value="'+Number(cfg.recycleDays||30)+'"></div>'+
@@ -90,7 +94,9 @@ async function appSettingsModal(){
     $("app-settings-form").onsubmit=async e=>{
       e.preventDefault();const f=e.target.elements;
       const settings={
-        schoolName:f.schoolName.value,reportFooter:f.reportFooter.value,inspectionStart:f.inspectionStart.value,inspectionEnd:f.inspectionEnd.value,
+        schoolName:f.schoolName.value,schoolLogoUrl:f.schoolLogoUrl.value,reportFooter:f.reportFooter.value,
+        scoreLabels:{"1":f.score1.value,"2":f.score2.value,"3":f.score3.value},
+        inspectionStart:f.inspectionStart.value,inspectionEnd:f.inspectionEnd.value,
         recycleDays:Number(f.recycleDays.value),certificateSilverMax:Number(f.certificateSilverMax.value),certificateBronzeMax:Number(f.certificateBronzeMax.value),
         approvalEnabled:f.approvalEnabled.checked,offlineEnabled:f.offlineEnabled.checked,
         skipReasons:f.skipReasons.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean)
@@ -175,7 +181,16 @@ async function renderHistoryHub(seq){
   };
   $("history-type").onchange=()=>{setIds();loadCoverageHistory().catch(error);};
   $("history-filter").onsubmit=e=>{e.preventDefault();loadCoverageHistory().catch(error);};
-  setIds();icons();
+  setIds();
+  try{
+    const pref=JSON.parse(sessionStorage.getItem("rsd-history-prefill")||"null");
+    if(pref&&types.includes(pref.type)){
+      $("history-type").value=pref.type;setIds();
+      if([...$("history-id").options].some(o=>o.value===pref.id))$("history-id").value=pref.id;
+    }
+    sessionStorage.removeItem("rsd-history-prefill");
+  }catch(e){}
+  icons();
   if($("history-id").value)await loadCoverageHistory(seq);
 }
 function coverageShiftDay(date,offset){const d=new Date(date+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+offset);return d.toISOString().slice(0,10);}
@@ -268,7 +283,7 @@ async function downloadCoverageXlsx(){
 function coverageExportHtml(d){
   const cfg=d.settings||{},rows=d.rows||[];
   return '<div class="coverage-pdf-report" id="coverage-pdf-report">'+
-    '<div class="coverage-pdf-head"><img src="/school-logo"><div><h1>รายงานผลการตรวจเขตพื้นที่</h1><h2>'+esc(cfg.schoolName||"โรงเรียนรัษฎา")+'</h2><p>'+coverageDateText(d.start)+' – '+coverageDateText(d.end)+'</p></div></div>'+
+    '<div class="coverage-pdf-head"><img src="'+esc(cfg.schoolLogoUrl||"/school-logo")+'" onerror="this.onerror=null;this.src=\'/school-logo\'"><div><h1>รายงานผลการตรวจเขตพื้นที่</h1><h2>'+esc(cfg.schoolName||"โรงเรียนรัษฎา")+'</h2><p>'+coverageDateText(d.start)+' – '+coverageDateText(d.end)+'</p></div></div>'+
     '<table><thead><tr><th>วันที่</th><th>ห้องเรียน</th><th>พื้นที่</th><th>สถานะ</th><th>ระดับ</th><th>คะแนน</th><th>หมายเหตุ/เหตุผลงดตรวจ</th><th>รับรอง</th></tr></thead><tbody>'+
     rows.map(x=>'<tr><td>'+esc(x["วันที่"])+'</td><td>'+esc(x["ห้องเรียน"])+'</td><td>'+esc(x["พื้นที่"])+'</td><td>'+esc(x["สถานะ"])+'</td><td>'+esc(x["ระดับ"])+'</td><td>'+esc(x["คะแนน"])+'</td><td>'+esc(x["หมายเหตุ"]||x["เหตุผลงดตรวจ"]||"")+'</td><td>'+esc(x["สถานะรับรอง"]||"")+'</td></tr>').join("")+
     '</tbody></table><footer>'+esc(cfg.reportFooter||"ข้อมูลจากระบบ RSD Clean")+'</footer></div>';
@@ -289,3 +304,10 @@ async function downloadCoveragePdf(){
     toast("สร้างไฟล์ PDF แล้ว");
   }catch(e){error(e);}finally{wrap?.remove();busy(false);}
 }
+
+
+document.addEventListener("click",(e)=>{
+  const el=e.target.closest("[data-history-id][data-history-type]");
+  if(!el)return;
+  try{sessionStorage.setItem("rsd-history-prefill",JSON.stringify({type:el.dataset.historyType,id:el.dataset.historyId}));}catch(x){}
+});
