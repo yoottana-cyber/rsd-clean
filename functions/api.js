@@ -642,11 +642,10 @@ async function restoreTrash(env,u,p){
     assert(await db.prepare("SELECT 1 x FROM areas WHERE area_id=?").bind(String(x.AreaID)).first(),"พื้นที่เดิมไม่มีอยู่แล้ว");
     assert(!(await db.prepare("SELECT 1 x FROM assignments WHERE assignment_id=? OR (user_id=? AND area_id=?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID)).first()),"มีงานมอบหมายนี้อยู่แล้ว");
     await db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID),String(x.Days||"1,2,3,4,5"),now,now).run();
-    await invalidateToday(env);
-    await ensureToday(env);
   }else throw Error("ประเภทข้อมูลในถังขยะไม่รองรับ");
   await db.prepare("DELETE FROM recycle_bin WHERE recycle_id=?").bind(r.recycle_id).run();
   await invalidateToday(env);
+  if(type==="Assignments")await ensureToday(env);
   return{entityType:type,entityId:String(r.entity_id)};
 }
 async function purgeTrash(env,u,p){
