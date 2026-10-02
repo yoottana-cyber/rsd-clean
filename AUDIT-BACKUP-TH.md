@@ -77,3 +77,29 @@ Audit Log ไม่บันทึก:
 - password proof
 - credential
 - session token
+
+
+## Restore จาก Backup
+
+หน้า Admin → **สำรองและกู้คืน**
+
+มี 3 ทางเลือก:
+
+- **Backup ไป Google Drive ตอนนี้** — สร้าง JSON จาก D1 และเก็บในโฟลเดอร์ Backup
+- **ดาวน์โหลด Backup ลงเครื่อง** — ดาวน์โหลดไฟล์ JSON มาเก็บเอง
+- **กู้คืนจากไฟล์ที่เลือก** — แทนที่ข้อมูล D1 ปัจจุบันด้วยข้อมูลในไฟล์ Backup
+
+ขั้นตอน Restore:
+
+1. เลือกไฟล์ `RSD-Clean-D1-backup-*.json` หรือ Backup อัตโนมัติที่ดาวน์โหลดจาก Google Drive
+2. ระบบตรวจรูปแบบไฟล์และแสดงจำนวนข้อมูลก่อน
+3. พิมพ์ `RESTORE` เพื่อยืนยัน
+4. ระบบสร้าง **Safety Backup ของ D1 ปัจจุบันไป Google Driveก่อนทุกครั้ง**
+5. จึงเริ่มกู้คืน users, classrooms, areas, assignments, inspections, inspector teams, rewards, holidays, settings และ audit log
+6. Session ปัจจุบันทั้งหมดจะถูกยกเลิก และ Admin ต้อง Login ใหม่หลัง Restore
+
+หากสร้าง Safety Backup ไม่สำเร็จ ระบบจะ **ไม่เริ่ม Restore**
+
+รูปหลักฐานใน Google Drive ไม่ถูกลบหรือคัดลอกใหม่ เพราะ Backup ของ D1 เก็บ Drive file ID เดิมไว้
+
+> ควรเลือกไฟล์จากวันที่ระบบยังทำงานปกติ และไม่ควรแก้ JSON ด้วยมือก่อน Restore
