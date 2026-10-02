@@ -1610,6 +1610,7 @@ async function dailyReport(env,u,date){
     done:done.length,
     pending:isHoliday?0:items.filter(x=>x.Status==="รอตรวจ").length,
     skipped:items.filter(x=>x.Status==="งดตรวจ").length,
+    approvalPending:items.filter(x=>String(x.ApprovalStatus||"")==="รอรับรอง").length,
     counts,
     items,
     settings:await getAppSettings(db),
