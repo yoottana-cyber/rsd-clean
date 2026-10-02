@@ -456,7 +456,8 @@ async function buildBackupBundle(env){
     ["holidays","SELECT * FROM holidays ORDER BY holiday_date"],
     ["settings","SELECT * FROM settings ORDER BY key"],
     ["audit_log","SELECT * FROM audit_log ORDER BY timestamp,audit_id"],
-    ["recycle_bin","SELECT * FROM recycle_bin ORDER BY deleted_at,recycle_id"]
+    ["recycle_bin","SELECT * FROM recycle_bin ORDER BY deleted_at,recycle_id"],
+    ["duty_overrides","SELECT * FROM duty_overrides ORDER BY override_date,override_id"]
   ];
   const tables={};
   for(const [name,sql] of specs)tables[name]=await all(env.DB,sql);
@@ -482,6 +483,7 @@ function backupArrays(b){
   for(const name of names){assert(Array.isArray(b.tables[name]),"Backup ขาดตาราง "+name);t[name]=b.tables[name];}
   t.audit_log=Array.isArray(b.tables.audit_log)?b.tables.audit_log:[];
   t.recycle_bin=Array.isArray(b.tables.recycle_bin)?b.tables.recycle_bin:[];
+  t.duty_overrides=Array.isArray(b.tables.duty_overrides)?b.tables.duty_overrides:[];
   return t;
 }
 function uniqueBackup(rows,key,label,transform=v=>String(v??"")){
@@ -508,6 +510,7 @@ function validateBackupBundle(b){
   uniqueBackup(t.settings,"key","settings");
   if(t.audit_log.length)uniqueBackup(t.audit_log,"audit_id","audit_log");
   if(t.recycle_bin.length)uniqueBackup(t.recycle_bin,"recycle_id","recycle_bin");
+  if(t.duty_overrides.length)uniqueBackup(t.duty_overrides,"override_id","duty_overrides");
   const pairs=new Set();
   for(const r of t.inspection_inspectors){
     const k=String(r?.inspection_id||"")+"|"+String(r?.user_id||"");
@@ -559,7 +562,8 @@ async function restoreBackup(env,u,p){
     db.prepare("DELETE FROM holidays"),
     db.prepare("DELETE FROM settings"),
     db.prepare("DELETE FROM audit_log"),
-    db.prepare("DELETE FROM recycle_bin")
+    db.prepare("DELETE FROM recycle_bin"),
+    db.prepare("DELETE FROM duty_overrides")
   ]);
 
   const now=nowIso();
@@ -584,6 +588,9 @@ async function restoreBackup(env,u,p){
   await ensureRecycleTable(db);
   await runDbBatches(db,t.recycle_bin.map(r=>db.prepare("INSERT INTO recycle_bin(recycle_id,deleted_at,deleted_by_user_id,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at) VALUES(?,?,?,?,?,?,?,?,?)")
     .bind(String(r.recycle_id),String(r.deleted_at),String(r.deleted_by_user_id||""),String(r.deleted_by_name||""),String(r.entity_type),String(r.entity_id),String(r.label||""),String(r.snapshot_json||"{}"),Number(r.expires_at||Date.now()+30*24*3600000))));
+  await ensureDutyOverridesTable(db);
+  await runDbBatches(db,t.duty_overrides.map(r=>db.prepare("INSERT INTO duty_overrides(override_id,override_date,area_id,replace_user_id,substitute_user_id,reason,created_by_id,created_by_name,created_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(String(r.override_id),String(r.override_date),String(r.area_id),String(r.replace_user_id||""),String(r.substitute_user_id),String(r.reason||""),String(r.created_by_id||""),String(r.created_by_name||""),String(r.created_at||now))));
 
   const restoredAt=nowIso();
   await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_restore_at',?),('last_restore_prebackup_file_id',?),('last_auto_backup_day',?)")
@@ -834,7 +841,7 @@ function recycleLabel(table,row){
 }
 async function putRecycle(db,u,table,id,snapshot){
   await cleanRecycle(db);
-  const deletedAt=nowIso(),expiresAt=Date.now()+30*24*3600000;
+  const cfg=await getAppSettings(db),deletedAt=nowIso(),expiresAt=Date.now()+Number(cfg.recycleDays||30)*24*3600000;
   await db.prepare("INSERT INTO recycle_bin(recycle_id,deleted_at,deleted_by_user_id,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at) VALUES(?,?,?,?,?,?,?,?,?)")
     .bind(uuid(),deletedAt,String(u.user_id||""),String(u.full_name||""),String(table),String(id),recycleLabel(table,snapshot),JSON.stringify(snapshot),expiresAt).run();
 }
@@ -1104,6 +1111,24 @@ async function ensureToday(env) {
     WHERE u.role='Inspector' ORDER BY a.area_id,u.full_name`);
   const byArea=new Map();
   for(const r of rows){if(!dutyDays(r.days).includes(w))continue;if(!byArea.has(r.area_id))byArea.set(r.area_id,[]);byArea.get(r.area_id).push(r);}
+  await ensureDutyOverridesTable(db);
+  const overrides=await all(db,`SELECT d.*,su.full_name substitute_name,a.area_name,a.responsible_classroom_id,c.class_name
+    FROM duty_overrides d
+    JOIN users su ON su.user_id=d.substitute_user_id
+    JOIN areas a ON a.area_id=d.area_id
+    JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id
+    WHERE d.override_date=? ORDER BY d.area_id,d.created_at`,date);
+  for(const o of overrides){
+    let team=byArea.get(o.area_id)||[];
+    if(o.replace_user_id)team=team.filter(x=>String(x.user_id)!==String(o.replace_user_id));
+    if(!team.some(x=>String(x.user_id)===String(o.substitute_user_id))){
+      team.push({
+        area_id:o.area_id,area_name:o.area_name,responsible_classroom_id:o.responsible_classroom_id,class_name:o.class_name,
+        user_id:o.substitute_user_id,full_name:o.substitute_name,assignment_id:"override:"+o.override_id,days:String(w)
+      });
+    }
+    byArea.set(o.area_id,team);
+  }
   let existing=await all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date);
   const map=new Map(existing.map(i=>[i.area_id,i])),create=[];
   for(const [areaId,team] of byArea){
@@ -1131,7 +1156,7 @@ async function ensureToday(env) {
 function inspectionDisplay(i, inspectors=[]) {
   const m=parseJson(i.meta_json,{}); m.note=i.note||m.note||""; m.version=Number(i.version||0); m.completedAt=i.completed_at||m.completedAt||"";
   if(inspectors.length){ m.inspectorIds=inspectors.map(x=>x.user_id); m.inspectorNames=inspectors.map(x=>x.user_name); }
-  return { InspectionID:i.inspection_id,AssignmentID:"",InspectionDate:i.inspection_date,Status:i.status,Rating:i.rating,Score:Number(i.score||0),Notes:i.note||"",PhotoLinks:parseJson(i.photo_links_json,[]).map(id=>({id})),meta:m };
+  return { InspectionID:i.inspection_id,AssignmentID:"",InspectionDate:i.inspection_date,Status:i.status,Rating:i.rating,Score:Number(i.score||0),Notes:i.note||"",PhotoLinks:parseJson(i.photo_links_json,[]).map(id=>({id})),ApprovalStatus:String(m.approvalStatus||""),ReviewNote:String(m.reviewNote||""),SkipReason:String(m.skipReason||""),meta:m };
 }
 async function displayOne(db,i){ const team=await all(db,"SELECT user_id,user_name FROM inspection_inspectors WHERE inspection_id=? ORDER BY user_name",i.inspection_id); return inspectionDisplay(i,team); }
 async function ownedTask(env,u,id){ role(u,["Inspector"]); const db=env.DB; const i=await db.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_id=? AND ii.user_id=?`).bind(id,u.user_id).first(); assert(i,"งานนี้ไม่ใช่งานที่ได้รับมอบหมาย"); assert(i.inspection_date===thaiDay(),"แก้ไขได้เฉพาะงานวันนี้"); return i; }
@@ -1265,17 +1290,34 @@ async function gasDrive(env,action,payload){
   const raw=await res.text(); let r; try{r=JSON.parse(raw);}catch{throw Error("Drive gateway ตอบกลับไม่ใช่ JSON");} if(!r.ok) throw Error(r.error||"Drive gateway error"); return r.data;
 }
 async function saveInspection(env,u,p){
-  const db=env.DB,i=await ownedTask(env,u,p.id); assert(Number(p.version)===Number(i.version),"ข้อมูลถูกเปลี่ยนแล้ว กรุณาโหลดใหม่"); assert(["รอตรวจ","ตรวจแล้ว"].includes(p.status),"สถานะไม่ถูกต้อง"); const score=p.status==="ตรวจแล้ว"?Number(p.score):0; assert((Number.isInteger(score)&&score>=1&&score<=3)||p.status==="รอตรวจ","เลือกระดับประเมิน");
+  const db=env.DB,i=await ownedTask(env,u,p.id),cfg=await getAppSettings(db);
+  assert(Number(p.version)===Number(i.version),"ข้อมูลถูกเปลี่ยนแล้ว กรุณาโหลดใหม่");
+  assert(["รอตรวจ","ตรวจแล้ว","งดตรวจ"].includes(p.status),"สถานะไม่ถูกต้อง");
+  const score=p.status==="ตรวจแล้ว"?Number(p.score):0;
+  assert((Number.isInteger(score)&&score>=1&&score<=3)||p.status!=="ตรวจแล้ว","เลือกระดับประเมิน");
+  const skipReason=p.status==="งดตรวจ"?text(p.skipReason||"",120):"";
+  if(p.status==="งดตรวจ")assert(skipReason&&cfg.skipReasons.includes(skipReason),"เลือกเหตุผลงดตรวจ");
   const oldPhotos=parseJson(i.photo_links_json,[]); let photos=oldPhotos;
   if(p.uploadTicket){ const t=await db.prepare("SELECT * FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).first(); assert(t&&t.user_id===u.user_id&&t.inspection_id===i.inspection_id&&Number(t.expires_at)>Date.now(),"สิทธิ์อัปโหลดหมดอายุ"); await gasDrive(env,"verifyUpload",{ticket:t.ticket,fileId:t.file_id,size:Number(t.size),mime:t.mime,inspectionId:i.inspection_id}); photos=[t.file_id]; }
   else if(p.removePhoto===true) photos=[];
-  const stamp=nowIso(), meta=parseJson(i.meta_json,{}); meta.note=text(p.notes,2000); meta.version=Number(i.version)+1; meta.completedAt=score?stamp:""; meta.completedById=score?u.user_id:""; meta.completedByName=score?u.full_name:"";
+  const stamp=nowIso(), meta=parseJson(i.meta_json,{});
+  meta.note=text(p.notes,2000); meta.version=Number(i.version)+1; meta.skipReason=skipReason;
+  const completed=p.status==="ตรวจแล้ว"||p.status==="งดตรวจ";
+  meta.completedAt=completed?stamp:""; meta.completedById=completed?u.user_id:""; meta.completedByName=completed?u.full_name:"";
+  meta.reviewNote="";
+  if(completed&&cfg.approvalEnabled){
+    meta.approvalStatus="รอรับรอง";meta.approvedById="";meta.approvedByName="";meta.approvedAt="";
+  }else if(completed){
+    meta.approvalStatus="รับรองแล้ว";meta.approvedById="system";meta.approvedByName="รับรองอัตโนมัติ";meta.approvedAt=stamp;
+  }else{
+    meta.approvalStatus="";
+  }
   await db.prepare(`UPDATE inspections SET status=?,rating=?,score=?,note=?,meta_json=?,photo_links_json=?,version=?,completed_at=?,completed_by_id=?,completed_by_name=?,updated_at=? WHERE inspection_id=?`)
-    .bind(p.status,["","ปรับปรุง","ปานกลาง","ยอดเยี่ยม"][score],score,meta.note,JSON.stringify(meta),JSON.stringify(photos),meta.version,meta.completedAt,meta.completedById,meta.completedByName,stamp,i.inspection_id).run();
+    .bind(p.status,score?["","ปรับปรุง","ปานกลาง","ยอดเยี่ยม"][score]:"",score,meta.note,JSON.stringify(meta),JSON.stringify(photos),meta.version,meta.completedAt,meta.completedById,meta.completedByName,stamp,i.inspection_id).run();
   if(p.uploadTicket) { await db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).run(); gasDrive(env,"consumeUpload",{ticket:String(p.uploadTicket)}).catch(()=>{}); }
   const trash=oldPhotos.filter(id=>!photos.includes(id)); if(trash.length&&env.GAS_DRIVE_URL) gasDrive(env,"trashFiles",{fileIds:trash}).catch(()=>{});
   const updated=await db.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(i.inspection_id).first();
-  return {inspection:await displayOne(db,updated),warning:""};
+  return {inspection:await displayOne(db,updated),warning:cfg.approvalEnabled&&completed?"บันทึกแล้ว · รอผู้รับรองผล":""};
 }
 async function photo(env,u,p){ const i=await env.DB.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(String(p.inspectionId||"")).first(); assert(i&&await visible(env,u,i),"ไม่มีสิทธิ์ดูรูป"); const ids=parseJson(i.photo_links_json,[]); assert(ids.includes(String(p.fileId||"")),"ไม่พบรูปในรายการ"); return gasDrive(env,"photo",{fileId:String(p.fileId)}); }
 
