@@ -438,6 +438,120 @@
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
     reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
   };
+  function getDeviceIdentity(){
+    let id="";
+    try{
+      id=localStorage.getItem("rsd-device-id")||"";
+      if(!id){
+        id=(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(16).slice(2));
+        localStorage.setItem("rsd-device-id",id);
+      }
+    }catch(e){id="device-"+Date.now();}
+    const ua=navigator.userAgent||"";
+    let device=/iPhone/i.test(ua)?"iPhone":/iPad/i.test(ua)?"iPad":/Android/i.test(ua)?"Android":/Windows/i.test(ua)?"Windows":/Macintosh|Mac OS X/i.test(ua)?"Mac":"อุปกรณ์";
+    let browser=/CriOS|Chrome/i.test(ua)?"Chrome":/FxiOS|Firefox/i.test(ua)?"Firefox":/EdgiOS|Edg/i.test(ua)?"Edge":/Safari/i.test(ua)?"Safari":"Browser";
+    if(isStandaloneApp()) browser+=" · PWA";
+    return{id,label:device+" · "+browser};
+  }
+  function homeRouteForUser(){
+    if(!S.user)return"dashboard";
+    return S.user.Role==="Inspector"?"tasks":S.user.Role==="Teacher"?"teacher":"dashboard";
+  }
+  function onboardingKey(){
+    return "rsd-onboarding-v1:"+(S.user?.Role||"guest");
+  }
+  function onboardingSlides(){
+    const common=[
+      {icon:"house",title:"หน้าแรกของคุณ",text:"ระบบจะพาไปหน้าที่เหมาะกับบทบาทอัตโนมัติเมื่อเปิดจากไอคอน RSD Clean"},
+      {icon:"bell",title:"ดูแจ้งเตือน",text:"ตรวจงานค้าง งานรอซิงก์ และข้อความที่ต้องดำเนินการจากกระดิ่งด้านล่าง"}
+    ];
+    if(S.user?.Role==="Inspector")return[
+      {icon:"clipboard-check",title:"ดูงานตรวจวันนี้",text:"เปิดรายการพื้นที่ที่ได้รับมอบหมาย และดูสถานะงานของวันนี้"},
+      {icon:"scan-line",title:"สแกน QR ณ จุดตรวจ",text:"ใช้ปุ่มวงกลมตรงกลางเพื่อสแกน QR แล้วเปิดแบบประเมินของพื้นที่นั้นทันที"},
+      {icon:"wifi-off",title:"เน็ตหลุดก็ยังบันทึกได้",text:"งานจะเก็บไว้ในเครื่องและขึ้นสถานะรอซิงก์ จากนั้นส่งอัตโนมัติเมื่อออนไลน์"},
+      ...common.slice(1)
+    ];
+    if(S.user?.Role==="Teacher")return[
+      {icon:"school",title:"ติดตามห้องเรียนของฉัน",text:"ดูผลตรวจ พื้นที่รับผิดชอบ รูปหลักฐาน และรางวัลของห้องเรียน"},
+      {icon:"bell",title:"ติดตามผลที่ควรปรับปรุง",text:"ศูนย์แจ้งเตือนจะช่วยชี้ผลประเมินที่ควรติดตาม"},
+      {icon:"smartphone",title:"ติดตั้งบนมือถือ",text:"เพิ่ม RSD Clean ลงหน้าจอหลักแล้วเปิดใช้งานเหมือนแอป"}
+    ];
+    if(S.user?.Role==="Admin")return[
+      {icon:"layout-dashboard",title:"ดูภาพรวมโรงเรียน",text:"ติดตามงานที่ตรวจแล้ว งานค้าง และผลประเมินล่าสุด"},
+      {icon:"settings-2",title:"จัดการข้อมูล",text:"เพิ่มผู้ใช้ ห้องเรียน พื้นที่ ตั้งเวร QR วันหยุด และกู้คืนข้อมูลจากถังขยะ"},
+      {icon:"bell",title:"ตรวจสิ่งที่ต้องดำเนินการ",text:"ศูนย์แจ้งเตือนรวมงานค้าง พื้นที่ไม่มีผู้ตรวจ Backup และสถานะสำคัญ"},
+      {icon:"shield-check",title:"ระบบมี Backup และ Audit Log",text:"ตรวจประวัติการเปลี่ยนแปลง สำรอง และกู้คืนข้อมูลได้จากหน้า Admin"}
+    ];
+    if(S.user?.Role==="Supervisor")return[
+      {icon:"layout-dashboard",title:"ติดตามภาพรวม",text:"ดูจำนวนงานตรวจ ผลประเมิน และสถานะประจำวัน"},
+      {icon:"chart-no-axes-column-increasing",title:"เปิดรายงาน",text:"ดูอันดับห้องเรียน พื้นที่ที่ต้องจับตา และประสิทธิภาพผู้ตรวจ"},
+      ...common.slice(1)
+    ];
+    return common;
+  }
+  function showOnboarding(force=false){
+    if(!S.user)return;
+    try{if(!force&&localStorage.getItem(onboardingKey())==="done")return;}catch(e){}
+    const slides=onboardingSlides();let index=0;
+    const render=()=>{
+      const x=slides[index];
+      openModal("เริ่มใช้งาน RSD Clean",
+        '<div class="onboarding-wrap">'+
+          '<div class="onboarding-step">ขั้นตอน '+(index+1)+' / '+slides.length+'</div>'+
+          '<div class="onboarding-icon"><i data-lucide="'+x.icon+'"></i></div>'+
+          '<h3>'+esc(x.title)+'</h3><p>'+esc(x.text)+'</p>'+
+          '<div class="onboarding-dots">'+slides.map((_,i)=>'<span class="'+(i===index?"active":"")+'"></span>').join("")+'</div>'+
+          '<div class="onboarding-actions">'+
+            (index?'<button class="btn secondary" id="onboard-prev">ย้อนกลับ</button>':'<button class="btn secondary" id="onboard-skip">ข้าม</button>')+
+            '<button class="btn" id="onboard-next">'+(index===slides.length-1?"เริ่มใช้งาน":"ถัดไป")+'</button>'+
+          '</div>'+
+        '</div>');
+      icons();
+      if($("onboard-prev"))$("onboard-prev").onclick=()=>{index--;render();};
+      if($("onboard-skip"))$("onboard-skip").onclick=()=>{try{localStorage.setItem(onboardingKey(),"done");}catch(e){}closeModal();};
+      $("onboard-next").onclick=()=>{
+        if(index<slides.length-1){index++;render();}
+        else{try{localStorage.setItem(onboardingKey(),"done");}catch(e){}closeModal();toast("พร้อมใช้งาน RSD Clean");}
+      };
+    };
+    render();
+  }
+  async function deviceSessionsModal(){
+    openModal("อุปกรณ์ที่เข้าสู่ระบบ",'<div id="device-sessions-body"><div class="muted">กำลังโหลดอุปกรณ์…</div></div>');
+    const box=$("device-sessions-body");
+    try{
+      const rows=await rpc("sessions",{},true);
+      if(!box?.isConnected)return;
+      box.innerHTML=
+        '<p class="muted mb-4">หากพบอุปกรณ์ที่ไม่รู้จัก สามารถออกจากระบบอุปกรณ์นั้นได้ทันที</p>'+
+        '<div class="device-list">'+rows.map(r=>
+          '<div class="device-card '+(r.Current?"current":"")+'">'+
+            '<span class="device-icon"><i data-lucide="'+(/iPhone|iPad|Android/.test(r.DeviceLabel)?"smartphone":"monitor")+'"></i></span>'+
+            '<span class="device-copy"><b>'+esc(r.DeviceLabel||"อุปกรณ์เดิม")+(r.Current?' <span class="pill green">เครื่องนี้</span>':'')+'</b>'+
+              '<small>ใช้งานล่าสุด '+esc(new Date(r.LastSeen).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}))+'</small>'+
+              '<small>หมดอายุ '+esc(new Date(r.ExpiresAt).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}))+'</small></span>'+
+            (!r.Current?'<button class="btn small danger session-logout" data-id="'+esc(r.SessionID)+'">ออกจากระบบ</button>':'')+
+          '</div>'
+        ).join("")+'</div>'+
+        (rows.filter(x=>!x.Current).length?'<button class="btn danger w-full mt-4" id="logout-other-sessions">ออกจากระบบเครื่องอื่นทั้งหมด</button>':'');
+      box.querySelectorAll(".session-logout").forEach(b=>b.onclick=async()=>{
+        const ok=await Swal.fire({icon:"question",title:"ออกจากระบบอุปกรณ์นี้?",showCancelButton:true,confirmButtonText:"ออกจากระบบ",cancelButtonText:"ยกเลิก"});
+        if(!ok.isConfirmed)return;
+        await rpc("logoutSession",{sessionId:b.dataset.id},true);
+        toast("ออกจากระบบอุปกรณ์แล้ว");
+        await deviceSessionsModal();
+      });
+      if($("logout-other-sessions"))$("logout-other-sessions").onclick=async()=>{
+        const ok=await Swal.fire({icon:"warning",title:"ออกจากระบบเครื่องอื่นทั้งหมด?",showCancelButton:true,confirmButtonText:"ยืนยัน",cancelButtonText:"ยกเลิก"});
+        if(!ok.isConfirmed)return;
+        await rpc("logoutOtherSessions",{},true);
+        toast("ออกจากระบบเครื่องอื่นแล้ว");
+        await deviceSessionsModal();
+      };
+      icons();
+    }catch(e){box.innerHTML='<div class="warn">'+esc(e.message||String(e))+'</div>';}
+  }
+
   function mobileQuickAction() {
     if (!S.user) {
       location.hash = "login";
@@ -483,6 +597,8 @@
       '</div>' +
       '<div class="mobile-more-grid">' +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
+        '<button class="mobile-more-item" id="mobile-devices" type="button"><i data-lucide="monitor-smartphone"></i><span>อุปกรณ์ที่เข้าสู่ระบบ</span></button>' +
+        '<button class="mobile-more-item" id="mobile-guide" type="button"><i data-lucide="circle-help"></i><span>คู่มือใช้งาน</span></button>' +
         '<button class="mobile-more-item" id="mobile-change-pass" type="button"><i data-lucide="key-round"></i><span>เปลี่ยนรหัสผ่าน</span></button>' +
         '<button class="mobile-more-item" id="mobile-refresh" type="button"><i data-lucide="refresh-cw"></i><span>รีเฟรชข้อมูล</span></button>' +
         '<button class="mobile-more-item danger-item" id="mobile-logout" type="button"><i data-lucide="log-out"></i><span>ออกจากระบบ</span></button>' +
@@ -491,6 +607,8 @@
     wireInstallButtons();
     icons();
     refreshNotificationBadge();
+    if ($("mobile-devices")) $("mobile-devices").onclick = () => { closeModal(); deviceSessionsModal(); };
+    if ($("mobile-guide")) $("mobile-guide").onclick = () => { closeModal(); showOnboarding(true); };
     if ($("mobile-change-pass")) $("mobile-change-pass").onclick = () => {
       closeModal();
       passwordModal();
@@ -585,6 +703,7 @@
     $("account").innerHTML = S.user
       ? '<div class="account-user"><span class="account-name">' + esc(S.user.FullName) + '</span>' +
         '<button class="btn small secondary notification-btn" id="notification-btn" type="button" aria-label="แจ้งเตือน"><span class="menu-icon-with-badge"><i data-lucide="bell"></i><b class="notification-badge hidden">0</b></span><span class="account-label">แจ้งเตือน</span></button>' +
+        '<button class="btn small secondary" id="devices-btn" type="button" aria-label="อุปกรณ์"><i data-lucide="monitor-smartphone"></i><span class="account-label">อุปกรณ์</span></button>' +
         install +
         '<button class="btn small secondary" id="change-pass" type="button" aria-label="เปลี่ยนรหัสผ่าน"><i data-lucide="key-round"></i><span class="account-label">รหัสผ่าน</span></button>' +
         '<button class="btn small secondary" id="logout" type="button" aria-label="ออกจากระบบ"><i data-lucide="log-out"></i><span class="account-label">ออก</span></button></div>'
@@ -594,6 +713,7 @@
     if ($("mobile-more")) $("mobile-more").onclick = mobileMoreMenu;
     if ($("mobile-notification-btn")) $("mobile-notification-btn").onclick = notificationCenterModal;
     if ($("notification-btn")) $("notification-btn").onclick = notificationCenterModal;
+    if ($("devices-btn")) $("devices-btn").onclick = deviceSessionsModal;
 
     if (S.user) {
       $("logout").onclick = async () => {
@@ -613,7 +733,8 @@
     S.charts.forEach((c) => c.destroy());
     S.charts = [];
     if (!S.scanToken) S.scanToken = getPendingQr();
-    let p = (location.hash.slice(1).split("?")[0] || "dashboard");
+    let p = (location.hash.slice(1).split("?")[0] || "home");
+    if(p==="home") p=homeRouteForUser();
     if (S.user && p === "login") p = S.user.Role === "Teacher" ? "teacher" : "dashboard";
     if (S.user && p === "dashboard" && S.user.Role === "Teacher") p = "teacher";
     if (S.user && S.scanToken && S.user.Role === "Inspector") p = "tasks";
@@ -684,7 +805,7 @@
         const username = $("username").value.trim().toLowerCase(),
           proof = await proofFor(username, $("password").value),
           remember = $("remember-login").checked,
-          r = await rpc("login", { username, proof, remember }, true);
+          r = await rpc("login", { username, proof, remember, client:getDeviceIdentity() }, true);
         S.token = r.token;
         S.user = r.user;
         storeSession(r.token, remember);
@@ -692,13 +813,9 @@
         if (remember && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
         S.scanToken = getPendingQr();
         S.scanHandled = false;
-        location.hash =
-          S.user.Role === "Teacher"
-            ? "teacher"
-            : S.user.Role === "Inspector"
-              ? "tasks"
-              : "dashboard";
+        location.hash = "home";
         await route();
+        setTimeout(()=>showOnboarding(false),350);
         if (S.scanToken && S.user.Role !== "Inspector")
           await Swal.fire({
             icon: "info",
@@ -906,6 +1023,7 @@
       }
     }
     await route();
+    if(S.user)setTimeout(()=>showOnboarding(false),450);
     if(navigator.onLine&&S.user&&typeof window.syncOfflineInspections==="function"){
       try{await window.syncOfflineInspections(false);}catch(e){}
     }
