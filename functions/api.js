@@ -1179,8 +1179,8 @@ async function executiveDashboard(env,u){
   const firstMonth=monthShift(thisMonth,-5)+"-01";
   const firstWeek=shiftDate(currentWeekStart,-49);
   const start=firstMonth<firstWeek?firstMonth:firstWeek;
-  const [{ins},areaRow]=await Promise.all([
-    inspectionBundleRange(db,start,today),
+  const [ins,areaRow]=await Promise.all([
+    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,today),
     db.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
 
