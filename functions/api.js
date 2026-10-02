@@ -245,7 +245,7 @@ async function dispatch(env, action, p, token, request) {
     await db.prepare("DELETE FROM sessions WHERE token_hash=?").bind(await digest(token)).run(); return true;
   }
   const handlers = {
-    bootstrap: async () => ({ user:publicUser(u), today:thaiDay(), holidays:(await all(db,"SELECT holiday_date FROM holidays ORDER BY holiday_date")).map(x=>x.holiday_date) }),
+    bootstrap: async () => ({ user:publicUser(u), today:thaiDay(), holidays:(await all(db,"SELECT holiday_date FROM holidays ORDER BY holiday_date")).map(x=>x.holiday_date), settings:await getAppSettings(db) }),
     myRewards: async () => { role(u,["Inspector"]); return (await all(db,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id)).map(rewardRow); },
     dashboard: async () => dashboard(env,u,validateDate(p.date || thaiDay())),
     executiveDashboard: async () => executiveDashboard(env,u),
@@ -1219,12 +1219,13 @@ async function tasksReady(env,u){
 async function tasks(env,u){ role(u,["Inspector"]); await ensureToday(env); return tasksReady(env,u); }
 async function inspectorHome(env,u){
   role(u,["Inspector"]); await ensureToday(env);
-  const [taskRows,rewards,notice]=await Promise.all([
+  const [taskRows,rewards,notice,settings]=await Promise.all([
     tasksReady(env,u),
     all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id),
-    notifications(env,u,true)
+    notifications(env,u,true),
+    getAppSettings(env.DB)
   ]);
-  return{tasks:taskRows,rewards:rewards.map(rewardRow),notifications:notice,updatedAt:nowIso()};
+  return{tasks:taskRows,rewards:rewards.map(rewardRow),notifications:notice,settings,updatedAt:nowIso()};
 }
 async function qrTask(env,u,p){ role(u,["Inspector"]); const aid=await qrAreaId(env,p.token); await ensureToday(env); const i=await env.DB.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_date=? AND i.area_id=? AND ii.user_id=?`).bind(thaiDay(),aid,u.user_id).first(); assert(i,"พื้นที่นี้ไม่ได้อยู่ในงานที่คุณได้รับมอบหมายวันนี้"); return displayOne(env.DB,i); }
 async function visible(env,u,i){ if(!u) return false; if(["Admin","Supervisor"].includes(u.role)) return true; if(u.role==="Inspector") return !!(await env.DB.prepare("SELECT 1 x FROM inspection_inspectors WHERE inspection_id=? AND user_id=?").bind(i.inspection_id,u.user_id).first()); const m=parseJson(i.meta_json,{}); return u.role==="Teacher" && m.classId===u.linked_classroom_id; }
