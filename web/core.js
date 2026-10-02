@@ -857,8 +857,9 @@
           r = await rpc("login", { username, proof, remember, client:getDeviceIdentity() }, true);
         S.token = r.token;
         S.user = r.user;
+        S.config = r.settings || S.config;
         storeSession(r.token, remember);
-        try { localStorage.setItem("rsd-user-cache",JSON.stringify(r.user)); } catch(e) {}
+        try { localStorage.setItem("rsd-user-cache",JSON.stringify(r.user)); localStorage.setItem("rsd-config-cache",JSON.stringify(S.config||{})); } catch(e) {}
         if (remember && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
         S.scanToken = getPendingQr();
         S.scanHandled = false;
