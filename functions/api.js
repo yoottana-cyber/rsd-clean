@@ -1208,21 +1208,22 @@ function inspectionDisplay(i, inspectors=[]) {
   return { InspectionID:i.inspection_id,AssignmentID:"",InspectionDate:i.inspection_date,Status:i.status,Rating:i.rating,Score:Number(i.score||0),Notes:i.note||"",PhotoLinks:parseJson(i.photo_links_json,[]).map(id=>({id})),ApprovalStatus:String(m.approvalStatus||""),ReviewNote:String(m.reviewNote||""),SkipReason:String(m.skipReason||""),meta:m };
 }
 async function displayOne(db,i){ const team=await all(db,"SELECT user_id,user_name FROM inspection_inspectors WHERE inspection_id=? ORDER BY user_name",i.inspection_id); return inspectionDisplay(i,team); }
-async function ownedTask(env,u,id){ role(u,["Inspector"]); const db=env.DB; const i=await db.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_id=? AND ii.user_id=?`).bind(id,u.user_id).first(); assert(i,"งานนี้ไม่ใช่งานที่ได้รับมอบหมาย"); assert(i.inspection_date===thaiDay(),"แก้ไขได้เฉพาะงานวันนี้"); return i; }
+async function ownedTask(env,u,id){ role(u,["Inspector"]); const db=env.DB; const i=await db.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_id=? AND ii.user_id=?`).bind(id,u.user_id).first(); assert(i,"งานนี้ไม่ใช่งานที่ได้รับมอบหมาย"); const returned=String(metaOf(i).approvalStatus||"")==="ส่งกลับแก้ไข"; assert(i.inspection_date===thaiDay()||returned,"แก้ไขได้เฉพาะงานวันนี้หรือรายการที่ถูกส่งกลับแก้ไข"); return i; }
 async function tasksReady(env,u){
-  const day=thaiDay(),db=env.DB;
-  const [rows,teams]=await Promise.all([
+  const day=thaiDay(),start=shiftDate(day,-7),db=env.DB;
+  const [allRows,teams]=await Promise.all([
     all(db,`SELECT DISTINCT i.* FROM inspections i
       JOIN inspection_inspectors mine ON mine.inspection_id=i.inspection_id
-      WHERE i.inspection_date=? AND mine.user_id=?
-      ORDER BY i.inspection_id`,day,u.user_id),
+      WHERE i.inspection_date>=? AND i.inspection_date<=? AND mine.user_id=?
+      ORDER BY i.inspection_date DESC,i.inspection_id`,start,day,u.user_id),
     all(db,`SELECT team.inspection_id,team.user_id,team.user_name
       FROM inspections i
       JOIN inspection_inspectors mine ON mine.inspection_id=i.inspection_id AND mine.user_id=?
       JOIN inspection_inspectors team ON team.inspection_id=i.inspection_id
-      WHERE i.inspection_date=?
-      ORDER BY team.inspection_id,team.user_name`,u.user_id,day)
+      WHERE i.inspection_date>=? AND i.inspection_date<=?
+      ORDER BY team.inspection_id,team.user_name`,u.user_id,start,day)
   ]);
+  const rows=allRows.filter(i=>i.inspection_date===day||String(metaOf(i).approvalStatus||"")==="ส่งกลับแก้ไข");
   const map=new Map();
   teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);});
   return rows.map(i=>inspectionDisplay(i,map.get(i.inspection_id)||[]));
