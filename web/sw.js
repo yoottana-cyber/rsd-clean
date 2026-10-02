@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-8";
+const CACHE="rsd-clean-v2-shell-9";
 const SHELL=[
   "/",
   "/index.html",
@@ -13,11 +13,11 @@ const SHELL=[
 ];
 
 self.addEventListener("install",event=>{
-  event.waitUntil(
-    caches.open(CACHE)
-      .then(cache=>cache.addAll(SHELL))
-      .then(()=>self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)));
+});
+
+self.addEventListener("message",event=>{
+  if(event.data&&event.data.type==="SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate",event=>{
