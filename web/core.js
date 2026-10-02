@@ -150,6 +150,19 @@
   };
   if (initialScanToken) savePendingQr(initialScanToken);
   const $ = (id) => document.getElementById(id);
+  const mobileNavQuery = window.matchMedia("(max-width: 760px)");
+  function placeNavigation() {
+    const navEl = $("nav"), topbar = document.querySelector(".topbar"), account = $("account");
+    if (!navEl || !topbar) return;
+    if (mobileNavQuery.matches) {
+      if (navEl.parentElement !== document.body) document.body.appendChild(navEl);
+    } else if (navEl.parentElement !== topbar) {
+      if (account && account.parentElement === topbar) topbar.insertBefore(navEl, account);
+      else topbar.appendChild(navEl);
+    }
+  }
+  if (mobileNavQuery.addEventListener) mobileNavQuery.addEventListener("change", placeNavigation);
+  else if (mobileNavQuery.addListener) mobileNavQuery.addListener(placeNavigation);
   const esc = (v) =>
     String(v ?? "").replace(
       /[&<>"']/g,
@@ -625,6 +638,7 @@
   window.addEventListener("offline", updateNetworkStatus);
 
   window.addEventListener("DOMContentLoaded", async () => {
+    placeNavigation();
     updateNetworkStatus();
     wireInstallButtons();
     if (S.token) {
