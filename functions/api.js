@@ -6,6 +6,7 @@ const ITERATIONS = 600000;
 const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
 const enc = new TextEncoder();
 let sessionMetaReady = false;
+let autoBackupCheckedDay = "";
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -453,6 +454,8 @@ async function restoreBackup(env,u,p){
   const restoredAt=nowIso();
   await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_restore_at',?),('last_restore_prebackup_file_id',?),('last_auto_backup_day',?)")
     .bind(restoredAt,String(pre.fileId),thaiDay()).run();
+  await invalidateToday(env);
+  autoBackupCheckedDay=thaiDay();
 
   const adminCount=await db.prepare("SELECT COUNT(*) n FROM users WHERE role='Admin'").first();
   assert(Number(adminCount?.n||0)>0,"Restore ไม่สมบูรณ์: ไม่พบ Admin");
@@ -466,8 +469,11 @@ async function restoreBackup(env,u,p){
 async function autoBackupIfDue(env){
   if(!env.GAS_DRIVE_URL||!env.DRIVE_GATEWAY_KEY)return;
   const day=thaiDay(),key="last_auto_backup_day";
+  if(autoBackupCheckedDay===day)return;
+  const current=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();
+  if(String(current?.value||"")===day){autoBackupCheckedDay=day;return;}
   const lock=await env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE settings.value<>excluded.value").bind(key,day).run();
-  if(!Number(lock?.meta?.changes||0))return;
+  if(!Number(lock?.meta?.changes||0)){autoBackupCheckedDay=day;return;}
   try{
     const bundle=await buildBackupBundle(env),content=JSON.stringify(bundle),filename="RSD-Clean-D1-auto-"+day+".json";
     const saved=await gasDrive(env,"saveBackup",{filename,content});
@@ -476,7 +482,9 @@ async function autoBackupIfDue(env){
     await ensureAuditTable(env.DB);
     await env.DB.prepare("INSERT INTO audit_log(audit_id,timestamp,actor_user_id,actor_name,actor_role,action,entity_type,entity_id,details_json) VALUES(?,?,?,?,?,?,?,?,?)")
       .bind(uuid(),bundle.createdAt,"","ระบบ","System","backupAuto","Backup",String(saved.fileId||""),JSON.stringify({filename,size:Number(saved.size||content.length)})).run();
+    autoBackupCheckedDay=day;
   }catch(e){
+    autoBackupCheckedDay="";
     await env.DB.prepare("DELETE FROM settings WHERE key=? AND value=?").bind(key,day).run();
     throw e;
   }
@@ -638,6 +646,7 @@ async function restoreTrash(env,u,p){
     await ensureToday(env);
   }else throw Error("ประเภทข้อมูลในถังขยะไม่รองรับ");
   await db.prepare("DELETE FROM recycle_bin WHERE recycle_id=?").bind(r.recycle_id).run();
+  await invalidateToday(env);
   return{entityType:type,entityId:String(r.entity_id)};
 }
 async function purgeTrash(env,u,p){
