@@ -1,4 +1,58 @@
 "use strict";
+  const SCHOOL_LOGO_URL = "https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png";
+  let deferredInstallPrompt = null;
+  const isStandaloneApp = () => window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+  const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    document.documentElement.classList.add("pwa-installable");
+  });
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    document.documentElement.classList.add("pwa-installed");
+    document.querySelectorAll(".install-btn").forEach((b) => b.classList.add("hidden"));
+  });
+
+  async function installApp() {
+    if (isStandaloneApp()) return toast("ติดตั้ง RSD Clean บนอุปกรณ์นี้แล้ว");
+    if (deferredInstallPrompt) {
+      const prompt = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      await prompt.prompt();
+      const choice = await prompt.userChoice.catch(() => null);
+      if (choice?.outcome === "accepted") toast("กำลังติดตั้ง RSD Clean");
+      return;
+    }
+    if (isIOS()) {
+      return Swal.fire({
+        icon: "info",
+        title: "ติดตั้ง RSD Clean บน iPhone / iPad",
+        html: '<div style="text-align:left;line-height:1.8"><b>1.</b> แตะปุ่ม <b>แชร์</b> ของเบราว์เซอร์<br><b>2.</b> เลือก <b>เพิ่มไปยังหน้าจอโฮม (Add to Home Screen)</b><br><b>3.</b> แตะ <b>เพิ่ม</b><br><br><span style="color:#64748b">เมื่อติดตั้งแล้ว เปิดจากไอคอน RSD Clean ได้เหมือนแอป</span></div>',
+        confirmButtonText: "เข้าใจแล้ว",
+        confirmButtonColor: "#0f766e",
+      });
+    }
+    return Swal.fire({
+      icon: "info",
+      title: "ติดตั้ง RSD Clean",
+      text: "เปิดเมนูของเบราว์เซอร์ แล้วเลือก ติดตั้งแอป หรือ เพิ่มไปยังหน้าจอหลัก",
+      confirmButtonText: "ตกลง",
+      confirmButtonColor: "#0f766e",
+    });
+  }
+
+  function wireInstallButtons() {
+    document.querySelectorAll(".install-btn").forEach((b) => {
+      if (isStandaloneApp()) b.classList.add("hidden");
+      else {
+        b.classList.remove("hidden");
+        b.onclick = installApp;
+      }
+    });
+  }
+
   function storageGet(key) {
     try {
       return localStorage.getItem(key) || sessionStorage.getItem(key) || "";
@@ -259,11 +313,11 @@
     } catch (e) {}
   }
   const pages = {
-    dashboard: { title: "ภาพรวม", roles: ["Admin", "Supervisor", "Inspector"] },
-    tasks: { title: "งานตรวจวันนี้", roles: ["Inspector"] },
-    teacher: { title: "ห้องเรียนของฉัน", roles: ["Teacher"] },
-    admin: { title: "จัดการข้อมูล", roles: ["Admin"] },
-    reports: { title: "รายงาน", roles: ["Admin", "Supervisor"] },
+    dashboard: { title: "ภาพรวม", icon: "layout-dashboard", roles: ["Admin", "Supervisor", "Inspector"] },
+    tasks: { title: "งานตรวจวันนี้", icon: "clipboard-check", roles: ["Inspector"] },
+    teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
+    admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
+    reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
   };
   function nav() {
     const keys = S.user
@@ -274,29 +328,29 @@
         (k) =>
           '<a class="nav-link ' +
           (S.route === k ? "active" : "") +
-          '" href="#' +
-          k +
-          '">' +
-          pages[k].title +
-          "</a>",
+          '" href="#' + k + '" aria-label="' + esc(pages[k].title) + '">' +
+          '<i data-lucide="' + pages[k].icon + '"></i><span>' + esc(pages[k].title) + "</span></a>",
       )
       .join("");
+    const install = !isStandaloneApp()
+      ? '<button class="btn small secondary install-btn" type="button" aria-label="ติดตั้งแอป"><i data-lucide="download"></i><span class="account-label">ติดตั้ง</span></button>'
+      : "";
     $("account").innerHTML = S.user
-      ? '<span class="mr-2">' +
-        esc(S.user.FullName) +
-        '</span><button class="btn small secondary" id="change-pass">รหัสผ่าน</button> <button class="btn small secondary" id="logout">ออก</button>'
-      : '<a class="btn small" href="#login">เข้าสู่ระบบ</a>';
+      ? '<div class="account-user"><span class="account-name">' + esc(S.user.FullName) + '</span>' +
+        install +
+        '<button class="btn small secondary" id="change-pass" type="button" aria-label="เปลี่ยนรหัสผ่าน"><i data-lucide="key-round"></i><span class="account-label">รหัสผ่าน</span></button>' +
+        '<button class="btn small secondary" id="logout" type="button" aria-label="ออกจากระบบ"><i data-lucide="log-out"></i><span class="account-label">ออก</span></button></div>'
+      : install + '<a class="btn small" href="#login"><i data-lucide="log-in"></i><span class="account-label">เข้าสู่ระบบ</span></a>';
     if (S.user) {
       $("logout").onclick = async () => {
-        try {
-          await rpc("logout");
-        } catch (e) {}
+        try { await rpc("logout"); } catch (e) {}
         clearSession();
         location.hash = "login";
         route();
       };
       $("change-pass").onclick = passwordModal;
     }
+    wireInstallButtons();
     icons();
   }
   async function route() {
@@ -351,7 +405,23 @@
   }
   function renderLogin() {
     $("app").innerHTML =
-      '<section class="card max-w-md mx-auto my-12"><div class="text-4xl mb-4">🌿</div><h1 class="page-title">ยินดีต้อนรับ</h1><p class="muted">เข้าสู่ระบบตรวจความสะอาด โรงเรียนรัษฎา</p><form id="login-form"><div class="field"><label for="username">ชื่อผู้ใช้</label><input id="username" autocomplete="username" required maxlength="80"></div><div class="field"><label for="password">รหัสผ่าน</label><input id="password" type="password" autocomplete="current-password" required maxlength="200"></div><label class="remember-login"><input id="remember-login" type="checkbox" checked><span><b>จำการเข้าสู่ระบบบนอุปกรณ์นี้</b><small>เหมาะสำหรับมือถือผู้ตรวจเครื่องส่วนตัว · ไม่บันทึกรหัสผ่าน</small></span></label><button class="btn w-full mt-4">เข้าสู่ระบบ</button></form></section>';
+      '<section class="card login-shell">' +
+        '<div class="login-visual">' +
+          '<div class="login-logo-box"><img src="' + SCHOOL_LOGO_URL + '" alt="ตราโรงเรียนรัษฎา" onerror="this.onerror=null;this.src=\'/icon-192.png\'"></div>' +
+          '<div><span class="login-chip">RSD CLEAN · SCHOOL APP</span><h1 class="mt-4">พื้นที่สะอาด<br>สร้างได้ทุกวัน</h1><p>ระบบตรวจความสะอาดและให้คะแนนเขตพื้นที่ โรงเรียนรัษฎา ใช้งานได้ทั้งคอมพิวเตอร์และมือถือ</p></div>' +
+        '</div>' +
+        '<div class="login-form-panel">' +
+          '<h1 class="page-title">ยินดีต้อนรับ</h1><p class="muted mt-1">เข้าสู่ระบบเพื่อเริ่มใช้งาน RSD Clean</p>' +
+          '<form id="login-form"><div class="field"><label for="username">ชื่อผู้ใช้</label><input id="username" autocomplete="username" autocapitalize="none" required maxlength="80" placeholder="ชื่อผู้ใช้"></div>' +
+          '<div class="field"><label for="password">รหัสผ่าน</label><input id="password" type="password" autocomplete="current-password" required maxlength="200" placeholder="รหัสผ่าน"></div>' +
+          '<label class="remember-login"><input id="remember-login" type="checkbox" checked><span><b>จำการเข้าสู่ระบบบนอุปกรณ์นี้</b><small>เหมาะสำหรับมือถือส่วนตัว · ต่ออายุการเข้าสู่ระบบอัตโนมัติเมื่อใช้งาน</small></span></label>' +
+          '<button class="btn w-full mt-4" type="submit"><i data-lucide="log-in"></i> เข้าสู่ระบบ</button></form>' +
+          '<button class="btn secondary w-full mt-3 install-btn" id="login-install-app" type="button"><i data-lucide="download"></i> ติดตั้ง RSD Clean ลงมือถือ</button>' +
+          '<div class="login-install-note"><i data-lucide="smartphone"></i><span>เมื่อติดตั้งแล้ว เปิดจากไอคอนบนหน้าจอหลักได้ทันที และไม่ต้องกรอกรหัสผ่านใหม่ทุกครั้งบนอุปกรณ์ส่วนตัว</span></div>' +
+        '</div>' +
+      '</section>';
+    wireInstallButtons();
+    icons();
     $("login-form").onsubmit = async (e) => {
       e.preventDefault();
       busy(true, "กำลังตรวจสอบสิทธิ์…");
@@ -363,6 +433,7 @@
         S.token = r.token;
         S.user = r.user;
         storeSession(r.token, remember);
+        if (remember && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
         S.scanToken = getPendingQr();
         S.scanHandled = false;
         location.hash =
@@ -503,7 +574,7 @@
             datasets: [
               {
                 label: "คะแนนเฉลี่ย",
-                data: d.leaders.map((x) => x.average),
+                data: d.leaders.map((x) => Number(x.average ?? x.avg ?? 0)),
                 backgroundColor: "#67d8e5",
                 borderRadius: 8,
               },
@@ -545,7 +616,17 @@
       S.polling = false;
     }
   }, 60000);
+  function updateNetworkStatus() {
+    const bar = $("network-status");
+    if (!bar) return;
+    bar.classList.toggle("hidden", navigator.onLine);
+  }
+  window.addEventListener("online", updateNetworkStatus);
+  window.addEventListener("offline", updateNetworkStatus);
+
   window.addEventListener("DOMContentLoaded", async () => {
+    updateNetworkStatus();
+    wireInstallButtons();
     if (S.token) {
       try {
         const b = await rpc("bootstrap");
@@ -558,5 +639,10 @@
   });
 
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+    window.addEventListener("load", async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        reg.update().catch(() => {});
+      } catch (e) {}
+    });
   }
