@@ -988,7 +988,7 @@
         new Chart($("donut"), {
           type: "doughnut",
           data: {
-            labels: ["ยอดเยี่ยม", "ปานกลาง", "ปรับปรุง"],
+            labels: [S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม", S.config?.scoreLabels?.["2"]||"ปานกลาง", S.config?.scoreLabels?.["1"]||"ปรับปรุง"],
             datasets: [
               {
                 data: d.counts,
