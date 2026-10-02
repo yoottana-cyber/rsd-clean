@@ -303,8 +303,9 @@
         signal: controller.signal,
         body: JSON.stringify({ action, payload, token: S.token || "" }),
       });
-      if (!res.ok) throw Error("API HTTP " + res.status);
-      const r = await res.json();
+      let r=null;
+      try{r=await res.json();}catch(e){}
+      if (!res.ok) throw Error((r&&r.error)||("API HTTP "+res.status));
       if (!r || r.ok !== true) {
         if (r && r.error === "SESSION_EXPIRED") {
           clearSession();
