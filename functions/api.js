@@ -7,13 +7,74 @@ const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
 const enc = new TextEncoder();
 let sessionMetaReady = false;
 let autoBackupCheckedDay = "";
+let systemEventsReady = false;
+let systemEventsCleanupDay = "";
+const rateBuckets = new Map();
+let rateSweepAt = 0;
 
+function clientAddress(request){
+  return String(
+    request.headers.get("CF-Connecting-IP") ||
+    request.headers.get("X-Forwarded-For")?.split(",")[0] ||
+    "unknown"
+  ).trim().slice(0,80);
+}
+function rateError(message="คำขอถี่เกินไป กรุณารอสักครู่แล้วลองใหม่"){
+  const e=Error(message);e.httpStatus=429;e.rateLimited=true;return e;
+}
+function consumeRateBucket(key,limit,windowMs){
+  const now=Date.now();
+  if(now-rateSweepAt>60000){
+    rateSweepAt=now;
+    for(const [k,v] of rateBuckets){if(Number(v.resetAt||0)<=now)rateBuckets.delete(k);}
+    if(rateBuckets.size>5000){
+      const extra=rateBuckets.size-4000;
+      let n=0;for(const k of rateBuckets.keys()){rateBuckets.delete(k);if(++n>=extra)break;}
+    }
+  }
+  let b=rateBuckets.get(key);
+  if(!b||b.resetAt<=now)b={count:0,resetAt:now+windowMs};
+  b.count++;
+  rateBuckets.set(key,b);
+  if(b.count>limit)throw rateError();
+}
+function enforceRateLimit(request,action,payload,token){
+  const ip=clientAddress(request),username=String(payload?.username||"").trim().toLowerCase().slice(0,80);
+  if(action==="login"){
+    consumeRateBucket("login:user:"+ip+":"+username,8,5*60000);
+    consumeRateBucket("login:ip:"+ip,120,5*60000);
+    return;
+  }
+  if(action==="challenge"){
+    consumeRateBucket("challenge:user:"+ip+":"+username,30,5*60000);
+    consumeRateBucket("challenge:ip:"+ip,240,5*60000);
+    return;
+  }
+  if(action==="publicDashboard"){
+    consumeRateBucket("public:"+ip,90,60000);
+    return;
+  }
+  if(token){
+    consumeRateBucket("auth:"+String(token).slice(-28),180,60000);
+    return;
+  }
+  consumeRateBucket("anon:"+ip,60,60000);
+}
+function expectedClientError(message){
+  return /SESSION_EXPIRED|ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง|วันที่ไม่ถูกต้อง|ช่วงวันที่ไม่ถูกต้อง|ไม่มีสิทธิ์|ไม่พบรายการ|ไม่พบ API|ไม่ถูกต้อง|ต้องยืนยัน|กรุณา|เลือก|ซ้ำ|ว่าง|หมดอายุ|ไม่ได้อยู่ในงาน|แก้ไขได้เฉพาะงานวันนี้|ข้อมูลถูกเปลี่ยนแล้ว|คำขอใหญ่เกินไป|รองรับ JPG|รูปภาพต้องไม่เกิน/i.test(String(message||""));
+}
+function background(context,promise){
+  if(typeof context.waitUntil==="function")context.waitUntil(Promise.resolve(promise).catch(()=>{}));
+}
 export async function onRequest(context) {
   const { request, env } = context;
+  const started=Date.now();
+  let action="",payload={},token="";
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer"
   };
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
   if (request.method !== "POST") return jsonResponse({ ok: false, error: "METHOD_NOT_ALLOWED" }, 405, headers);
@@ -21,23 +82,53 @@ export async function onRequest(context) {
   if (!env.RSD_PEPPER) return jsonResponse({ ok: false, error: "ยังไม่ได้ตั้งค่า RSD_PEPPER" }, 500, headers);
   try {
     const input = await request.json();
-    const action = String(input?.action || "");
-    const payload = input?.payload || {};
+    action = String(input?.action || "");
+    payload = input?.payload || {};
+    token = String(input?.token || "");
     const payloadSize = JSON.stringify(payload).length;
     const maxPayload = action === "restoreBackup" ? 20 * 1024 * 1024 : 100000;
     if (payloadSize > maxPayload) throw Error(action === "restoreBackup" ? "ไฟล์ Backup ใหญ่เกิน 20 MB" : "คำขอใหญ่เกินไป");
-    const token = String(input?.token || "");
+    enforceRateLimit(request,action,payload,token);
+
     const data = await dispatch(env, action, payload, token, request);
+    const duration=Date.now()-started;
+
     if (!["challenge","login","publicDashboard"].includes(action)) {
-      const job = autoBackupIfDue(env).catch(e => console.error("AUTO_BACKUP_FAILED", e));
-      if (typeof context.waitUntil === "function") context.waitUntil(job);
+      background(context,autoBackupIfDue(env).catch(e => console.error("AUTO_BACKUP_FAILED", e)));
     }
-    if (action === "saveInspection" && typeof context.waitUntil === "function") {
-      context.waitUntil(rebuildRewards(env).catch(e => console.error("REWARD_REBUILD_FAILED", e)));
+    if (action === "saveInspection") {
+      background(context,rebuildRewards(env).catch(e => console.error("REWARD_REBUILD_FAILED", e)));
+    }
+    if(duration>=1200 && action!=="systemEvents"){
+      background(context,writeSystemEvent(env,{
+        eventType:"slow",
+        action,
+        durationMs:duration,
+        message:"API ใช้เวลานานกว่าค่าที่กำหนด",
+        details:{thresholdMs:1200}
+      },request));
     }
     return jsonResponse({ ok: true, data }, 200, headers);
   } catch (err) {
-    return jsonResponse({ ok: false, error: err?.message || String(err) }, 200, headers);
+    const message=err?.message||String(err),duration=Date.now()-started;
+    if(err?.rateLimited){
+      background(context,writeSystemEvent(env,{
+        eventType:"security",
+        action:action||"unknown",
+        durationMs:duration,
+        message:"Rate limit exceeded",
+        details:{kind:"rate_limit"}
+      },request));
+    }else if(!expectedClientError(message)){
+      background(context,writeSystemEvent(env,{
+        eventType:"error",
+        action:action||"unknown",
+        durationMs:duration,
+        message,
+        details:{name:String(err?.name||"Error")}
+      },request));
+    }
+    return jsonResponse({ ok: false, error: message }, Number(err?.httpStatus||200), headers);
   }
 }
 
@@ -156,6 +247,7 @@ async function dispatch(env, action, p, token, request) {
     backupNow: async () => backupNow(env,u),
     restoreBackup: async () => restoreBackup(env,u,p),
     systemStatus: async () => systemStatus(env,u),
+    systemEvents: async () => systemEvents(env,u,p),
     notifications: async () => notifications(env,u),
     recycleBin: async () => recycleBin(env,u),
     restoreTrash: async () => restoreTrash(env,u,p),
@@ -491,11 +583,87 @@ async function autoBackupIfDue(env){
   }
 }
 
+async function ensureSystemEventsTable(db){
+  if(systemEventsReady)return;
+  await db.prepare(`CREATE TABLE IF NOT EXISTS system_events (
+    event_id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    action TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT '',
+    client_hash TEXT NOT NULL DEFAULT '',
+    details_json TEXT NOT NULL DEFAULT '{}'
+  )`).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_system_events_timestamp ON system_events(timestamp DESC)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_system_events_type_time ON system_events(event_type,timestamp DESC)").run();
+  systemEventsReady=true;
+}
+async function cleanSystemEvents(db){
+  await ensureSystemEventsTable(db);
+  const day=thaiDay();
+  if(systemEventsCleanupDay===day)return;
+  systemEventsCleanupDay=day;
+  const cutoff=new Date(Date.now()-30*86400000).toISOString();
+  await db.prepare("DELETE FROM system_events WHERE timestamp<?").bind(cutoff).run();
+}
+async function writeSystemEvent(env,event,request){
+  try{
+    const db=env.DB;await cleanSystemEvents(db);
+    const ip=clientAddress(request),clientHash=ip==="unknown"?"":String(await hmac(env,"client:"+ip)).slice(0,24);
+    const details=event?.details&&typeof event.details==="object"?event.details:{};
+    await db.prepare("INSERT INTO system_events(event_id,timestamp,event_type,action,duration_ms,message,client_hash,details_json) VALUES(?,?,?,?,?,?,?,?)")
+      .bind(
+        uuid(),
+        nowIso(),
+        String(event?.eventType||"info").slice(0,30),
+        String(event?.action||"").slice(0,80),
+        Math.max(0,Number(event?.durationMs||0)),
+        String(event?.message||"").slice(0,500),
+        clientHash,
+        JSON.stringify(details).slice(0,2000)
+      ).run();
+  }catch(e){console.error("SYSTEM_EVENT_LOG_FAILED",e);}
+}
+async function systemEvents(env,u,p){
+  role(u,["Admin"]);const db=env.DB;await cleanSystemEvents(db);
+  const type=["error","slow","security"].includes(String(p.type||""))?String(p.type):"";
+  const limit=Math.min(200,Math.max(10,Number(p.limit||80)));
+  const since24=new Date(Date.now()-24*3600000).toISOString();
+  const summary=await db.prepare(`SELECT
+    SUM(CASE WHEN event_type='error' THEN 1 ELSE 0 END) errors,
+    SUM(CASE WHEN event_type='slow' THEN 1 ELSE 0 END) slow,
+    SUM(CASE WHEN event_type='security' THEN 1 ELSE 0 END) security,
+    MAX(CASE WHEN event_type='error' THEN timestamp ELSE '' END) last_error
+    FROM system_events WHERE timestamp>=?`).bind(since24).first();
+  const rows=type
+    ? await all(db,"SELECT event_id,timestamp,event_type,action,duration_ms,message,details_json FROM system_events WHERE event_type=? ORDER BY timestamp DESC LIMIT ?",type,limit)
+    : await all(db,"SELECT event_id,timestamp,event_type,action,duration_ms,message,details_json FROM system_events ORDER BY timestamp DESC LIMIT ?",limit);
+  return{
+    summary:{
+      errors:Number(summary?.errors||0),
+      slow:Number(summary?.slow||0),
+      security:Number(summary?.security||0),
+      lastError:String(summary?.last_error||"")
+    },
+    rows:rows.map(r=>({
+      EventID:r.event_id,
+      Timestamp:r.timestamp,
+      Type:r.event_type,
+      Action:r.action,
+      DurationMs:Number(r.duration_ms||0),
+      Message:r.message,
+      Details:parseJson(r.details_json,{})
+    }))
+  };
+}
+
 async function systemStatus(env,u){
   role(u,["Admin"]);
   const db=env.DB;
   await ensureAuditTable(db);
   await ensureRecycleTable(db);
+  await ensureSystemEventsTable(db);
 
   const countSql = [
     ["users","SELECT COUNT(*) n FROM users"],
@@ -506,7 +674,8 @@ async function systemStatus(env,u){
     ["auditLogs","SELECT COUNT(*) n FROM audit_log"],
     ["activeSessions","SELECT COUNT(*) n FROM sessions WHERE expires_at>?"],
     ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"],
-    ["recycleBin","SELECT COUNT(*) n FROM recycle_bin"]
+    ["recycleBin","SELECT COUNT(*) n FROM recycle_bin"],
+    ["systemEvents","SELECT COUNT(*) n FROM system_events"]
   ];
   const counts={};
   for(const [key,sql] of countSql){
@@ -555,6 +724,13 @@ async function systemStatus(env,u){
   }
   if(counts.users===0) warnings.push("ไม่พบผู้ใช้งานในฐานข้อมูล");
   if(counts.areas>0&&counts.assignments===0) warnings.push("มีพื้นที่แล้วแต่ยังไม่มีการมอบหมายเวร");
+  const since24=new Date(Date.now()-24*3600000).toISOString();
+  const monitor=await db.prepare(`SELECT
+    SUM(CASE WHEN event_type='error' THEN 1 ELSE 0 END) errors,
+    SUM(CASE WHEN event_type='slow' THEN 1 ELSE 0 END) slow,
+    SUM(CASE WHEN event_type='security' THEN 1 ELSE 0 END) security
+    FROM system_events WHERE timestamp>=?`).bind(since24).first();
+  if(Number(monitor?.errors||0)>0)warnings.push("พบ System Error ใน 24 ชั่วโมงล่าสุด "+Number(monitor.errors)+" รายการ");
 
   return{
     overall:warnings.length?"warning":"ok",
@@ -569,6 +745,7 @@ async function systemStatus(env,u){
       lastRestoreAt:String(settings.last_restore_at||"")
     },
     counts,
+    monitor24h:{errors:Number(monitor?.errors||0),slow:Number(monitor?.slow||0),security:Number(monitor?.security||0)},
     lastInspection:lastInspection?{date:lastInspection.inspection_date,status:lastInspection.status,updatedAt:lastInspection.updated_at}:null,
     lastAudit:lastAudit?{timestamp:lastAudit.timestamp,action:lastAudit.action,actorName:lastAudit.actor_name}:null,
     warnings
