@@ -941,7 +941,7 @@ async function dashboard(env,u,d){
 }
 async function teacher(env,u){ role(u,["Teacher"]); await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins); const filtered=ins.filter(i=>metaOf(i).classId===u.linked_classroom_id&&(i.inspection_date===thaiDay()||ad.has(i.inspection_date))).sort((a,b)=>b.inspection_date.localeCompare(a.inspection_date)).slice(0,200); return{inspections:await Promise.all(filtered.map(i=>displayOne(env.DB,i))),rewards:(await all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=?",u.linked_classroom_id)).map(rewardRow),monthly:(await monthly(env,ins,thaiDay().slice(0,7))).filter(r=>r.id===u.linked_classroom_id)}; }
 async function dailyReport(env,u,date){
-  role(u,["Admin","Supervisor"]);
+  role(u,["Admin","Supervisor","Inspector"]);
   assert(date<=thaiDay(),"เลือกวันที่ในอนาคตไม่ได้");
   if(date===thaiDay())await ensureToday(env);
   const db=env.DB;
