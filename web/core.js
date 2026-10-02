@@ -443,6 +443,7 @@
     teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
     reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
+    daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor"] },
   };
   function getDeviceIdentity(){
     let id="";
@@ -602,6 +603,7 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
+        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-daily-report" type="button"><i data-lucide="send"></i><span>รายงานรายวัน</span></button>' : '') +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
         '<button class="mobile-more-item" id="mobile-devices" type="button"><i data-lucide="monitor-smartphone"></i><span>อุปกรณ์ที่เข้าสู่ระบบ</span></button>' +
         '<button class="mobile-more-item" id="mobile-guide" type="button"><i data-lucide="circle-help"></i><span>คู่มือใช้งาน</span></button>' +
@@ -613,6 +615,7 @@
     wireInstallButtons();
     icons();
     refreshNotificationBadge();
+    if ($("mobile-daily-report")) $("mobile-daily-report").onclick = () => { closeModal(); location.hash="daily"; route(); };
     if ($("mobile-devices")) $("mobile-devices").onclick = () => { closeModal(); deviceSessionsModal(); };
     if ($("mobile-guide")) $("mobile-guide").onclick = () => { closeModal(); showOnboarding(true); };
     if ($("mobile-change-pass")) $("mobile-change-pass").onclick = () => {
@@ -756,6 +759,7 @@
       else if (p === "dashboard") await renderDashboard(seq);
       else if (p === "admin") await renderAdmin(seq);
       else if (p === "reports") await renderReports(seq);
+      else if (p === "daily") await renderDailyReport(seq);
       else if (p === "tasks") await renderTasks(seq);
       else if (p === "teacher") await renderTeacher(seq);
     } catch (e) {
