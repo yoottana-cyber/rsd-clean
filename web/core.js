@@ -472,6 +472,14 @@
     exports: { title: "ส่งออก", icon: "file-down", roles: ["Admin", "Supervisor", "Teacher"] },
     daily: { title: "รายงานรายวัน", icon: "send", roles: ["Admin", "Supervisor", "Inspector"] },
   };
+  function applyBrandSettings(){
+    const cfg=S.config||{},name=String(cfg.schoolName||"โรงเรียนรัษฎา"),logo=String(cfg.schoolLogoUrl||SCHOOL_LOGO_URL);
+    document.querySelectorAll(".school-logo").forEach(img=>{img.src=logo;});
+    const sub=document.querySelector(".brand-copy small");if(sub)sub.textContent=name+" · พื้นที่สะอาด สร้างได้ทุกวัน";
+    const fimg=document.querySelector(".app-footer img");if(fimg)fimg.src=logo;
+    const ftext=document.querySelector(".app-footer span");if(ftext)ftext.textContent="RSD Clean · "+name;
+  }
+
   function getDeviceIdentity(){
     let id="";
     try{
@@ -858,6 +866,7 @@
         S.token = r.token;
         S.user = r.user;
         S.config = r.settings || S.config;
+        applyBrandSettings();
         storeSession(r.token, remember);
         try { localStorage.setItem("rsd-user-cache",JSON.stringify(r.user)); localStorage.setItem("rsd-config-cache",JSON.stringify(S.config||{})); } catch(e) {}
         if (remember && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
@@ -1065,11 +1074,12 @@
         const b = await rpc("bootstrap");
         S.user = b.user;
         S.config = b.settings || S.config;
+        applyBrandSettings();
         try { localStorage.setItem("rsd-user-cache",JSON.stringify(b.user)); localStorage.setItem("rsd-config-cache",JSON.stringify(S.config||{})); } catch(e) {}
       } catch (e) {
         let cached=null,cachedConfig=null;
         try { cached=JSON.parse(localStorage.getItem("rsd-user-cache")||"null"); cachedConfig=JSON.parse(localStorage.getItem("rsd-config-cache")||"null"); } catch(x) {}
-        if(S.token&&cached){ S.user=cached; S.config=cachedConfig||S.config; }
+        if(S.token&&cached){ S.user=cached; S.config=cachedConfig||S.config; applyBrandSettings(); }
         else clearSession();
       }
     }
