@@ -51,7 +51,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="backup-btn">ดาวน์โหลด Backup</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -61,7 +61,7 @@ const adminTables = {
     );
     $("holiday-btn").onclick = holidayModal;
     $("audit-btn").onclick = auditModal;
-    $("backup-btn").onclick = downloadBackup;
+    $("backup-btn").onclick = backupCenterModal;
     adminContent();
   }
   function adminContent() {
@@ -862,6 +862,8 @@ const adminTables = {
         password:"เปลี่ยนรหัสผ่าน",
         holidays:"แก้วันหยุด",
         backupExport:"ดาวน์โหลด Backup",
+        backupNow:"Backup ไป Google Drive",
+        restoreBackup:"กู้คืนจาก Backup",
         backupAuto:"Backup อัตโนมัติ"
       };
       $("modal-body").innerHTML =
@@ -878,6 +880,107 @@ const adminTables = {
         );
     } catch (e) {
       $("modal-body").innerHTML = '<div class="warn">' + esc(e.message||String(e)) + '</div>';
+    }
+  }
+
+  function backupCenterModal() {
+    openModal(
+      "สำรองและกู้คืนข้อมูล",
+      '<div class="space-y-4">' +
+        '<div class="warn"><b>คำแนะนำ:</b> ก่อนเปลี่ยนข้อมูลจำนวนมาก ควรสำรองข้อมูลไว้ก่อน ไฟล์ Backup มีข้อมูลบัญชีแบบ hash จึงควรเก็บเป็นความลับ</div>' +
+        '<div class="grid gap-3">' +
+          '<button class="btn" id="backup-drive-now">☁ Backup ไป Google Drive ตอนนี้</button>' +
+          '<button class="btn secondary" id="backup-download-now">⬇ ดาวน์โหลด Backup ลงเครื่อง</button>' +
+        '</div>' +
+        '<hr class="my-4">' +
+        '<h3 class="text-lg font-medium">กู้คืนจากไฟล์ Backup</h3>' +
+        '<p class="muted">ระบบจะตรวจไฟล์ สร้าง Backup ของข้อมูลปัจจุบันไป Google Drive ก่อน แล้วจึงกู้คืน D1</p>' +
+        '<input id="restore-file" type="file" accept="application/json,.json" class="w-full">' +
+        '<button class="btn danger mt-3" id="restore-backup-btn">♻ กู้คืนจากไฟล์ที่เลือก</button>' +
+      '</div>'
+    );
+    $("backup-drive-now").onclick = backupToDriveNow;
+    $("backup-download-now").onclick = downloadBackup;
+    $("restore-backup-btn").onclick = restoreBackupFile;
+  }
+
+  async function backupToDriveNow() {
+    busy(true,"กำลังสำรอง D1 ไป Google Drive…");
+    try {
+      const r = await rpc("backupNow", {}, true);
+      await Swal.fire({
+        icon:"success",
+        title:"Backup สำเร็จ",
+        html:"บันทึกเป็น <b>"+esc(r.filename||"Backup JSON")+"</b><br><span class='muted'>"+esc(new Date(r.createdAt).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}))+"</span>"
+      });
+      toast("สำรองข้อมูลไป Google Drive แล้ว");
+    } catch(e) {
+      error(e);
+    } finally {
+      busy(false);
+    }
+  }
+
+  async function restoreBackupFile() {
+    const input = $("restore-file"), file = input?.files?.[0];
+    if (!file) return Swal.fire({icon:"warning",title:"ยังไม่ได้เลือกไฟล์ Backup"});
+    if (file.size > 20 * 1024 * 1024) return Swal.fire({icon:"error",title:"ไฟล์ใหญ่เกิน 20 MB"});
+    let bundle;
+    try {
+      bundle = JSON.parse(await file.text());
+    } catch(e) {
+      return Swal.fire({icon:"error",title:"อ่านไฟล์ไม่ได้",text:"ไฟล์ต้องเป็น JSON ที่ถูกต้อง"});
+    }
+    if (!bundle || bundle.format !== "rsd-clean-d1-backup-v1" || !bundle.tables) {
+      return Swal.fire({icon:"error",title:"ไฟล์ Backup ไม่ถูกต้อง",text:"รองรับเฉพาะ RSD Clean D1 Backup v1"});
+    }
+    const names=["users","classrooms","areas","assignments","inspections","inspection_inspectors","rewards_log","holidays","settings","audit_log"];
+    const counts=names.map(n=>[n,Array.isArray(bundle.tables[n])?bundle.tables[n].length:0]);
+    const created=bundle.createdAt ? new Date(bundle.createdAt).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}) : "ไม่ระบุ";
+    const summary=counts.map(([n,c])=>"<tr><td style='text-align:left;padding:3px 10px'>"+esc(n)+"</td><td style='text-align:right;padding:3px 10px'>"+c+"</td></tr>").join("");
+    const confirm = await Swal.fire({
+      icon:"warning",
+      title:"ยืนยันการกู้คืนข้อมูล",
+      html:
+        "<p>Backup วันที่ <b>"+esc(created)+"</b></p>"+
+        "<table style='margin:12px auto'>"+summary+"</table>"+
+        "<p><b>ข้อมูล D1 ปัจจุบันจะถูกแทนที่ด้วยข้อมูลในไฟล์นี้</b></p>"+
+        "<p>ก่อน Restore ระบบจะสำรองข้อมูลปัจจุบันไป Google Drive ให้อัตโนมัติ</p>",
+      input:"text",
+      inputLabel:"พิมพ์ RESTORE เพื่อยืนยัน",
+      inputPlaceholder:"RESTORE",
+      showCancelButton:true,
+      confirmButtonText:"กู้คืนข้อมูล",
+      cancelButtonText:"ยกเลิก",
+      confirmButtonColor:"#b91c1c",
+      preConfirm:(v)=>{
+        if(String(v||"").trim()!=="RESTORE"){
+          Swal.showValidationMessage("กรุณาพิมพ์ RESTORE ให้ตรงกัน");
+          return false;
+        }
+        return true;
+      }
+    });
+    if (!confirm.isConfirmed) return;
+
+    busy(true,"กำลังสร้าง Safety Backup และกู้คืนข้อมูล…");
+    try {
+      const r = await rpc("restoreBackup", { bundle, confirm:"RESTORE" }, true);
+      busy(false);
+      await Swal.fire({
+        icon:"success",
+        title:"กู้คืนสำเร็จ",
+        html:
+          "ข้อมูลถูกกู้คืนแล้ว<br>"+
+          "Safety Backup ก่อนกู้คืน: <b>"+esc(r.preRestoreBackup?.filename||"สร้างแล้ว")+"</b><br>"+
+          "<span class='muted'>ระบบจะออกจากระบบเพื่อโหลดข้อมูลชุดใหม่</span>",
+        confirmButtonText:"เข้าสู่ระบบใหม่"
+      });
+      clearSession();
+      location.href = location.pathname;
+    } catch(e) {
+      busy(false);
+      error(e);
     }
   }
 
