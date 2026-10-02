@@ -85,7 +85,7 @@ let taskRows = [];
     $("app").innerHTML =
       heading(
         "งานตรวจของฉัน 🔎",
-        "งานประจำวันที่ " + thaiDay() + " · ดำเนินการแล้ว " + done + " จาก " + todayRows.length + " พื้นที่",
+        "งานประจำวันที่ " + thaiDay() + " · ดำเนินการแล้ว " + done + " จาก " + todayRows.length + " พื้นที่" + (S.config?.inspectionStart&&S.config?.inspectionEnd ? " · เวลาตรวจ "+S.config.inspectionStart+"–"+S.config.inspectionEnd+" น." : ""),
         '<div class="flex flex-wrap gap-2"><button class="btn" id="scan-qr"><span aria-hidden="true">▦</span> สแกน QR ณ จุดตรวจ</button><button class="btn secondary" id="refresh-tasks">รีเฟรช</button></div>',
       ) +
       (offlineView?'<div class="offline-work-notice mb-4"><b>โหมดออฟไลน์</b><span>กำลังใช้รายการงานล่าสุดที่เก็บไว้ในเครื่อง ผลตรวจใหม่จะซิงก์เมื่ออินเทอร์เน็ตกลับมา</span></div>':'') +
