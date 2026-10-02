@@ -261,6 +261,7 @@ async function dispatch(env, action, p, token, request) {
     restoreBackup: async () => restoreBackup(env,u,p),
     systemStatus: async () => systemStatus(env,u),
     systemEvents: async () => systemEvents(env,u,p),
+    clientError: async () => clientError(env,u,p,request),
     notifications: async () => notifications(env,u),
     recycleBin: async () => recycleBin(env,u),
     restoreTrash: async () => restoreTrash(env,u,p),
@@ -638,6 +639,19 @@ async function writeSystemEvent(env,event,request){
       ).run();
   }catch(e){console.error("SYSTEM_EVENT_LOG_FAILED",e);}
 }
+async function clientError(env,u,p,request){
+  const message=text(p.message||"Client error",300);
+  const page=text(p.page||"",80);
+  await writeSystemEvent(env,{
+    eventType:"error",
+    action:"client"+(page?":"+page:""),
+    durationMs:0,
+    message,
+    details:{source:"browser",role:String(u.role||"")}
+  },request);
+  return true;
+}
+
 async function systemEvents(env,u,p){
   role(u,["Admin"]);const db=env.DB;await cleanSystemEvents(db);
   const type=["error","slow","security"].includes(String(p.type||""))?String(p.type):"";
