@@ -270,7 +270,10 @@ async function loadCoverageHistory(seq=S.seq){
     S.charts.push(new Chart($("history-chart"),{type:"line",data:{labels:tr.map(x=>coverageDateText(x.date)),datasets:[{label:"คะแนน",data:tr.map(x=>x.status==="ตรวจแล้ว"?x.score:null),borderColor:"#0f766e",backgroundColor:"rgba(15,118,110,.12)",fill:true,tension:.3,spanGaps:true}]},options:{maintainAspectRatio:false,scales:{y:{min:0,max:3,ticks:{stepSize:1}},x:{ticks:{maxTicksLimit:8}}},plugins:{legend:{display:false}}}}));
   }
   document.querySelectorAll(".history-photo").forEach(b=>b.onclick=()=>coveragePhoto(d.rows[Number(b.dataset.index)]));
-  $("history-export").onclick=()=>{location.hash="exports";route();};
+  $("history-export").onclick=()=>{
+    try{sessionStorage.setItem("rsd-export-prefill",JSON.stringify({start:d.start,end:d.end,type:d.type,id:d.id}));}catch(e){}
+    location.hash="exports";route();
+  };
   icons();
 }
 function coverageBar(label,n,total,cls){
@@ -298,6 +301,16 @@ async function renderExportCenter(seq){
     '</form>'+
     '<div id="export-content" class="mt-4"><div class="card empty">เลือกช่วงวันที่แล้วกด “เตรียมข้อมูล”</div></div>';
   if(teacher&&opts.classes[0]){$("export-class").value=opts.classes[0].id;$("export-class").disabled=true;}
+  try{
+    const pref=JSON.parse(sessionStorage.getItem("rsd-export-prefill")||"null");
+    if(pref){
+      if(pref.start)$("export-start").value=pref.start;
+      if(pref.end)$("export-end").value=pref.end;
+      if(pref.type==="class"&&[...$("export-class").options].some(o=>o.value===pref.id))$("export-class").value=pref.id;
+      if(pref.type==="area"&&[...$("export-area").options].some(o=>o.value===pref.id))$("export-area").value=pref.id;
+    }
+    sessionStorage.removeItem("rsd-export-prefill");
+  }catch(e){}
   $("export-filter").onsubmit=e=>{e.preventDefault();loadExportPreview().catch(error);};icons();
   await loadExportPreview(seq);
 }
