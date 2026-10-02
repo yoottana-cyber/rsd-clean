@@ -332,19 +332,123 @@
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
     reports: { title: "รายงาน", icon: "chart-no-axes-column-increasing", roles: ["Admin", "Supervisor"] },
   };
+  function mobileQuickAction() {
+    if (!S.user) {
+      location.hash = "login";
+      return;
+    }
+    if (S.user.Role === "Inspector") {
+      if (typeof scanQrModal === "function") {
+        scanQrModal();
+      } else {
+        location.hash = "tasks";
+      }
+      return;
+    }
+    if (S.user.Role === "Admin") {
+      location.hash = "admin";
+      setTimeout(() => {
+        const add = $("add-row");
+        if (add) add.click();
+      }, 350);
+      return;
+    }
+    if (S.user.Role === "Supervisor") {
+      location.hash = "reports";
+      return;
+    }
+    if (S.user.Role === "Teacher") {
+      location.hash = "teacher";
+      setTimeout(() => route(), 50);
+      return;
+    }
+  }
+
+  function mobileMoreMenu() {
+    if (!S.user) {
+      location.hash = "login";
+      return;
+    }
+    openModal(
+      "เมนู",
+      '<div class="mobile-more-user">' +
+        '<div class="mobile-more-avatar"><i data-lucide="user-round"></i></div>' +
+        '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
+      '</div>' +
+      '<div class="mobile-more-grid">' +
+        (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
+        '<button class="mobile-more-item" id="mobile-change-pass" type="button"><i data-lucide="key-round"></i><span>เปลี่ยนรหัสผ่าน</span></button>' +
+        '<button class="mobile-more-item" id="mobile-refresh" type="button"><i data-lucide="refresh-cw"></i><span>รีเฟรชข้อมูล</span></button>' +
+        '<button class="mobile-more-item danger-item" id="mobile-logout" type="button"><i data-lucide="log-out"></i><span>ออกจากระบบ</span></button>' +
+      '</div>'
+    );
+    wireInstallButtons();
+    icons();
+    if ($("mobile-change-pass")) $("mobile-change-pass").onclick = () => {
+      closeModal();
+      passwordModal();
+    };
+    if ($("mobile-refresh")) $("mobile-refresh").onclick = async () => {
+      closeModal();
+      await route();
+      toast("รีเฟรชข้อมูลแล้ว");
+    };
+    if ($("mobile-logout")) $("mobile-logout").onclick = async () => {
+      try { await rpc("logout"); } catch (e) {}
+      clearSession();
+      closeModal();
+      location.hash = "login";
+      route();
+    };
+  }
+
   function nav() {
     const keys = S.user
       ? Object.keys(pages).filter((k) => pages[k].roles.includes(S.user.Role))
       : ["dashboard"];
-    $("nav").innerHTML = keys
+
+    const desktopLinks = keys
       .map(
         (k) =>
-          '<a class="nav-link ' +
+          '<a class="nav-link desktop-nav-link ' +
           (S.route === k ? "active" : "") +
           '" href="#' + k + '" aria-label="' + esc(pages[k].title) + '">' +
           '<i data-lucide="' + pages[k].icon + '"></i><span>' + esc(pages[k].title) + "</span></a>",
       )
       .join("");
+
+    let mobileItems = keys.slice();
+    if (S.user?.Role === "Admin") mobileItems = ["dashboard","admin","reports"];
+    if (S.user?.Role === "Supervisor") mobileItems = ["dashboard","reports"];
+    if (S.user?.Role === "Inspector") mobileItems = ["dashboard","tasks"];
+    if (S.user?.Role === "Teacher") mobileItems = ["teacher"];
+
+    const leftCount = Math.ceil(mobileItems.length / 2);
+    const left = mobileItems.slice(0,leftCount);
+    const right = mobileItems.slice(leftCount);
+    const mobileLink = (k) =>
+      '<a class="mobile-nav-item ' + (S.route === k ? "active" : "") +
+      '" href="#' + k + '" aria-label="' + esc(pages[k].title) + '">' +
+      '<i data-lucide="' + pages[k].icon + '"></i><span>' + esc(pages[k].title) + '</span></a>';
+
+    const installUtility = !S.user
+      ? '<button class="mobile-nav-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้ง</span></button>'
+      : "";
+
+    $("nav").innerHTML =
+      '<div class="desktop-nav">' + desktopLinks + '</div>' +
+      '<div class="mobile-bottom-nav">' +
+        left.map(mobileLink).join("") +
+        installUtility +
+        '<button class="mobile-fab" id="mobile-fab" type="button" aria-label="ทางลัด"><i data-lucide="' +
+          (S.user?.Role === "Inspector" ? "scan-line" : S.user?.Role === "Admin" ? "plus" : S.user?.Role === "Teacher" ? "refresh-cw" : "chart-no-axes-column-increasing") +
+        '"></i><span>' +
+          (S.user?.Role === "Inspector" ? "สแกน" : S.user?.Role === "Admin" ? "เพิ่ม" : S.user?.Role === "Teacher" ? "รีเฟรช" : "รายงาน") +
+        '</span></button>' +
+        right.map(mobileLink).join("") +
+        (S.user ? '<button class="mobile-nav-item" id="mobile-more" type="button"><i data-lucide="menu"></i><span>เมนู</span></button>' : '<a class="mobile-nav-item" href="#login"><i data-lucide="log-in"></i><span>เข้าสู่ระบบ</span></a>') +
+      '</div>';
+
     const install = !isStandaloneApp()
       ? '<button class="btn small secondary install-btn" type="button" aria-label="ติดตั้งแอป"><i data-lucide="download"></i><span class="account-label">ติดตั้ง</span></button>'
       : "";
@@ -354,6 +458,10 @@
         '<button class="btn small secondary" id="change-pass" type="button" aria-label="เปลี่ยนรหัสผ่าน"><i data-lucide="key-round"></i><span class="account-label">รหัสผ่าน</span></button>' +
         '<button class="btn small secondary" id="logout" type="button" aria-label="ออกจากระบบ"><i data-lucide="log-out"></i><span class="account-label">ออก</span></button></div>'
       : install + '<a class="btn small" href="#login"><i data-lucide="log-in"></i><span class="account-label">เข้าสู่ระบบ</span></a>';
+
+    if ($("mobile-fab")) $("mobile-fab").onclick = mobileQuickAction;
+    if ($("mobile-more")) $("mobile-more").onclick = mobileMoreMenu;
+
     if (S.user) {
       $("logout").onclick = async () => {
         try { await rpc("logout"); } catch (e) {}
