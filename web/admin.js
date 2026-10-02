@@ -848,6 +848,7 @@ const adminTables = {
   async function loadExecutiveDashboard(seq=S.seq){
     const d=await rpc("executiveDashboard",{},true);
     if(seq!==S.seq)return;
+    if(d.settings){S.config=d.settings;try{localStorage.setItem("rsd-config-cache",JSON.stringify(d.settings));}catch(e){}}
     const t=d.todayStats||{},w=d.currentWeek||{},pw=d.previousWeek||{},m=d.currentMonth||{},pm=d.previousMonth||{},l=d.last30||{};
     const watch=d.watchAreas||[],leaders=d.leaders||[];
     const statusClass=!t.scheduled?"neutral":t.pending?"warning":"good";
