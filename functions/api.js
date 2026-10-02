@@ -149,6 +149,10 @@ async function dispatch(env, action, p, token, request) {
     backupNow: async () => backupNow(env,u),
     restoreBackup: async () => restoreBackup(env,u,p),
     systemStatus: async () => systemStatus(env,u),
+    notifications: async () => notifications(env,u),
+    recycleBin: async () => recycleBin(env,u),
+    restoreTrash: async () => restoreTrash(env,u,p),
+    purgeTrash: async () => purgeTrash(env,u,p),
   };
   assert(handlers[action], "ไม่พบ API");
   const result = await handlers[action]();
@@ -188,7 +192,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash"]);
 
 async function ensureAuditTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
@@ -223,6 +227,8 @@ function auditMeta(action,p,result){
   if(action==="backupExport")return{entityType:"Backup",entityId:"download",details:{createdAt:result?.createdAt||nowIso()}};
   if(action==="backupNow")return{entityType:"Backup",entityId:String(result?.fileId||"manual-drive"),details:{createdAt:result?.createdAt||nowIso(),filename:result?.filename||""}};
   if(action==="restoreBackup")return{entityType:"Backup",entityId:"restore",details:{restoredAt:result?.restoredAt||nowIso(),sourceCreatedAt:result?.sourceCreatedAt||"",preRestoreFileId:result?.preRestoreBackup?.fileId||"",counts:result?.counts||{}}};
+  if(action==="restoreTrash")return{entityType:"RecycleBin",entityId:String(p.recycleId||""),details:{restoredType:result?.entityType||"",restoredId:result?.entityId||""}};
+  if(action==="purgeTrash")return{entityType:"RecycleBin",entityId:String(p.recycleId||""),details:{purged:true}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
@@ -239,6 +245,7 @@ async function auditList(env,u,p){
 }
 async function buildBackupBundle(env){
   await ensureAuditTable(env.DB);
+  await ensureRecycleTable(env.DB);
   const specs=[
     ["users","SELECT * FROM users ORDER BY user_id"],
     ["classrooms","SELECT * FROM classrooms ORDER BY classroom_id"],
@@ -249,7 +256,8 @@ async function buildBackupBundle(env){
     ["rewards_log","SELECT * FROM rewards_log ORDER BY timestamp,log_id"],
     ["holidays","SELECT * FROM holidays ORDER BY holiday_date"],
     ["settings","SELECT * FROM settings ORDER BY key"],
-    ["audit_log","SELECT * FROM audit_log ORDER BY timestamp,audit_id"]
+    ["audit_log","SELECT * FROM audit_log ORDER BY timestamp,audit_id"],
+    ["recycle_bin","SELECT * FROM recycle_bin ORDER BY deleted_at,recycle_id"]
   ];
   const tables={};
   for(const [name,sql] of specs)tables[name]=await all(env.DB,sql);
@@ -274,6 +282,7 @@ function backupArrays(b){
   const t={};
   for(const name of names){assert(Array.isArray(b.tables[name]),"Backup ขาดตาราง "+name);t[name]=b.tables[name];}
   t.audit_log=Array.isArray(b.tables.audit_log)?b.tables.audit_log:[];
+  t.recycle_bin=Array.isArray(b.tables.recycle_bin)?b.tables.recycle_bin:[];
   return t;
 }
 function uniqueBackup(rows,key,label,transform=v=>String(v??"")){
@@ -299,6 +308,7 @@ function validateBackupBundle(b){
   uniqueBackup(t.holidays,"holiday_date","holidays");
   uniqueBackup(t.settings,"key","settings");
   if(t.audit_log.length)uniqueBackup(t.audit_log,"audit_id","audit_log");
+  if(t.recycle_bin.length)uniqueBackup(t.recycle_bin,"recycle_id","recycle_bin");
   const pairs=new Set();
   for(const r of t.inspection_inspectors){
     const k=String(r?.inspection_id||"")+"|"+String(r?.user_id||"");
@@ -349,7 +359,8 @@ async function restoreBackup(env,u,p){
     db.prepare("DELETE FROM classrooms"),
     db.prepare("DELETE FROM holidays"),
     db.prepare("DELETE FROM settings"),
-    db.prepare("DELETE FROM audit_log")
+    db.prepare("DELETE FROM audit_log"),
+    db.prepare("DELETE FROM recycle_bin")
   ]);
 
   const now=nowIso();
@@ -371,6 +382,9 @@ async function restoreBackup(env,u,p){
   await runDbBatches(db,t.settings.map(r=>db.prepare("INSERT INTO settings(key,value) VALUES(?,?)").bind(String(r.key),String(r.value??""))));
   await runDbBatches(db,t.audit_log.map(r=>db.prepare("INSERT INTO audit_log(audit_id,timestamp,actor_user_id,actor_name,actor_role,action,entity_type,entity_id,details_json) VALUES(?,?,?,?,?,?,?,?,?)")
     .bind(String(r.audit_id),String(r.timestamp),String(r.actor_user_id||""),String(r.actor_name||""),String(r.actor_role||""),String(r.action||""),String(r.entity_type||""),String(r.entity_id||""),String(r.details_json||"{}"))));
+  await ensureRecycleTable(db);
+  await runDbBatches(db,t.recycle_bin.map(r=>db.prepare("INSERT INTO recycle_bin(recycle_id,deleted_at,deleted_by_user_id,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(String(r.recycle_id),String(r.deleted_at),String(r.deleted_by_user_id||""),String(r.deleted_by_name||""),String(r.entity_type),String(r.entity_id),String(r.label||""),String(r.snapshot_json||"{}"),Number(r.expires_at||Date.now()+30*24*3600000))));
 
   const restoredAt=nowIso();
   await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_restore_at',?),('last_restore_prebackup_file_id',?),('last_auto_backup_day',?)")
@@ -408,6 +422,7 @@ async function systemStatus(env,u){
   role(u,["Admin"]);
   const db=env.DB;
   await ensureAuditTable(db);
+  await ensureRecycleTable(db);
 
   const countSql = [
     ["users","SELECT COUNT(*) n FROM users"],
@@ -417,7 +432,8 @@ async function systemStatus(env,u){
     ["inspections","SELECT COUNT(*) n FROM inspections"],
     ["auditLogs","SELECT COUNT(*) n FROM audit_log"],
     ["activeSessions","SELECT COUNT(*) n FROM sessions WHERE expires_at>?"],
-    ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"]
+    ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"],
+    ["recycleBin","SELECT COUNT(*) n FROM recycle_bin"]
   ];
   const counts={};
   for(const [key,sql] of countSql){
@@ -484,6 +500,122 @@ async function systemStatus(env,u){
     lastAudit:lastAudit?{timestamp:lastAudit.timestamp,action:lastAudit.action,actorName:lastAudit.actor_name}:null,
     warnings
   };
+}
+
+async function ensureRecycleTable(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS recycle_bin (
+    recycle_id TEXT PRIMARY KEY,
+    deleted_at TEXT NOT NULL,
+    deleted_by_user_id TEXT NOT NULL DEFAULT '',
+    deleted_by_name TEXT NOT NULL DEFAULT '',
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    snapshot_json TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_recycle_expires ON recycle_bin(expires_at)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_recycle_deleted ON recycle_bin(deleted_at DESC)").run();
+}
+async function cleanRecycle(db){
+  await ensureRecycleTable(db);
+  await db.prepare("DELETE FROM recycle_bin WHERE expires_at<?").bind(Date.now()).run();
+}
+function recycleLabel(table,row){
+  if(table==="Users") return String(row?.FullName||row?.Username||row?.UserID||"ผู้ใช้งาน");
+  if(table==="Classrooms") return String(row?.ClassName||row?.ClassroomID||"ห้องเรียน");
+  if(table==="Areas") return String(row?.AreaName||row?.AreaID||"พื้นที่");
+  if(table==="Assignments") return String(row?.AssignmentID||"งานมอบหมาย");
+  return String(row?.id||"รายการ");
+}
+async function putRecycle(db,u,table,id,snapshot){
+  await cleanRecycle(db);
+  const deletedAt=nowIso(),expiresAt=Date.now()+30*24*3600000;
+  await db.prepare("INSERT INTO recycle_bin(recycle_id,deleted_at,deleted_by_user_id,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(uuid(),deletedAt,String(u.user_id||""),String(u.full_name||""),String(table),String(id),recycleLabel(table,snapshot),JSON.stringify(snapshot),expiresAt).run();
+}
+async function recycleBin(env,u){
+  role(u,["Admin"]); const db=env.DB; await cleanRecycle(db);
+  const rows=await all(db,"SELECT recycle_id,deleted_at,deleted_by_name,entity_type,entity_id,label,expires_at FROM recycle_bin ORDER BY deleted_at DESC LIMIT 500");
+  return rows.map(r=>({
+    RecycleID:r.recycle_id,
+    DeletedAt:r.deleted_at,
+    DeletedBy:r.deleted_by_name,
+    EntityType:r.entity_type,
+    EntityID:r.entity_id,
+    Label:r.label,
+    ExpiresAt:Number(r.expires_at)
+  }));
+}
+async function restoreTrash(env,u,p){
+  role(u,["Admin"]); const db=env.DB; await cleanRecycle(db);
+  const r=await db.prepare("SELECT * FROM recycle_bin WHERE recycle_id=?").bind(String(p.recycleId||"")).first();
+  assert(r,"ไม่พบรายการในถังขยะ");
+  const x=parseJson(r.snapshot_json,null); assert(x,"ข้อมูลในถังขยะเสียหาย");
+  const type=String(r.entity_type),now=nowIso();
+  if(type==="Users"){
+    assert(!(await db.prepare("SELECT 1 x FROM users WHERE user_id=? OR username=? COLLATE NOCASE").bind(String(x.UserID),String(x.Username)).first()),"มีผู้ใช้หรือ Username นี้อยู่แล้ว");
+    if(String(x.Role)==="Teacher"&&String(x.LinkedClassroomID||"")) assert(await db.prepare("SELECT 1 x FROM classrooms WHERE classroom_id=?").bind(String(x.LinkedClassroomID)).first(),"ห้องเรียนเดิมไม่มีอยู่แล้ว");
+    await db.prepare("INSERT INTO users(user_id,username,password,full_name,role,linked_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
+      .bind(String(x.UserID),String(x.Username).toLowerCase(),String(x.Password),String(x.FullName),String(x.Role),String(x.LinkedClassroomID||""),now,now).run();
+  }else if(type==="Classrooms"){
+    assert(!(await db.prepare("SELECT 1 x FROM classrooms WHERE classroom_id=? OR class_name=?").bind(String(x.ClassroomID),String(x.ClassName)).first()),"มีห้องเรียนนี้อยู่แล้ว");
+    await db.prepare("INSERT INTO classrooms(classroom_id,class_name,created_at,updated_at) VALUES(?,?,?,?)").bind(String(x.ClassroomID),String(x.ClassName),now,now).run();
+  }else if(type==="Areas"){
+    assert(await db.prepare("SELECT 1 x FROM classrooms WHERE classroom_id=?").bind(String(x.ResponsibleClassroomID)).first(),"ห้องรับผิดชอบเดิมไม่มีอยู่แล้ว");
+    assert(!(await db.prepare("SELECT 1 x FROM areas WHERE area_id=? OR area_name=?").bind(String(x.AreaID),String(x.AreaName)).first()),"มีพื้นที่นี้อยู่แล้ว");
+    await db.prepare("INSERT INTO areas(area_id,area_name,responsible_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?)").bind(String(x.AreaID),String(x.AreaName),String(x.ResponsibleClassroomID),now,now).run();
+  }else if(type==="Assignments"){
+    assert(await db.prepare("SELECT 1 x FROM users WHERE user_id=? AND role='Inspector'").bind(String(x.UserID)).first(),"ผู้ตรวจเดิมไม่มีอยู่แล้ว");
+    assert(await db.prepare("SELECT 1 x FROM areas WHERE area_id=?").bind(String(x.AreaID)).first(),"พื้นที่เดิมไม่มีอยู่แล้ว");
+    assert(!(await db.prepare("SELECT 1 x FROM assignments WHERE assignment_id=? OR (user_id=? AND area_id=?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID)).first()),"มีงานมอบหมายนี้อยู่แล้ว");
+    await db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID),String(x.Days||"1,2,3,4,5"),now,now).run();
+    await ensureToday(env);
+  }else throw Error("ประเภทข้อมูลในถังขยะไม่รองรับ");
+  await db.prepare("DELETE FROM recycle_bin WHERE recycle_id=?").bind(r.recycle_id).run();
+  return{entityType:type,entityId:String(r.entity_id)};
+}
+async function purgeTrash(env,u,p){
+  role(u,["Admin"]); const db=env.DB; await cleanRecycle(db);
+  const id=String(p.recycleId||""); const r=await db.prepare("DELETE FROM recycle_bin WHERE recycle_id=?").bind(id).run();
+  assert(Number(r.meta?.changes||0)>0,"ไม่พบรายการในถังขยะ");
+  return true;
+}
+
+async function notifications(env,u){
+  const db=env.DB,items=[];
+  const add=(type,title,message,action="",count=0)=>items.push({type,title,message,action,count});
+  if(u.role==="Inspector"){
+    await ensureToday(env);
+    const row=await db.prepare(`SELECT COUNT(*) total,
+      SUM(CASE WHEN i.status='ตรวจแล้ว' THEN 1 ELSE 0 END) done
+      FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id
+      WHERE i.inspection_date=? AND ii.user_id=?`).bind(thaiDay(),u.user_id).first();
+    const total=Number(row?.total||0),done=Number(row?.done||0),pending=Math.max(0,total-done);
+    if(pending) add("warning","งานตรวจยังไม่ครบ","วันนี้เหลือ "+pending+" พื้นที่จากทั้งหมด "+total+" พื้นที่","tasks",pending);
+    else if(total) add("success","งานวันนี้ครบแล้ว","ตรวจครบ "+total+" พื้นที่แล้ว","tasks",0);
+    else add("info","ไม่มีงานตรวจวันนี้","อาจเป็นวันหยุดหรือยังไม่ได้มอบหมายงาน","tasks",0);
+  }else if(u.role==="Admin"||u.role==="Supervisor"){
+    await ensureToday(env);
+    const day=thaiDay();
+    const row=await db.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status='ตรวจแล้ว' THEN 1 ELSE 0 END) done FROM inspections WHERE inspection_date=?").bind(day).first();
+    const total=Number(row?.total||0),done=Number(row?.done||0),pending=Math.max(0,total-done);
+    if(pending) add("warning","มีงานตรวจค้าง","วันนี้ยังเหลือ "+pending+" งาน","reports",pending);
+    const unassigned=await db.prepare("SELECT COUNT(*) n FROM areas a WHERE NOT EXISTS(SELECT 1 FROM assignments x WHERE x.area_id=a.area_id)").first();
+    if(Number(unassigned?.n||0)>0) add("warning","พื้นที่ยังไม่มีผู้ตรวจ",Number(unassigned.n)+" พื้นที่ยังไม่มีการมอบหมาย","admin",Number(unassigned.n));
+    const b=await db.prepare("SELECT value FROM settings WHERE key='last_backup_at'").first();
+    const last=String(b?.value||"");
+    if(!last) add("warning","ยังไม่มี Backup","ควรสำรองข้อมูลระบบ","admin",1);
+    else if(Date.now()-new Date(last).getTime()>48*3600000) add("warning","Backup เกิน 48 ชั่วโมง","ควรตรวจสอบระบบสำรองข้อมูล","admin",1);
+    if(u.role==="Admin"){ await cleanRecycle(db); const trash=await db.prepare("SELECT COUNT(*) n FROM recycle_bin").first(); if(Number(trash?.n||0)>0) add("info","มีข้อมูลในถังขยะ",Number(trash.n)+" รายการจะถูกลบถาวรเมื่อครบ 30 วัน","admin",Number(trash.n)); }
+  }else if(u.role==="Teacher"){
+    const rows=await all(db,"SELECT score,inspection_date,meta_json FROM inspections WHERE status='ตรวจแล้ว' ORDER BY inspection_date DESC LIMIT 100");
+    const mine=rows.filter(x=>parseJson(x.meta_json,{}).classId===u.linked_classroom_id);
+    const improve=mine.filter(x=>Number(x.score)===1).slice(0,5);
+    if(improve.length) add("warning","มีผลประเมินที่ควรติดตาม","พบ "+improve.length+" ผลตรวจระดับปรับปรุงล่าสุด","teacher",improve.length);
+    else add("success","สถานะห้องเรียน","ยังไม่พบผลระดับปรับปรุงในรายการล่าสุด","teacher",0);
+  }
+  return{items,unread:items.filter(x=>x.type==="warning").reduce((n,x)=>n+Math.max(1,Number(x.count||0)),0),updatedAt:nowIso()};
 }
 
 async function schoolDay(env,date) {
@@ -559,13 +691,29 @@ async function saveMaster(env,u,p){
 
 async function deleteMaster(env,u,p){
   role(u,["Admin"]); const db=env.DB,m=await masterData(db), id=String(p.id||""); assert(["Users","Classrooms","Areas","Assignments"].includes(p.table),"ตารางไม่ถูกต้อง");
-  if(p.table==="Users") { const old=m.Users.find(x=>x.UserID===id); assert(old,"ไม่พบรายการ"); assert(id!==u.user_id,"ลบบัญชีตนเองไม่ได้"); assert(!m.Assignments.some(a=>a.UserID===id),"ยกเลิกงานมอบหมายก่อน"); assert(old.Role!=="Admin"||m.Users.filter(x=>x.Role==="Admin").length>1,"ต้องมี Admin"); await db.prepare("DELETE FROM users WHERE user_id=?").bind(id).run(); }
-  if(p.table==="Classrooms") { assert(m.Classrooms.some(x=>x.ClassroomID===id),"ไม่พบรายการ"); assert(!m.Areas.some(a=>a.ResponsibleClassroomID===id)&&!m.Users.some(x=>x.LinkedClassroomID===id),"ยังมีข้อมูลอ้างอิงห้องนี้"); await db.prepare("DELETE FROM classrooms WHERE classroom_id=?").bind(id).run(); }
-  if(p.table==="Areas") { assert(m.Areas.some(x=>x.AreaID===id),"ไม่พบรายการ"); assert(!m.Assignments.some(a=>a.AreaID===id),"ยกเลิกงานมอบหมายก่อน"); await db.prepare("DELETE FROM areas WHERE area_id=?").bind(id).run(); }
-  if(p.table==="Assignments") { assert(m.Assignments.some(x=>x.AssignmentID===id),"ไม่พบรายการ"); await db.prepare("DELETE FROM assignments WHERE assignment_id=?").bind(id).run(); }
+  if(p.table==="Users"){
+    const old=m.Users.find(x=>x.UserID===id); assert(old,"ไม่พบรายการ"); assert(id!==u.user_id,"ลบบัญชีตนเองไม่ได้"); assert(!m.Assignments.some(a=>a.UserID===id),"ยกเลิกงานมอบหมายก่อน"); assert(old.Role!=="Admin"||m.Users.filter(x=>x.Role==="Admin").length>1,"ต้องมี Admin");
+    await putRecycle(db,u,p.table,id,old);
+    await db.prepare("DELETE FROM sessions WHERE user_id=?").bind(id).run();
+    await db.prepare("DELETE FROM users WHERE user_id=?").bind(id).run();
+  }
+  if(p.table==="Classrooms"){
+    const old=m.Classrooms.find(x=>x.ClassroomID===id); assert(old,"ไม่พบรายการ"); assert(!m.Areas.some(a=>a.ResponsibleClassroomID===id)&&!m.Users.some(x=>x.LinkedClassroomID===id),"ยังมีข้อมูลอ้างอิงห้องนี้");
+    await putRecycle(db,u,p.table,id,old);
+    await db.prepare("DELETE FROM classrooms WHERE classroom_id=?").bind(id).run();
+  }
+  if(p.table==="Areas"){
+    const old=m.Areas.find(x=>x.AreaID===id); assert(old,"ไม่พบรายการ"); assert(!m.Assignments.some(a=>a.AreaID===id),"ยกเลิกงานมอบหมายก่อน");
+    await putRecycle(db,u,p.table,id,old);
+    await db.prepare("DELETE FROM areas WHERE area_id=?").bind(id).run();
+  }
+  if(p.table==="Assignments"){
+    const old=m.Assignments.find(x=>x.AssignmentID===id); assert(old,"ไม่พบรายการ");
+    await putRecycle(db,u,p.table,id,old);
+    await db.prepare("DELETE FROM assignments WHERE assignment_id=?").bind(id).run();
+  }
   return true;
 }
-
 async function assign(env,u,p){
   role(u,["Admin"]); const db=env.DB,m=await masterData(db), users=[...new Set((p.userIds||[]).map(String))], areas=[...new Set((p.areaIds||[]).map(String))], days=dutyText(Array.isArray(p.days)?p.days.join(","):p.days);
   assert(users.length&&areas.length,"เลือกผู้ตรวจและพื้นที่"); users.forEach(id=>assert(m.Users.some(x=>x.UserID===id&&x.Role==="Inspector"),"ผู้ตรวจไม่ถูกต้อง")); areas.forEach(id=>assert(m.Areas.some(x=>x.AreaID===id),"ไม่พบพื้นที่"));
