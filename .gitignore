@@ -1,0 +1,28 @@
+# Local dependencies / tooling
+node_modules/
+.wrangler/
+.devcontainer/
+
+# Cloudflare local secrets and environment files
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+
+# Local Wrangler configs that may contain account/database IDs
+wrangler.toml
+wrangler.json
+wrangler.jsonc
+!wrangler.jsonc.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs / generated artifacts
+*.log
+dist/
+coverage/
