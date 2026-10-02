@@ -428,6 +428,7 @@
     try {
       sessionStorage.removeItem("rsd-token");
       localStorage.removeItem("rsd-token");
+      localStorage.removeItem("rsd-user-cache");
     } catch (e) {}
   }
   const pages = {
@@ -671,6 +672,7 @@
         S.token = r.token;
         S.user = r.user;
         storeSession(r.token, remember);
+        try { localStorage.setItem("rsd-user-cache",JSON.stringify(r.user)); } catch(e) {}
         if (remember && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
         S.scanToken = getPendingQr();
         S.scanHandled = false;
@@ -879,11 +881,18 @@
       try {
         const b = await rpc("bootstrap");
         S.user = b.user;
+        try { localStorage.setItem("rsd-user-cache",JSON.stringify(b.user)); } catch(e) {}
       } catch (e) {
-        clearSession();
+        let cached=null;
+        try { cached=JSON.parse(localStorage.getItem("rsd-user-cache")||"null"); } catch(x) {}
+        if(S.token&&cached) S.user=cached;
+        else clearSession();
       }
     }
-    route();
+    await route();
+    if(navigator.onLine&&S.user&&typeof window.syncOfflineInspections==="function"){
+      try{await window.syncOfflineInspections(false);}catch(e){}
+    }
   });
 
   if ("serviceWorker" in navigator) {
