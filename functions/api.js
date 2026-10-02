@@ -362,7 +362,7 @@ async function login(env,p) {
   const token=uuid()+uuid(), th=await digest(token), now=Date.now(), exp=now+(p.remember===true?REMEMBER_SESSION_MS:SESSION_MS),client=cleanClient(p);
   await db.prepare("INSERT INTO sessions(token_hash,user_id,expires_at,credential_hash,created_at,device_id,device_label,last_seen) VALUES(?,?,?,?,?,?,?,?)")
     .bind(th,u.user_id,exp,await digest(u.password),now,client.id,client.label,now).run();
-  return { token, user:publicUser(u), mustChange:c.scheme === "bootstrap" };
+  return { token, user:publicUser(u), mustChange:c.scheme === "bootstrap", settings:await getAppSettings(db) };
 }
 async function auth(env, token) {
   assert(token,"SESSION_EXPIRED"); const db=env.DB, th=await digest(token);
@@ -918,6 +918,9 @@ async function notifications(env,u,skipEnsure=false){
     const mineReturned=returned.filter(i=>String(metaOf(i).approvalStatus||"")==="ส่งกลับแก้ไข" && Array.isArray(metaOf(i).inspectorIds) && metaOf(i).inspectorIds.map(String).includes(String(u.user_id)));
     if(mineReturned.length)add("warning","มีผลตรวจถูกส่งกลับแก้ไข",mineReturned.length+" รายการ กรุณาตรวจสอบหมายเหตุผู้รับรอง","tasks",mineReturned.length);
 
+    await ensureDutyOverridesTable(db);
+    const sub=await db.prepare("SELECT COUNT(*) n FROM duty_overrides WHERE override_date=? AND substitute_user_id=?").bind(today,u.user_id).first();
+    if(Number(sub?.n||0)>0)add("info","วันนี้มีเวรทดแทน","ได้รับมอบหมายแทน "+Number(sub.n)+" พื้นที่","tasks",0);
     const nowTime=new Intl.DateTimeFormat("en-GB",{timeZone:TZ,hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date());
     if(pending&&nowTime>=cfg.inspectionEnd)add("warning","เลยเวลาตรวจที่กำหนดแล้ว","ยังเหลือ "+pending+" พื้นที่ที่ไม่ได้ดำเนินการ","tasks",pending);
     else if(pending&&nowTime>=shiftClock(cfg.inspectionEnd,-60))add("warning","ใกล้หมดเวลาตรวจ","ยังเหลือ "+pending+" พื้นที่ก่อน "+cfg.inspectionEnd+" น.","tasks",pending);
@@ -1400,7 +1403,7 @@ async function rewardRecords(env,ins,teamMap){
   for(const i of ins){ const m=metaOf(i); (classes[m.classId]||(classes[m.classId]=[])).push(i); for(const uid of inspectorIdsFrom(i,teamMap)){ const k=uid+"|"+i.inspection_date; (inspectors[k]||(inspectors[k]=[])).push(i); } }
   for(const [ref,list] of Object.entries(classes)){
     list.sort((a,b)=>a.inspection_date.localeCompare(b.inspection_date)||a.inspection_id.localeCompare(b.inspection_id)); let streak=0,count=0,improving=0,star=false,improved=false;
-    for(const i of list){ const m=metaOf(i),s=i.status==="ตรวจแล้ว"?Number(i.score):0; if(s===3){streak++;count++;if(improving>0)improving++;}else{streak=0;improving=s===1?1:0;} if(streak>=5&&!star){await add(ref,"star","ดาวสะอาด",{at:m.completedAt,description:"ยอดเยี่ยม 5 ผลตรวจติดต่อกัน"});star=true;} if([10,20,50].includes(count)&&s===3)await add(ref,"consistent:"+count,"ความสม่ำเสมอ "+count+" ครั้ง",{at:m.completedAt,count}); if(improving===4&&!improved){await add(ref,"improve","พัฒนาการยอดเยี่ยม",{at:m.completedAt,description:"ปรับปรุง แล้วได้ยอดเยี่ยม 3 ผลตรวจติดต่อกัน"});improved=true;} }
+    for(const i of list){ if(i.status==="งดตรวจ")continue; const m=metaOf(i),s=i.status==="ตรวจแล้ว"?Number(i.score):0; if(s===3){streak++;count++;if(improving>0)improving++;}else{streak=0;improving=s===1?1:0;} if(streak>=5&&!star){await add(ref,"star","ดาวสะอาด",{at:m.completedAt,description:"ยอดเยี่ยม 5 ผลตรวจติดต่อกัน"});star=true;} if([10,20,50].includes(count)&&s===3)await add(ref,"consistent:"+count,"ความสม่ำเสมอ "+count+" ครั้ง",{at:m.completedAt,count}); if(improving===4&&!improved){await add(ref,"improve","พัฒนาการยอดเยี่ยม",{at:m.completedAt,description:"ปรับปรุง แล้วได้ยอดเยี่ยม 3 ผลตรวจติดต่อกัน"});improved=true;} }
   }
   for(const [key,items] of Object.entries(inspectors)){ const [uid,date]=key.split("|"); const ok=items.length&&items.every(i=>i.status==="ตรวจแล้ว"&&metaOf(i).completedAt&&new Intl.DateTimeFormat("en-GB",{timeZone:TZ,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date(metaOf(i).completedAt))<"10:00:00"); if(ok) await add(uid,"perfect:"+date,"Perfect Day",{at:date+"T10:00:00+07:00",date,count:items.length}); }
   return rewards;
@@ -1520,6 +1523,7 @@ async function executiveDashboard(env,u){
     weekSeries,monthSeries,
     leaders:leaderboard(last30,cfg).slice(0,5),
     watchAreas,watchClasses,
+    settings:cfg,
     updatedAt:nowIso()
   };
 }
