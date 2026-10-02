@@ -1,6 +1,6 @@
 const TZ = "Asia/Bangkok";
 const SESSION_MS = 8 * 3600000;
-const REMEMBER_SESSION_MS = 30 * 24 * 3600000;
+const REMEMBER_SESSION_MS = 90 * 24 * 3600000;
 const MAX_IMAGE = 100 * 1024 * 1024;
 const ITERATIONS = 600000;
 const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
@@ -175,6 +175,13 @@ async function auth(env, token) {
   const s=await db.prepare("SELECT s.*,u.* FROM sessions s JOIN users u ON u.user_id=s.user_id WHERE s.token_hash=?").bind(th).first();
   if (!s || Number(s.expires_at)<Date.now() || !equalLoose(s.credential_hash,await digest(s.password))) {
     await db.prepare("DELETE FROM sessions WHERE token_hash=?").bind(th).run(); throw Error("SESSION_EXPIRED");
+  }
+  const remembered = Number(s.expires_at) - Number(s.created_at) > SESSION_MS * 2;
+  const renewBefore = 30 * 24 * 3600000;
+  if (remembered && Number(s.expires_at) - Date.now() < renewBefore) {
+    const next = Date.now() + REMEMBER_SESSION_MS;
+    await db.prepare("UPDATE sessions SET expires_at=? WHERE token_hash=?").bind(next,th).run();
+    s.expires_at = next;
   }
   return s;
 }
