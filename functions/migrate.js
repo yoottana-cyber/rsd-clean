@@ -7,7 +7,6 @@ export async function onRequest(context){
     302
   );
 }
-
 if (request.method !== "POST") {
   return Response.json(
     { ok: false, error: "METHOD_NOT_ALLOWED" },
