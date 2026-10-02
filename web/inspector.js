@@ -377,9 +377,9 @@ let taskRows = [];
         '<div class="field hidden" id="skip-reason-field"><label>เหตุผลงดตรวจ</label><select name="skipReason"><option value="">— เลือกเหตุผล —</option>'+((S.config?.skipReasons||["ผู้ตรวจลา","กิจกรรมโรงเรียน","ฝนตก/สภาพอากาศ","พื้นที่ปิด/เข้าไม่ได้","เหตุจำเป็นอื่น"]).map(x=>'<option value="'+esc(x)+'" '+(i.SkipReason===x?"selected":"")+'>'+esc(x)+'</option>').join(""))+'</select></div>'+
         '<div class="field"><label>ระดับประเมิน</label><select name="score"><option value="">— เลือกระดับ —</option>' +
         [
-          [3, "ยอดเยี่ยม — 3 คะแนน"],
-          [2, "ปานกลาง — 2 คะแนน"],
-          [1, "ปรับปรุง — 1 คะแนน"],
+          [3, (S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม")+" — 3 คะแนน"],
+          [2, (S.config?.scoreLabels?.["2"]||"ปานกลาง")+" — 2 คะแนน"],
+          [1, (S.config?.scoreLabels?.["1"]||"ปรับปรุง")+" — 1 คะแนน"],
         ]
           .map(
             ([v, l]) =>
