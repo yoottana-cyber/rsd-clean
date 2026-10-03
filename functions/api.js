@@ -253,6 +253,14 @@ async function dispatch(env, action, p, token, request) {
     myRewards: async () => { role(u,["Inspector"]); return (await all(db,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id)).map(rewardRow); },
     dashboard: async () => dashboard(env,u,validateDate(p.date || thaiDay())),
     executiveDashboard: async () => executiveDashboard(env,u),
+    dailyControl: async () => dailyControl(env,u,p),
+    academicPeriods: async () => academicPeriods(env,u),
+    saveAcademicPeriod: async () => saveAcademicPeriod(env,u,p),
+    deleteAcademicPeriod: async () => deleteAcademicPeriod(env,u,p),
+    certificateData: async () => certificateData(env,u,p),
+    pushStatus: async () => pushStatus(env,u),
+    savePushSubscription: async () => savePushSubscription(env,u,p),
+    deletePushSubscription: async () => deletePushSubscription(env,u,p),
     appSettings: async () => appSettings(env,u),
     saveAppSettings: async () => saveAppSettings(env,u,p),
     dutyOverrides: async () => dutyOverrides(env,u,p),
@@ -391,7 +399,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription"]);
 
 async function ensureAuditTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
@@ -435,6 +443,10 @@ function auditMeta(action,p,result){
   if(action==="deleteDutyOverride")return{entityType:"DutyOverride",entityId:String(p.id||""),details:{deleted:true}};
   if(action==="reviewInspection")return{entityType:"InspectionReview",entityId:String(p.id||""),details:{decision:String(p.decision||""),note:String(p.note||"").slice(0,300)}};
   if(action==="setInspectionException")return{entityType:"InspectionException",entityId:String(p.id||""),details:{action:String(p.action||""),reason:String(p.reason||"").slice(0,120)}};
+  if(action==="saveAcademicPeriod")return{entityType:"AcademicPeriod",entityId:String(result?.PeriodID||p.id||""),details:{label:String(p.label||""),active:p.isActive===true}};
+  if(action==="deleteAcademicPeriod")return{entityType:"AcademicPeriod",entityId:String(p.id||""),details:{deleted:true}};
+  if(action==="savePushSubscription")return{entityType:"PushSubscription",entityId:String(result?.SubscriptionID||""),details:{enabled:true}};
+  if(action==="deletePushSubscription")return{entityType:"PushSubscription",entityId:String(p.id||""),details:{deleted:true}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
@@ -453,6 +465,8 @@ async function buildBackupBundle(env){
   await ensureAuditTable(env.DB);
   await ensureRecycleTable(env.DB);
   await ensureDutyOverridesTable(env.DB);
+  await ensureAcademicPeriodsTable(env.DB);
+  await ensurePushSubscriptionsTable(env.DB);
   const specs=[
     ["users","SELECT * FROM users ORDER BY user_id"],
     ["classrooms","SELECT * FROM classrooms ORDER BY classroom_id"],
@@ -465,7 +479,9 @@ async function buildBackupBundle(env){
     ["settings","SELECT * FROM settings ORDER BY key"],
     ["audit_log","SELECT * FROM audit_log ORDER BY timestamp,audit_id"],
     ["recycle_bin","SELECT * FROM recycle_bin ORDER BY deleted_at,recycle_id"],
-    ["duty_overrides","SELECT * FROM duty_overrides ORDER BY override_date,override_id"]
+    ["duty_overrides","SELECT * FROM duty_overrides ORDER BY override_date,override_id"],
+    ["academic_periods","SELECT * FROM academic_periods ORDER BY start_date,period_id"],
+    ["push_subscriptions","SELECT * FROM push_subscriptions ORDER BY user_id,subscription_id"]
   ];
   const tables={};
   for(const [name,sql] of specs)tables[name]=await all(env.DB,sql);
@@ -492,6 +508,8 @@ function backupArrays(b){
   t.audit_log=Array.isArray(b.tables.audit_log)?b.tables.audit_log:[];
   t.recycle_bin=Array.isArray(b.tables.recycle_bin)?b.tables.recycle_bin:[];
   t.duty_overrides=Array.isArray(b.tables.duty_overrides)?b.tables.duty_overrides:[];
+  t.academic_periods=Array.isArray(b.tables.academic_periods)?b.tables.academic_periods:[];
+  t.push_subscriptions=Array.isArray(b.tables.push_subscriptions)?b.tables.push_subscriptions:[];
   return t;
 }
 function uniqueBackup(rows,key,label,transform=v=>String(v??"")){
@@ -544,6 +562,7 @@ function validateBackupBundle(b){
     assert(userIds.has(String(r.substitute_user_id)),"เวรทดแทนอ้างอิงผู้ตรวจทดแทนที่ไม่มีอยู่");
     if(String(r.replace_user_id||""))assert(userIds.has(String(r.replace_user_id)),"เวรทดแทนอ้างอิงผู้ตรวจเดิมที่ไม่มีอยู่");
   }
+  for(const r of t.push_subscriptions)assert(userIds.has(String(r.user_id)),"Push subscription อ้างอิงผู้ใช้ที่ไม่มีอยู่");
   return{tables:t,counts:Object.fromEntries(Object.entries(t).map(([k,v])=>[k,v.length]))};
 }
 async function runDbBatches(db,stmts,size=50){
@@ -577,7 +596,9 @@ async function restoreBackup(env,u,p){
     db.prepare("DELETE FROM settings"),
     db.prepare("DELETE FROM audit_log"),
     db.prepare("DELETE FROM recycle_bin"),
-    db.prepare("DELETE FROM duty_overrides")
+    db.prepare("DELETE FROM duty_overrides"),
+    db.prepare("DELETE FROM academic_periods"),
+    db.prepare("DELETE FROM push_subscriptions")
   ]);
 
   const now=nowIso();
@@ -605,6 +626,12 @@ async function restoreBackup(env,u,p){
   await ensureDutyOverridesTable(db);
   await runDbBatches(db,t.duty_overrides.map(r=>db.prepare("INSERT INTO duty_overrides(override_id,override_date,area_id,replace_user_id,substitute_user_id,reason,created_by_id,created_by_name,created_at) VALUES(?,?,?,?,?,?,?,?,?)")
     .bind(String(r.override_id),String(r.override_date),String(r.area_id),String(r.replace_user_id||""),String(r.substitute_user_id),String(r.reason||""),String(r.created_by_id||""),String(r.created_by_name||""),String(r.created_at||now))));
+  await ensureAcademicPeriodsTable(db);
+  await runDbBatches(db,t.academic_periods.map(r=>db.prepare("INSERT INTO academic_periods(period_id,academic_year,semester,label,start_date,end_date,is_active,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(String(r.period_id),String(r.academic_year),String(r.semester),String(r.label),String(r.start_date),String(r.end_date),Number(r.is_active||0),String(r.created_at||now),String(r.updated_at||now))));
+  await ensurePushSubscriptionsTable(db);
+  await runDbBatches(db,t.push_subscriptions.map(r=>db.prepare("INSERT INTO push_subscriptions(subscription_id,user_id,endpoint,p256dh,auth,device_label,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)")
+    .bind(String(r.subscription_id),String(r.user_id),String(r.endpoint),String(r.p256dh||""),String(r.auth||""),String(r.device_label||""),Number(r.enabled||0),String(r.created_at||now),String(r.updated_at||now))));
 
   const restoredAt=nowIso();
   await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('last_restore_at',?),('last_restore_prebackup_file_id',?),('last_auto_backup_day',?)")
@@ -990,6 +1017,150 @@ async function notifications(env,u,skipEnsure=false){
 function shiftClock(hhmm,minutes){
   const [h,m]=String(hhmm||"00:00").split(":").map(Number),total=(h*60+m+minutes+1440)%1440;
   return String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0");
+}
+
+async function ensureAcademicPeriodsTable(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS academic_periods (
+    period_id TEXT PRIMARY KEY,
+    academic_year TEXT NOT NULL,
+    semester TEXT NOT NULL,
+    label TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`).run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_academic_periods_dates ON academic_periods(start_date,end_date)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_academic_periods_active ON academic_periods(is_active,start_date)").run();
+}
+async function academicPeriods(env,u){
+  assert(u,"SESSION_EXPIRED");
+  const db=env.DB;await ensureAcademicPeriodsTable(db);
+  const rows=await all(db,"SELECT * FROM academic_periods ORDER BY start_date DESC,academic_year DESC,semester DESC");
+  return rows.map(r=>({
+    PeriodID:String(r.period_id),
+    AcademicYear:String(r.academic_year),
+    Semester:String(r.semester),
+    Label:String(r.label),
+    StartDate:String(r.start_date),
+    EndDate:String(r.end_date),
+    IsActive:Number(r.is_active||0)===1
+  }));
+}
+async function saveAcademicPeriod(env,u,p){
+  role(u,["Admin"]);const db=env.DB;await ensureAcademicPeriodsTable(db);
+  const id=text(p.id||"",100)||uuid(),year=text(p.academicYear,20),semester=text(p.semester,30),label=text(p.label,120),start=validateDate(p.startDate),end=validateDate(p.endDate),active=p.isActive===true,now=nowIso();
+  assert(year&&semester&&label,"กรอกข้อมูลปีการศึกษา/ภาคเรียนให้ครบ");
+  assert(start<=end,"วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด");
+  if(active)await db.prepare("UPDATE academic_periods SET is_active=0,updated_at=? WHERE is_active=1").bind(now).run();
+  await db.prepare(`INSERT INTO academic_periods(period_id,academic_year,semester,label,start_date,end_date,is_active,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(period_id) DO UPDATE SET academic_year=excluded.academic_year,semester=excluded.semester,label=excluded.label,start_date=excluded.start_date,end_date=excluded.end_date,is_active=excluded.is_active,updated_at=excluded.updated_at`)
+    .bind(id,year,semester,label,start,end,active?1:0,now,now).run();
+  return{PeriodID:id,AcademicYear:year,Semester:semester,Label:label,StartDate:start,EndDate:end,IsActive:active};
+}
+async function deleteAcademicPeriod(env,u,p){
+  role(u,["Admin"]);const db=env.DB;await ensureAcademicPeriodsTable(db);
+  const id=text(p.id,100),row=await db.prepare("SELECT * FROM academic_periods WHERE period_id=?").bind(id).first();assert(row,"ไม่พบปีการศึกษา/ภาคเรียน");
+  assert(Number(row.is_active||0)!==1,"ไม่สามารถลบภาคเรียนที่กำลังใช้งาน");
+  await db.prepare("DELETE FROM academic_periods WHERE period_id=?").bind(id).run();
+  return true;
+}
+async function activeAcademicPeriod(db){
+  await ensureAcademicPeriodsTable(db);
+  const active=await db.prepare("SELECT * FROM academic_periods WHERE is_active=1 ORDER BY updated_at DESC LIMIT 1").first();
+  if(active)return active;
+  const today=thaiDay();
+  return db.prepare("SELECT * FROM academic_periods WHERE start_date<=? AND end_date>=? ORDER BY start_date DESC LIMIT 1").bind(today,today).first();
+}
+async function ensurePushSubscriptionsTable(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    subscription_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL DEFAULT '',
+    auth TEXT NOT NULL DEFAULT '',
+    device_label TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`).run();
+  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id,enabled)").run();
+}
+async function pushStatus(env,u){
+  const db=env.DB;await ensurePushSubscriptionsTable(db);
+  const rows=await all(db,"SELECT subscription_id,device_label,enabled,created_at,updated_at FROM push_subscriptions WHERE user_id=? ORDER BY updated_at DESC",u.user_id);
+  return{
+    configured:!!env.VAPID_PUBLIC_KEY,
+    publicKey:String(env.VAPID_PUBLIC_KEY||""),
+    subscriptions:rows.map(r=>({SubscriptionID:r.subscription_id,DeviceLabel:r.device_label,Enabled:Number(r.enabled||0)===1,CreatedAt:r.created_at,UpdatedAt:r.updated_at}))
+  };
+}
+async function savePushSubscription(env,u,p){
+  const db=env.DB;await ensurePushSubscriptionsTable(db);
+  const sub=p.subscription&&typeof p.subscription==="object"?p.subscription:{},endpoint=text(sub.endpoint,2000),keys=sub.keys&&typeof sub.keys==="object"?sub.keys:{},p256dh=text(keys.p256dh||"",1000),auth=text(keys.auth||"",500),device=text(p.deviceLabel||"",120),now=nowIso();
+  assert(endpoint&&p256dh&&auth,"ข้อมูล Push Subscription ไม่ครบ");
+  const old=await db.prepare("SELECT subscription_id FROM push_subscriptions WHERE endpoint=?").bind(endpoint).first(),id=old?.subscription_id||uuid();
+  await db.prepare(`INSERT INTO push_subscriptions(subscription_id,user_id,endpoint,p256dh,auth,device_label,enabled,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,p256dh=excluded.p256dh,auth=excluded.auth,device_label=excluded.device_label,enabled=1,updated_at=excluded.updated_at`)
+    .bind(id,u.user_id,endpoint,p256dh,auth,device,1,now,now).run();
+  return{SubscriptionID:id};
+}
+async function deletePushSubscription(env,u,p){
+  const db=env.DB;await ensurePushSubscriptionsTable(db);
+  const id=text(p.id||"",120),endpoint=text(p.endpoint||"",2000);
+  if(id)await db.prepare("DELETE FROM push_subscriptions WHERE subscription_id=? AND user_id=?").bind(id,u.user_id).run();
+  else if(endpoint)await db.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND user_id=?").bind(endpoint,u.user_id).run();
+  else throw Error("ไม่พบ Push Subscription");
+  return true;
+}
+async function dailyControl(env,u,p){
+  role(u,["Admin","Supervisor"]);const db=env.DB,date=validateDate(p.date||thaiDay());
+  if(date===thaiDay())await ensureToday(env);
+  const cfg=await getAppSettings(db),period=await activeAcademicPeriod(db);
+  const [rows,teams,overrides]=await Promise.all([
+    all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
+    all(db,`SELECT ii.* FROM inspection_inspectors ii JOIN inspections i ON i.inspection_id=ii.inspection_id WHERE i.inspection_date=? ORDER BY ii.inspection_id,ii.user_name`,date),
+    (async()=>{await ensureDutyOverridesTable(db);return all(db,`SELECT d.*,su.full_name substitute_name,ru.full_name replace_name FROM duty_overrides d
+      JOIN users su ON su.user_id=d.substitute_user_id LEFT JOIN users ru ON ru.user_id=d.replace_user_id WHERE d.override_date=? ORDER BY d.area_id`,date);})()
+  ]);
+  const teamMap=new Map();teams.forEach(x=>{if(!teamMap.has(x.inspection_id))teamMap.set(x.inspection_id,[]);teamMap.get(x.inspection_id).push(x);});
+  const overrideMap=new Map();overrides.forEach(x=>{if(!overrideMap.has(x.area_id))overrideMap.set(x.area_id,[]);overrideMap.get(x.area_id).push(x);});
+  const items=rows.map(i=>{
+    const m=metaOf(i),team=teamMap.get(i.inspection_id)||[],ovs=overrideMap.get(i.area_id)||[];
+    return{
+      InspectionID:i.inspection_id,Date:i.inspection_date,AreaID:i.area_id,AreaName:m.areaName||"—",ClassName:m.className||"—",
+      Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",
+      ApprovalStatus:m.approvalStatus||"",CompletedBy:m.completedByName||i.completed_by_name||"",CompletedAt:m.completedAt||i.completed_at||"",
+      Inspectors:team.map(x=>({UserID:x.user_id,Name:x.user_name})),
+      HasSubstitute:ovs.length>0,
+      Substitutes:ovs.map(x=>({ReplaceName:x.replace_name||"",SubstituteName:x.substitute_name||"",Reason:x.reason||""})),
+      PhotoLinks:parseJson(i.photo_links_json,[]).map(id=>({id}))
+    };
+  });
+  const summary={
+    total:items.length,
+    done:items.filter(x=>x.Status==="ตรวจแล้ว").length,
+    skipped:items.filter(x=>x.Status==="งดตรวจ").length,
+    pending:items.filter(x=>x.Status==="รอตรวจ").length,
+    approvalPending:items.filter(x=>x.ApprovalStatus==="รอรับรอง").length,
+    substitute:items.filter(x=>x.HasSubstitute).length
+  };
+  return{date,settings:cfg,period:period?{PeriodID:period.period_id,Label:period.label,StartDate:period.start_date,EndDate:period.end_date}:null,summary,items,updatedAt:nowIso()};
+}
+async function certificateData(env,u,p){
+  role(u,["Admin","Supervisor"]);const db=env.DB;await ensureAcademicPeriodsTable(db);
+  const month=/^\d{4}-\d{2}$/.test(String(p.month||""))?String(p.month):thaiDay().slice(0,7);
+  const start=month+"-01",end=monthLastDay(month)<thaiDay()?monthLastDay(month):thaiDay(),cfg=await getAppSettings(db);
+  const {ins}=await inspectionBundleRange(db,start,end),rows=await monthly(env,ins,month),period=await activeAcademicPeriod(db);
+  return{
+    month,settings:cfg,period:period?{PeriodID:period.period_id,Label:period.label,AcademicYear:period.academic_year,Semester:period.semester}:null,
+    rows:rows.filter(x=>["เหรียญทอง","เหรียญเงิน","เหรียญทองแดง"].includes(x.medal)),
+    generatedAt:nowIso()
+  };
 }
 
 async function getAppSettings(db){
