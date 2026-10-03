@@ -1807,7 +1807,7 @@ const adminTables = {
       labels: ["ผู้ตรวจ", "พื้นที่", "วันเข้าเวร"],
       sample: [
         ["inspector01", "สวนหน้าอาคาร", "1,2,3,4,5"],
-        ["inspector02", "ลานกิจกรรม", "1,3,5"],
+        ["inspector02", "ลานกิจกรรม", "1,3,5,6,7"],
       ],
     },
   };
@@ -1963,7 +1963,7 @@ const adminTables = {
           : kind === "Areas"
             ? "เพิ่มห้องเรียนให้เรียบร้อยก่อน ใช้ชื่อห้องเรียนหรือ ClassroomID เพื่อจับคู่"
             : kind === "Assignments"
-              ? "ใช้ Username ของผู้ตรวจ + ชื่อพื้นที่ + วันเข้าเวร เช่น 1,2,3,4,5"
+              ? "ใช้ Username ของผู้ตรวจ + ชื่อพื้นที่ + วันเข้าเวร 1–7 (6=เสาร์, 7=อาทิตย์) เช่น 1,2,3,4,5,6"
               : "กรอกหนึ่งห้องต่อหนึ่งแถว") +
         "</p>" +
         '<div class="field"><label for="bulk-file">เลือกไฟล์ CSV / TSV</label><input id="bulk-file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></div>' +
