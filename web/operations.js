@@ -48,7 +48,7 @@ async function loadDailyControl(seq=S.seq){
   $("control-content").innerHTML=
     '<section class="ops-control-hero">'+
       '<div><span>สถานะประจำวันที่ '+esc(opDateText(d.date))+'</span><h2>'+(s.pending?"ยังมีงานรอตรวจ "+s.pending+" พื้นที่":"ดำเนินการครบแล้ว")+'</h2><p>'+esc(period)+' · เวลาตรวจ '+esc(cfg.inspectionStart||"—")+'–'+esc(cfg.inspectionEnd||"—")+' น.</p></div>'+
-      '<div class="ops-control-progress"><b>'+s.done+' / '+s.total+'</b><span>ตรวจแล้ว</span></div>'+
+      '<div class="ops-control-progress"><b>'+Number(s.resolved??(s.done+s.skipped))+' / '+s.total+'</b><span>ดำเนินการแล้ว</span></div>'+
     '</section>'+
     '<div class="exec-kpi-grid">'+
       '<article class="exec-kpi"><span>รอตรวจ</span><b>'+s.pending+'</b><small>ต้องดำเนินการ</small></article>'+
