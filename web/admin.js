@@ -474,7 +474,7 @@ const adminTables = {
               '<div class="area-first-actions"><button type="button" class="btn secondary area-first-add assignment-add-inspector" data-area="' +
               esc(a.AreaID) +
               '"><span aria-hidden="true">＋</span> เพิ่มผู้ตรวจ</button>' +
-              (team.length ? '<button type="button" class="btn secondary area-first-clear assignment-clear-area" data-area="' + esc(a.AreaID) + '">ล้างผู้ตรวจ</button>' : "") +
+              (team.length ? '<button type="button" class="btn secondary area-first-clear assignment-clear-area" data-area="' + esc(a.AreaID) + '">ล้างผู้ตรวจ</button><button type="button" class="btn secondary assignment-copy-team" data-area="' + esc(a.AreaID) + '">👥 เพิ่มชุดผู้ตรวจไปพื้นที่อื่น</button>' : "") +
               "</div></article>"
             );
           })
@@ -563,6 +563,9 @@ const adminTables = {
     });
     document.querySelectorAll(".assignment-clear-area").forEach((b) => {
       b.onclick = () => clearAreaDuty(b.dataset.area, selectedDay);
+    });
+    document.querySelectorAll(".assignment-copy-team").forEach((b) => {
+      b.onclick = () => assignmentCopyTeamModal(b.dataset.area, selectedDay);
     });
     $("assignment-print-roster").onclick = assignmentPrintRoster;
     $("assignment-export-csv").onclick = assignmentExportRosterCsv;
@@ -768,6 +771,129 @@ const adminTables = {
     sync();
   }
 
+
+
+  function assignmentCopyTeamModal(sourceAreaId, day) {
+    const m=S.master,
+      n=Number(day),
+      dayName=dutyDayOptions.find(d=>d[0]===n)?.[1]||String(n),
+      sourceArea=m.Areas.find(a=>String(a.AreaID)===String(sourceAreaId));
+    if(!sourceArea)return error(new Error("ไม่พบพื้นที่ต้นแบบ"));
+
+    const sourceRows=m.Assignments.filter(a=>String(a.AreaID)===String(sourceAreaId)&&dutyDaysArray(a.Days).includes(n)),
+      sourceUserIds=[...new Set(sourceRows.map(a=>String(a.UserID)))];
+    if(!sourceUserIds.length)return error(new Error("พื้นที่นี้ยังไม่มีชุดผู้ตรวจในวัน"+dayName));
+
+    const userMap=new Map(m.Users.map(u=>[String(u.UserID),u])),
+      sourceNames=sourceUserIds.map(id=>userMap.get(id)?.FullName||"—"),
+      dayRows=m.Assignments.filter(a=>dutyDaysArray(a.Days).includes(n)),
+      byArea=new Map();
+
+    dayRows.forEach(a=>{
+      const key=String(a.AreaID);
+      if(!byArea.has(key))byArea.set(key,new Set());
+      byArea.get(key).add(String(a.UserID));
+    });
+
+    const targets=[...m.Areas]
+      .filter(a=>String(a.AreaID)!==String(sourceAreaId))
+      .sort(assignmentAreaSort)
+      .map(a=>{
+        const current=byArea.get(String(a.AreaID))||new Set(),
+          missing=sourceUserIds.filter(id=>!current.has(id)),
+          existingNames=[...current].map(id=>userMap.get(id)?.FullName||"—").filter(Boolean);
+        return{area:a,missing,existingNames,complete:missing.length===0};
+      });
+
+    if(!targets.length)return error(new Error("ไม่มีพื้นที่อื่นให้เพิ่มชุดผู้ตรวจ"));
+
+    const rowsHtml=targets.map((x,idx)=>{
+      const cls=masterLabel("ResponsibleClassroomID",x.area.ResponsibleClassroomID)||"—",
+        meta=x.complete?"มีชุดผู้ตรวจนี้ครบแล้ว":(x.existingNames.length?"มีผู้ตรวจเดิม "+x.existingNames.length+" คน · จะเพิ่ม "+x.missing.length+" คน":"จะเพิ่ม "+x.missing.length+" คน"),
+        search=[x.area.AreaName,cls,...x.existingNames].join(" ").toLocaleLowerCase("th");
+      return '<label class="copy-team-area '+(x.complete?"complete":"")+'" data-search="'+esc(search)+'">'+
+        '<input type="checkbox" name="targetArea" value="'+esc(x.area.AreaID)+'" '+(x.complete?"disabled":"")+'>'+
+        '<span><b>'+esc(x.area.AreaName)+'</b><small>ห้องรับผิดชอบ '+esc(cls)+' · '+esc(meta)+'</small></span>'+
+        (x.complete?'<span class="pill gray">ครบแล้ว</span>':'')+
+      '</label>';
+    }).join("");
+
+    openModal(
+      "เพิ่มชุดผู้ตรวจไปพื้นที่อื่น",
+      '<form id="copy-team-form">'+
+        '<div class="copy-team-source"><div><span>ต้นแบบวัน'+esc(dayName)+'</span><b>'+esc(sourceArea.AreaName)+'</b></div><strong>'+sourceUserIds.length+' คน</strong></div>'+
+        '<div class="copy-team-members">'+sourceNames.map(n=>'<span>'+esc(n)+'</span>').join("")+'</div>'+
+        '<div class="copy-duty-note"><b>เป็นการเพิ่ม</b> ผู้ตรวจชุดนี้เข้าไปในพื้นที่ปลายทาง ผู้ตรวจเดิมจะไม่ถูกลบหรือแทนที่</div>'+
+        '<div class="search-box mt-3 mb-2"><i data-lucide="search"></i><input id="copy-team-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน…"></div>'+
+        '<div class="copy-team-tools"><button type="button" class="btn secondary" id="copy-team-all">เลือกทุกพื้นที่</button><button type="button" class="btn secondary" id="copy-team-empty">เฉพาะพื้นที่ยังไม่มีผู้ตรวจ</button><button type="button" class="btn secondary" id="copy-team-clear">ล้างการเลือก</button></div>'+
+        '<div class="copy-team-area-list">'+rowsHtml+'</div>'+
+        '<div class="area-inspector-footer"><span id="copy-team-selected">ยังไม่ได้เลือกพื้นที่ปลายทาง</span><button class="btn" id="copy-team-save" disabled>เพิ่มชุดผู้ตรวจ</button></div>'+
+      '</form>'
+    );
+    icons();
+
+    const form=$("copy-team-form"),
+      boxes=[...form.querySelectorAll('input[name="targetArea"]')],
+      rows=[...form.querySelectorAll(".copy-team-area")],
+      search=$("copy-team-search"),
+      save=$("copy-team-save"),
+      selected=$("copy-team-selected");
+
+    const sync=()=>{
+      const chosen=boxes.filter(x=>x.checked&&!x.disabled);
+      selected.textContent=chosen.length?"เลือกแล้ว "+chosen.length+" พื้นที่ · ชุด "+sourceUserIds.length+" คน":"ยังไม่ได้เลือกพื้นที่ปลายทาง";
+      save.disabled=!chosen.length;
+      save.textContent=chosen.length?"เพิ่มชุดไป "+chosen.length+" พื้นที่":"เพิ่มชุดผู้ตรวจ";
+    };
+
+    search.oninput=()=>{
+      const q=String(search.value||"").trim().toLocaleLowerCase("th");
+      rows.forEach(row=>row.hidden=!!q&&!String(row.dataset.search||"").includes(q));
+    };
+    boxes.forEach(x=>x.onchange=sync);
+
+    $("copy-team-all").onclick=()=>{
+      boxes.forEach(x=>{if(!x.disabled)x.checked=true;});
+      sync();
+    };
+    $("copy-team-empty").onclick=()=>{
+      boxes.forEach(x=>{
+        if(x.disabled)return;
+        const areaId=String(x.value),current=byArea.get(areaId)||new Set();
+        x.checked=current.size===0;
+      });
+      sync();
+    };
+    $("copy-team-clear").onclick=()=>{
+      boxes.forEach(x=>x.checked=false);
+      sync();
+    };
+
+    form.onsubmit=async e=>{
+      e.preventDefault();
+      const areaIds=boxes.filter(x=>x.checked&&!x.disabled).map(x=>String(x.value));
+      if(!areaIds.length)return;
+      const allTargets=areaIds.length===boxes.filter(x=>!x.disabled).length;
+      const ok=await Swal.fire({
+        icon:"question",
+        title:allTargets?"เพิ่มชุดผู้ตรวจไปทุกพื้นที่?":"เพิ่มชุดผู้ตรวจไป "+areaIds.length+" พื้นที่?",
+        html:"ชุด <b>"+sourceUserIds.length+" คน</b> จาก <b>"+esc(sourceArea.AreaName)+"</b> วัน"+esc(dayName)+"<br><span class='muted'>ผู้ตรวจเดิมของพื้นที่ปลายทางจะยังอยู่เหมือนเดิม</span>",
+        showCancelButton:true,
+        confirmButtonText:"เพิ่มชุดผู้ตรวจ",
+        cancelButtonText:"ยกเลิก"
+      });
+      if(!ok.isConfirmed)return;
+      busy(true,"กำลังเพิ่มชุดผู้ตรวจ…");
+      try{
+        const result=await rpc("assign",{userIds:sourceUserIds,areaIds,days:[String(n)]});
+        S.master=await rpc("master",{},true);
+        closeModal();
+        toast("เพิ่มชุดผู้ตรวจแล้ว "+areaIds.length+" พื้นที่");
+        assignmentContent();
+      }catch(e){error(e);}finally{busy(false);}
+    };
+    sync();
+  }
 
 
   async function assignmentCopyAllDays(sourceDay) {
