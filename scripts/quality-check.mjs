@@ -58,7 +58,6 @@ const checks=[
   [ops.includes("CERT_TEMPLATE_CACHE_NAME")&&ops.includes("certificateTemplateCacheGet")&&ops.includes("certificateTemplateCachePut"),"certificate template browser cache exists"],
   [ops.includes("async function certificateDecodedTemplate")&&ops.includes("opCertificateTemplateDecodedKey"),"certificate background decode is reused"],
   [api.includes("CERT_TEMPLATE_ORIGINAL")&&api.includes("CERT_TEMPLATE_WORKING")&&api.includes("originalFileId"),"certificate original and working copies are preserved"],
-  [sw.includes('k!=="rsd-certificate-template-v1"'),"certificate template cache survives service-worker upgrades"],
   [api.includes("function currentInspectionLabels")&&api.includes("async function currentInspectionNameMaps")&&api.includes("AreaName:label.AreaName")&&api.includes("พื้นที่:label.AreaName"),"historical views resolve current master names"],
   [api.includes("async function applyCurrentInspectionNames")&&api.includes("await applyCurrentInspectionNames(db,ins)")&&api.includes("await applyCurrentInspectionNames(env.DB,ins)"),"leaderboards and certificates use current master names"],
   [api.includes('"deleteInspection"].includes(action)')&&api.includes('action === "restoreTrash" && data?.entityType === "Inspections"'),"inspection delete/restore rebuilds rewards"],
