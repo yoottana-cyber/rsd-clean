@@ -501,7 +501,7 @@ function auditMeta(action,p,result){
       after:result?.after||{}
     }
   };
-  if(action==="saveCertificateTemplate")return{entityType:"CertificateTemplate",entityId:String(result?.fileId||"settings"),details:{enabled:result?.enabled===true,templateChanged:!!p.uploadTicket}};
+  if(action==="saveCertificateTemplate")return{entityType:"CertificateTemplate",entityId:String(result?.fileId||"settings"),details:{enabled:result?.enabled===true,templateChanged:!!(p.uploadTicket||p.workingUploadTicket||p.originalUploadTicket),optimized:result?.optimized===true,workingSize:Number(result?.workingSize||0),originalSize:Number(result?.originalSize||0)}};
   if(action==="deleteCertificateTemplate")return{entityType:"CertificateTemplate",entityId:"custom",details:{deleted:true}};
   return{entityType:"",entityId:"",details:{}};
 }
@@ -1388,6 +1388,11 @@ async function getCertificateTemplate(db){
     enabled:x?.enabled===true&&!!String(x?.fileId||""),
     fileId:String(x?.fileId||""),
     mime:String(x?.mime||""),
+    originalFileId:String(x?.originalFileId||""),
+    originalMime:String(x?.originalMime||""),
+    workingSize:Number(x?.workingSize||0),
+    originalSize:Number(x?.originalSize||0),
+    optimized:x?.optimized===true,
     updatedAt:String(x?.updatedAt||""),
     fields,
     textBlocks
@@ -1400,35 +1405,54 @@ async function certificateTemplate(env,u){
 }
 async function certificateTemplateUploadStart(env,u,p,request){
   role(u,["Admin"]);
-  const mime=String(p.mime||""),size=Number(p.size),origin=String(p.origin||new URL(request.url).origin);
+  const mime=String(p.mime||""),size=Number(p.size),origin=String(p.origin||new URL(request.url).origin),
+    kind=["original","working"].includes(String(p.kind||""))?String(p.kind):"legacy",
+    limit=kind==="working"?3*1024*1024:MAX_CERT_TEMPLATE;
   assert(["image/jpeg","image/png"].includes(mime),"แม่แบบรองรับ JPG หรือ PNG");
-  assert(Number.isInteger(size)&&size>0&&size<=MAX_CERT_TEMPLATE,"ไฟล์แม่แบบต้องไม่เกิน 8 MB");
+  assert(Number.isInteger(size)&&size>0&&size<=limit,kind==="working"?"ไฟล์แม่แบบสำหรับใช้งานต้องไม่เกิน 3 MB":"ไฟล์แม่แบบต้องไม่เกิน 8 MB");
   assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ยังไม่ได้ตั้งค่า Google Drive gateway");
   const r=await gasDrive(env,"templateUploadStart",{userId:u.user_id,mime,size,origin});
+  const marker=kind==="original"?"CERT_TEMPLATE_ORIGINAL":kind==="working"?"CERT_TEMPLATE_WORKING":"CERT_TEMPLATE";
   await env.DB.prepare("INSERT OR REPLACE INTO upload_tickets(ticket,user_id,inspection_id,file_id,size,mime,expires_at) VALUES(?,?,?,?,?,?,?)")
-    .bind(r.ticket,u.user_id,"CERT_TEMPLATE",r.fileId,size,mime,Date.now()+3600000).run();
-  return r;
+    .bind(r.ticket,u.user_id,marker,r.fileId,size,mime,Date.now()+3600000).run();
+  return{...r,kind};
+}
+async function certificateTemplateVerifyTicket(env,u,ticket,allowedMarkers){
+  if(!ticket)return null;
+  const t=await env.DB.prepare("SELECT * FROM upload_tickets WHERE ticket=?").bind(String(ticket)).first();
+  assert(t&&t.user_id===u.user_id&&allowedMarkers.includes(String(t.inspection_id||""))&&Number(t.expires_at)>Date.now(),"สิทธิ์อัปโหลดแม่แบบหมดอายุ");
+  await gasDrive(env,"verifyTemplateUpload",{ticket:t.ticket,fileId:t.file_id,size:Number(t.size),mime:t.mime,userId:u.user_id});
+  return t;
 }
 async function saveCertificateTemplate(env,u,p){
   role(u,["Admin"]);
   const db=env.DB,old=await getCertificateTemplate(db),def=defaultCertificateTemplate(),raw=p.config&&typeof p.config==="object"?p.config:{};
-  let fileId=old.fileId,mime=old.mime;
-  if(p.uploadTicket){
-    const t=await db.prepare("SELECT * FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).first();
-    assert(t&&t.user_id===u.user_id&&t.inspection_id==="CERT_TEMPLATE"&&Number(t.expires_at)>Date.now(),"สิทธิ์อัปโหลดแม่แบบหมดอายุ");
-    await gasDrive(env,"verifyTemplateUpload",{ticket:t.ticket,fileId:t.file_id,size:Number(t.size),mime:t.mime,userId:u.user_id});
-    fileId=String(t.file_id);mime=String(t.mime);
-  }
+  let fileId=old.fileId,mime=old.mime,workingSize=Number(old.workingSize||0),
+    originalFileId=old.originalFileId,originalMime=old.originalMime,originalSize=Number(old.originalSize||0);
+
+  const workingTicket=String(p.workingUploadTicket||p.uploadTicket||""),
+    originalTicket=String(p.originalUploadTicket||""),
+    wt=await certificateTemplateVerifyTicket(env,u,workingTicket,["CERT_TEMPLATE_WORKING","CERT_TEMPLATE"]),
+    ot=await certificateTemplateVerifyTicket(env,u,originalTicket,["CERT_TEMPLATE_ORIGINAL"]);
+
+  if(wt){fileId=String(wt.file_id);mime=String(wt.mime);workingSize=Number(wt.size||0);}
+  if(ot){originalFileId=String(ot.file_id);originalMime=String(ot.mime);originalSize=Number(ot.size||0);}
   assert(fileId,"กรุณาอัปโหลดภาพแม่แบบก่อน");
+
   const fields={};
   for(const k of Object.keys(def.fields))fields[k]=certField(raw?.fields?.[k],old.fields?.[k]||def.fields[k]);
   const textBlocks=Array.isArray(raw?.textBlocks)?raw.textBlocks.slice(0,20).map((v,i)=>certTextBlock(v,i)).filter(v=>v.text):old.textBlocks||[];
-  const cfg={enabled:raw.enabled!==false,fileId,mime,updatedAt:nowIso(),fields,textBlocks};
+  const cfg={enabled:raw.enabled!==false,fileId,mime,originalFileId,originalMime,workingSize,originalSize,optimized:!!originalFileId,updatedAt:nowIso(),fields,textBlocks};
   await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('certificate_template_json',?)").bind(JSON.stringify(cfg)).run();
-  if(p.uploadTicket){
-    await db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).run();
-    gasDrive(env,"consumeTemplateUpload",{ticket:String(p.uploadTicket)}).catch(()=>{});
-    if(old.fileId&&old.fileId!==fileId)gasDrive(env,"trashFiles",{fileIds:[old.fileId]}).catch(()=>{});
+
+  const usedTickets=[workingTicket,originalTicket].filter(Boolean);
+  if(usedTickets.length){
+    await runDbBatches(db,usedTickets.map(ticket=>db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(ticket)),40);
+    usedTickets.forEach(ticket=>gasDrive(env,"consumeTemplateUpload",{ticket}).catch(()=>{}));
+
+    const keep=new Set([fileId,originalFileId].filter(Boolean)),
+      oldIds=[old.fileId,old.originalFileId].filter(Boolean).filter(id=>!keep.has(id));
+    if(oldIds.length)gasDrive(env,"trashFiles",{fileIds:[...new Set(oldIds)]}).catch(()=>{});
   }
   return cfg;
 }
@@ -1441,7 +1465,8 @@ async function deleteCertificateTemplate(env,u){
   role(u,["Admin"]);
   const cfg=await getCertificateTemplate(env.DB);
   await env.DB.prepare("DELETE FROM settings WHERE key='certificate_template_json'").run();
-  if(cfg.fileId&&env.GAS_DRIVE_URL)gasDrive(env,"trashFiles",{fileIds:[cfg.fileId]}).catch(()=>{});
+  const ids=[cfg.fileId,cfg.originalFileId].filter(Boolean);
+  if(ids.length&&env.GAS_DRIVE_URL)gasDrive(env,"trashFiles",{fileIds:[...new Set(ids)]}).catch(()=>{});
   return true;
 }
 
