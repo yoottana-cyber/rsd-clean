@@ -18,7 +18,7 @@ function opMonthText(month){
 /* =========================
    1) DAILY CONTROL CENTER
    ========================= */
-let opControlData=null;
+let opControlData=null,opControlMapLayout=null,opControlView="list",opControlMapSelected="";
 async function renderDailyControl(seq){
   const today=thaiDay();
   $("app").innerHTML=
@@ -41,7 +41,8 @@ async function renderDailyControl(seq){
   await loadDailyControl(seq);
 }
 async function loadDailyControl(seq=S.seq){
-  const date=$("control-date")?.value||thaiDay(),d=await rpc("dailyControl",{date},true);
+  const date=$("control-date")?.value||thaiDay(),[d,mapLayout]=await Promise.all([rpc("dailyControl",{date},true),rpc("areaMapLayout",{},true).catch(()=>({shapes:[]}))]);
+  opControlMapLayout=mapLayout||{shapes:[]};
   if(seq!==S.seq)return;
   opControlData=d;
   const s=d.summary||{},cfg=d.settings||S.config||{},period=d.period?.Label||"ยังไม่ได้กำหนดภาคเรียน";
@@ -56,16 +57,18 @@ async function loadDailyControl(seq=S.seq){
       '<article class="exec-kpi"><span>งดตรวจ</span><b>'+s.skipped+'</b><small>มีเหตุผลกำกับ</small></article>'+
       '<article class="exec-kpi improve"><span>รอรับรอง</span><b>'+s.approvalPending+'</b><small>เวรทดแทน '+s.substitute+' พื้นที่</small></article>'+
     '</div>'+
-    '<section class="card mt-4"><div class="coverage-section-head mb-4"><div><h2>รายการพื้นที่</h2><p class="muted">กดดำเนินการได้จากรายการโดยตรง</p></div>'+
+    '<section class="card mt-4"><div class="coverage-section-head mb-4"><div><h2 id="control-view-title">รายการพื้นที่</h2><p class="muted" id="control-view-subtitle">กดดำเนินการได้จากรายการโดยตรง</p></div>'+
       '<div class="flex flex-wrap gap-2">'+
+        '<div class="ops-view-toggle"><button class="btn small secondary active" id="control-view-list" type="button"><i data-lucide="list"></i> รายการ</button><button class="btn small secondary" id="control-view-map" type="button"><i data-lucide="map"></i> ผัง</button></div>'+
         (S.user?.Role==="Admin"?'<button class="btn secondary" id="control-substitute"><i data-lucide="user-round-check"></i> ผู้ตรวจทดแทน</button>':'')+
         (d.date===thaiDay()&&s.pending?'<button class="btn secondary" id="control-push-reminder"><i data-lucide="bell-ring"></i> เตือนผู้ตรวจที่ยังค้าง</button>':'')+
         '<button class="btn secondary" id="control-exception"><i data-lucide="circle-off"></i> งดตรวจ</button>'+
         (d.settings?.approvalEnabled?'<a class="btn secondary" href="#review"><i data-lucide="badge-check"></i> รับรองผล</a>':'')+
       '</div></div>'+
-      '<div class="ops-control-list">'+
+      '<div id="control-list-view" class="ops-control-list">'+
         (d.items?.length?d.items.map((x,idx)=>opControlCard(x,idx)).join(""):'<div class="empty">ไม่มีงานตรวจในวันนี้</div>')+
       '</div>'+
+      '<div id="control-map-view" class="ops-control-map-view hidden"></div>'+
     '</section>';
   if($("control-substitute"))$("control-substitute").onclick=dutyOverrideModal;
   if($("control-push-reminder"))$("control-push-reminder").onclick=async()=>{
@@ -77,8 +80,11 @@ async function loadDailyControl(seq=S.seq){
     }catch(e){error(e);}
   };
   $("control-exception").onclick=()=>inspectionExceptionModal(d.date);
+  $("control-view-list").onclick=()=>opControlSetView("list");
+  $("control-view-map").onclick=()=>opControlSetView("map");
   document.querySelectorAll(".control-photo").forEach(b=>b.onclick=()=>coveragePhoto(d.items[Number(b.dataset.index)]));
   icons();
+  opControlSetView(opControlView,false);
   applyControlFilter();
 }
 function opControlCard(x,index){
@@ -100,17 +106,145 @@ function opControlCard(x,index){
     '</div>'+
   '</article>';
 }
+
+function opControlFilterValues(){
+  return{
+    q:String($("control-search")?.value||"").trim().toLocaleLowerCase("th"),
+    status:$("control-status")?.value||""
+  };
+}
+function opControlItemMatches(x,filters=opControlFilterValues()){
+  const inspectors=(x.Inspectors||[]).map(v=>v.Name).join(" "),
+    search=[x.ClassName,x.AreaName,inspectors,x.Status,x.Rating,x.SkipReason,x.CompletedBy].join(" ").toLocaleLowerCase("th");
+  const matchQ=!filters.q||search.includes(filters.q);
+  let matchS=true;
+  if(filters.status==="รอรับรอง")matchS=x.ApprovalStatus==="รอรับรอง";
+  else if(filters.status==="เวรทดแทน")matchS=!!x.HasSubstitute;
+  else if(filters.status)matchS=x.Status===filters.status;
+  return matchQ&&matchS;
+}
 function applyControlFilter(){
-  const q=String($("control-search")?.value||"").trim().toLocaleLowerCase("th"),status=$("control-status")?.value||"";
+  const filters=opControlFilterValues();
   document.querySelectorAll(".ops-control-card").forEach(card=>{
-    const matchQ=!q||String(card.dataset.search||"").includes(q);
+    const matchQ=!filters.q||String(card.dataset.search||"").includes(filters.q);
     let matchS=true;
-    if(status==="รอรับรอง")matchS=card.dataset.approval==="รอรับรอง";
-    else if(status==="เวรทดแทน")matchS=card.dataset.sub==="1";
-    else if(status)matchS=card.dataset.status===status;
+    if(filters.status==="รอรับรอง")matchS=card.dataset.approval==="รอรับรอง";
+    else if(filters.status==="เวรทดแทน")matchS=card.dataset.sub==="1";
+    else if(filters.status)matchS=card.dataset.status===filters.status;
     card.style.display=matchQ&&matchS?"":"none";
   });
+  if(opControlView==="map")opControlMapRender();
 }
+function opControlSetView(view,focus=true){
+  opControlView=view==="map"?"map":"list";
+  const list=$("control-list-view"),map=$("control-map-view"),
+    listBtn=$("control-view-list"),mapBtn=$("control-view-map"),
+    title=$("control-view-title"),sub=$("control-view-subtitle");
+  if(!list||!map)return;
+  list.classList.toggle("hidden",opControlView!=="list");
+  map.classList.toggle("hidden",opControlView!=="map");
+  listBtn?.classList.toggle("active",opControlView==="list");
+  mapBtn?.classList.toggle("active",opControlView==="map");
+  if(title)title.textContent=opControlView==="map"?"ผังสถานะพื้นที่":"รายการพื้นที่";
+  if(sub)sub.textContent=opControlView==="map"?"คลิกพื้นที่บนผังเพื่อดูสถานะและรายละเอียดงานตรวจ":"กดดำเนินการได้จากรายการโดยตรง";
+  if(opControlView==="map")opControlMapRender();
+  if(focus&&opControlView==="map")map.scrollIntoView({behavior:"smooth",block:"nearest"});
+  icons();
+}
+function opControlMapStatus(x){
+  if(!x)return{key:"none",label:"ไม่มีเวร",color:"#94a3b8"};
+  if(x.Status==="งดตรวจ")return{key:"skipped",label:"งดตรวจ",color:"#64748b"};
+  if(x.Status==="รอตรวจ")return{key:"pending",label:"รอตรวจ",color:"#facc15"};
+  if(x.Status==="ตรวจแล้ว"){
+    if(Number(x.Score)===3)return{key:"excellent",label:"ยอดเยี่ยม",color:"#22c55e"};
+    if(Number(x.Score)===2)return{key:"medium",label:"ปานกลาง",color:"#f59e0b"};
+    if(Number(x.Score)===1)return{key:"improve",label:"ปรับปรุง",color:"#ef4444"};
+    return{key:"done",label:x.Rating||"ตรวจแล้ว",color:"#14b8a6"};
+  }
+  return{key:"other",label:x.Status||"มีงานตรวจ",color:"#38bdf8"};
+}
+function opControlMapArea(areaId){
+  return (S.master?.Areas||[]).find(a=>String(a.AreaID)===String(areaId));
+}
+function opControlMapClass(area){
+  if(!area)return"—";
+  const row=(S.master?.Classrooms||[]).find(c=>String(c.ClassroomID)===String(area.ResponsibleClassroomID));
+  return row?.ClassName||"—";
+}
+function opControlMapCenter(s){
+  if(s.ShapeType==="polygon"&&Array.isArray(s.Points)&&s.Points.length){
+    const sum=s.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
+    return{x:sum.x/s.Points.length,y:sum.y/s.Points.length};
+  }
+  return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
+}
+function opControlMapLegend(){
+  const rows=(opControlData?.items||[]),allAreas=S.master?.Areas||[],
+    byArea=new Map(rows.map(x=>[String(x.AreaID),x])),counts={none:0,pending:0,excellent:0,medium:0,improve:0,skipped:0,done:0,other:0};
+  allAreas.forEach(a=>{const st=opControlMapStatus(byArea.get(String(a.AreaID)));counts[st.key]=(counts[st.key]||0)+1;});
+  return[
+    ["#94a3b8","ไม่มีเวร",counts.none],["#facc15","รอตรวจ",counts.pending],["#22c55e","ยอดเยี่ยม",counts.excellent],
+    ["#f59e0b","ปานกลาง",counts.medium],["#ef4444","ปรับปรุง",counts.improve],["#64748b","งดตรวจ",counts.skipped]
+  ].map(x=>'<span><i style="background:'+x[0]+'"></i>'+x[1]+' <b>'+Number(x[2]||0)+'</b></span>').join("");
+}
+function opControlMapRender(){
+  const box=$("control-map-view");if(!box)return;
+  const shapes=opControlMapLayout?.shapes||[];
+  if(!shapes.length){
+    box.innerHTML='<div class="ops-control-map-empty"><i data-lucide="map-pinned"></i><b>ยังไม่มีพื้นที่บนผัง</b><span>ให้ Admin เข้า “จัดการข้อมูลระบบ → ผังพื้นที่” เพื่อวางพื้นที่ก่อน</span></div>';
+    icons();return;
+  }
+  const rows=opControlData?.items||[],byArea=new Map(rows.map(x=>[String(x.AreaID),x])),filters=opControlFilterValues(),
+    ref=(()=>{try{return localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){return"";}})(),
+    refOpacity=(()=>{try{return Math.max(.1,Math.min(1,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||65)/100));}catch(e){return.65;}})(),
+    refSvg=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+refOpacity+'" pointer-events="none"/>':'',
+    selected=opControlMapSelected,
+    body=shapes.map(s=>{
+      const item=byArea.get(String(s.AreaID)),status=opControlMapStatus(item),area=opControlMapArea(s.AreaID),center=opControlMapCenter(s),
+        match=item?opControlItemMatches(item,filters):(!filters.q&&!filters.status),
+        geometry=s.ShapeType==="polygon"
+          ? '<polygon points="'+(s.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+status.color+'"/>'
+          : '<rect x="'+Number(s.X||0)+'" y="'+Number(s.Y||0)+'" width="'+Number(s.Width||0)+'" height="'+Number(s.Height||0)+'" rx="10" fill="'+status.color+'"/>';
+      return '<g class="ops-control-map-shape '+(selected===String(s.AreaID)?"selected ":"")+(match?"":"filtered")+'" data-area="'+esc(s.AreaID)+'">'+geometry+
+        '<text x="'+center.x+'" y="'+(center.y-5)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(area?.AreaName||item?.AreaName||"พื้นที่")+'</tspan><tspan class="sub" x="'+center.x+'" dy="18">'+esc(item?.ClassName||opControlMapClass(area))+'</tspan></text></g>';
+    }).join("");
+  box.innerHTML=
+    '<div class="ops-control-map-toolbar"><div class="ops-control-map-legend">'+opControlMapLegend()+'</div><span>สีอัปเดตตามวันที่ที่เลือก</span></div>'+
+    '<div class="ops-control-map-layout"><div class="ops-control-map-scroll"><svg id="control-map-svg" viewBox="0 0 1600 1000" role="img" aria-label="ผังสถานะพื้นที่ตรวจ">'+
+      '<rect width="1600" height="1000" fill="#fff"/>'+refSvg+body+
+    '</svg></div><aside id="control-map-detail" class="ops-control-map-detail"></aside></div>';
+  box.querySelectorAll(".ops-control-map-shape").forEach(el=>el.onclick=()=>{
+    opControlMapSelected=String(el.dataset.area||"");
+    opControlMapRender();
+  });
+  opControlMapRenderDetail();
+}
+function opControlMapRenderDetail(){
+  const box=$("control-map-detail");if(!box)return;
+  const areaId=String(opControlMapSelected||""),
+    item=(opControlData?.items||[]).find(x=>String(x.AreaID)===areaId),
+    shape=(opControlMapLayout?.shapes||[]).find(x=>String(x.AreaID)===areaId);
+  if(!shape){
+    box.innerHTML='<div class="ops-map-detail-empty"><i data-lucide="mouse-pointer-2"></i><b>เลือกพื้นที่บนผัง</b><span>คลิกพื้นที่เพื่อดูผู้ตรวจ คะแนน และสถานะ</span></div>';icons();return;
+  }
+  const area=opControlMapArea(areaId),status=opControlMapStatus(item),inspectors=(item?.Inspectors||[]).map(v=>v.Name).filter(Boolean).join(", ")||"—";
+  box.innerHTML=
+    '<div class="ops-map-detail-head"><span style="background:'+status.color+'"></span><div><b>'+esc(area?.AreaName||item?.AreaName||"พื้นที่")+'</b><small>'+esc(item?.ClassName||opControlMapClass(area))+'</small></div></div>'+
+    '<div class="ops-map-detail-status"><b>'+esc(status.label)+'</b><span>'+esc(opDateText(opControlData?.date||thaiDay()))+'</span></div>'+
+    (item?'<div class="ops-map-detail-grid">'+
+      '<div><span>ผู้ตรวจ</span><b>'+esc(inspectors)+'</b></div>'+
+      '<div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div>'+
+      '<div><span>การรับรอง</span><b>'+esc(item.ApprovalStatus||"—")+'</b></div>'+
+      '<div><span>ผู้บันทึก</span><b>'+esc(item.CompletedBy||"—")+'</b></div>'+
+      (item.HasSubstitute?'<div class="wide"><span>เวรทดแทน</span><b>'+esc((item.Substitutes||[]).map(v=>(v.ReplaceName?v.ReplaceName+" → ":"")+v.SubstituteName).join(", ")||"มี")+'</b></div>':"")+
+      (item.Notes?'<div class="wide"><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+
+    '</div>':'<div class="ops-map-no-duty">ไม่มีงานตรวจในวันที่เลือก</div>')+
+    '<div class="ops-map-detail-actions"><a class="btn small secondary" href="#history" data-history-type="area" data-history-id="'+esc(areaId)+'">ประวัติพื้นที่</a>'+
+    (item?.PhotoLinks?.length?'<button class="btn small secondary" id="control-map-photo">ดูรูป</button>':"")+'</div>';
+  if($("control-map-photo"))$("control-map-photo").onclick=()=>coveragePhoto(item);
+  icons();
+}
+
 
 /* =========================
    2) ACADEMIC YEAR / SEMESTER
