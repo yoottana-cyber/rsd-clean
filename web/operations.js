@@ -386,6 +386,115 @@ async function saveExcelImport(kind,rows){
    ========================= */
 let opCertificateData=null;
 let opCertificateTemplateImage="";
+let opCertificateTemplateKey="";
+let opCertificateTemplateDecoded=null;
+let opCertificateTemplateDecodedKey="";
+let opCertificateFontsKey="";
+let opCertificateFontsPromise=null;
+const CERT_TEMPLATE_CACHE_NAME="rsd-certificate-template-v1";
+const CERT_TEMPLATE_WIDTH=2244;
+const CERT_TEMPLATE_HEIGHT=1588;
+
+function certificateTemplateKey(template){
+  return String(template?.fileId||template?.updatedAt||"");
+}
+function certificateTemplateCacheUrl(key){
+  return location.origin+"/__rsd_cache/certificate-template/"+encodeURIComponent(String(key||"none"));
+}
+async function certificateTemplateCacheGet(key){
+  if(!key||!("caches" in window))return "";
+  try{
+    const cache=await caches.open(CERT_TEMPLATE_CACHE_NAME),res=await cache.match(certificateTemplateCacheUrl(key));
+    return res?await res.text():"";
+  }catch(e){return "";}
+}
+async function certificateTemplateCachePut(key,data){
+  if(!key||!data||!("caches" in window))return;
+  try{
+    const cache=await caches.open(CERT_TEMPLATE_CACHE_NAME),keys=await cache.keys(),keep=certificateTemplateCacheUrl(key);
+    await Promise.all(keys.filter(req=>req.url!==keep).map(req=>cache.delete(req)));
+    await cache.put(keep,new Response(String(data),{headers:{"Content-Type":"text/plain;charset=utf-8","Cache-Control":"public,max-age=31536000,immutable"}}));
+  }catch(e){console.warn("certificate cache",e);}
+}
+async function certificateTemplateCacheClear(){
+  try{if("caches" in window)await caches.delete(CERT_TEMPLATE_CACHE_NAME);}catch(e){}
+}
+function certificateResetTemplateMemory(){
+  opCertificateTemplateImage="";
+  opCertificateTemplateKey="";
+  opCertificateTemplateDecoded=null;
+  opCertificateTemplateDecodedKey="";
+}
+async function certificateGetTemplateImage(template){
+  const key=certificateTemplateKey(template);
+  if(!key)return "";
+  if(opCertificateTemplateImage&&opCertificateTemplateKey===key)return opCertificateTemplateImage;
+  const cached=await certificateTemplateCacheGet(key);
+  if(cached){
+    opCertificateTemplateImage=cached;opCertificateTemplateKey=key;
+    return cached;
+  }
+  const image=await rpc("certificateTemplateImage",{},true);
+  opCertificateTemplateImage=image;opCertificateTemplateKey=key;
+  await certificateTemplateCachePut(key,image);
+  return image;
+}
+async function certificateDecodedTemplate(d){
+  const key=certificateTemplateKey(d?.template),src=await ensureCertificateTemplateImage(d);
+  if(!src)throw Error("ไม่พบภาพพื้นหลังเกียรติบัตร");
+  if(opCertificateTemplateDecoded&&opCertificateTemplateDecodedKey===key)return opCertificateTemplateDecoded;
+  const img=await certificateLoadImage(src);
+  opCertificateTemplateDecoded=img;opCertificateTemplateDecodedKey=key;
+  return img;
+}
+function certificateFileSizeText(bytes){
+  const n=Number(bytes||0);
+  return n>=1024*1024?(n/1024/1024).toFixed(2)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+}
+async function certificateFileDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result||""));
+    reader.onerror=()=>reject(Error("อ่านไฟล์แม่แบบไม่สำเร็จ"));
+    reader.readAsDataURL(file);
+  });
+}
+async function certificateImageSourceFromFile(file){
+  if("createImageBitmap" in window){
+    try{return await createImageBitmap(file);}catch(e){}
+  }
+  const url=URL.createObjectURL(file);
+  try{return await certificateLoadImage(url);}
+  finally{URL.revokeObjectURL(url);}
+}
+async function certificateOptimizeTemplateFile(file){
+  const source=await certificateImageSourceFromFile(file),canvas=document.createElement("canvas");
+  canvas.width=CERT_TEMPLATE_WIDTH;canvas.height=CERT_TEMPLATE_HEIGHT;
+  const ctx=canvas.getContext("2d",{alpha:false});
+  ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+  const sw=Number(source.width||source.naturalWidth||CERT_TEMPLATE_WIDTH),sh=Number(source.height||source.naturalHeight||CERT_TEMPLATE_HEIGHT),
+    scale=Math.min(canvas.width/sw,canvas.height/sh),dw=Math.round(sw*scale),dh=Math.round(sh*scale),
+    dx=Math.round((canvas.width-dw)/2),dy=Math.round((canvas.height-dh)/2);
+  ctx.drawImage(source,dx,dy,dw,dh);
+  if(source&&typeof source.close==="function")try{source.close();}catch(e){}
+  const makeBlob=q=>new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",q));
+  let blob=await makeBlob(.90);
+  if(!blob)throw Error("บีบอัดแม่แบบไม่สำเร็จ");
+  if(blob.size>3*1024*1024)blob=await makeBlob(.82);
+  if(!blob||blob.size>3*1024*1024)throw Error("แม่แบบยังมีขนาดใหญ่เกินไปหลังบีบอัด");
+  const base=String(file.name||"certificate-template").replace(/\.[^.]+$/,"");
+  return new File([blob],base+"-optimized.jpg",{type:"image/jpeg",lastModified:Date.now()});
+}
+async function certificateUploadTemplateFile(file,kind){
+  const up=await rpc("certificateTemplateUploadStart",{mime:file.type,size:file.size,origin:location.origin,kind},true);
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
+  let res;
+  try{
+    res=await fetch(up.url,{method:"PUT",headers:{"Content-Type":file.type,"Content-Range":"bytes 0-"+(file.size-1)+"/"+file.size},body:file,signal:controller.signal});
+  }finally{clearTimeout(timer);}
+  if(!(res.status===200||res.status===201))throw Error("อัปโหลดแม่แบบไม่สำเร็จ (HTTP "+res.status+")");
+  return up.ticket;
+}
 async function renderCertificateCenter(seq){
   const month=thaiDay().slice(0,7);
   $("app").innerHTML=
