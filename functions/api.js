@@ -544,6 +544,11 @@ function validateBackupBundle(b){
   if(t.audit_log.length)uniqueBackup(t.audit_log,"audit_id","audit_log");
   if(t.recycle_bin.length)uniqueBackup(t.recycle_bin,"recycle_id","recycle_bin");
   if(t.duty_overrides.length)uniqueBackup(t.duty_overrides,"override_id","duty_overrides");
+  if(t.academic_periods.length)uniqueBackup(t.academic_periods,"period_id","academic_periods");
+  if(t.push_subscriptions.length){
+    uniqueBackup(t.push_subscriptions,"subscription_id","push_subscriptions");
+    uniqueBackup(t.push_subscriptions,"endpoint","push_subscriptions endpoint");
+  }
   const pairs=new Set();
   for(const r of t.inspection_inspectors){
     const k=String(r?.inspection_id||"")+"|"+String(r?.user_id||"");
@@ -1118,7 +1123,7 @@ async function vapidAuthorization(env,endpoint){
   assert(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK,"ยังไม่ได้ตั้งค่า VAPID สำหรับ Web Push");
   let jwk;try{jwk=JSON.parse(env.VAPID_PRIVATE_JWK);}catch(e){throw Error("VAPID_PRIVATE_JWK ไม่ถูกต้อง");}
   const origin=new URL(endpoint).origin,header=b64urlBytes(JSON.stringify({typ:"JWT",alg:"ES256"}));
-  const payload=b64urlBytes(JSON.stringify({aud:origin,exp:Math.floor(Date.now()/1000)+12*3600,sub:String(env.VAPID_SUBJECT||"mailto:admin@example.com")}));
+  const payload=b64urlBytes(JSON.stringify({aud:origin,exp:Math.floor(Date.now()/1000)+12*3600,sub:String(env.VAPID_SUBJECT||"https://rsd-clean.pages.dev")}));
   const unsigned=header+"."+payload,key=await crypto.subtle.importKey("jwk",jwk,{name:"ECDSA",namedCurve:"P-256"},false,["sign"]);
   const sig=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},key,new TextEncoder().encode(unsigned)));
   return "vapid t="+unsigned+"."+b64urlBytes(sig)+", k="+String(env.VAPID_PUBLIC_KEY);
