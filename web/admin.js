@@ -2274,7 +2274,7 @@ const adminTables = {
 
 
   function trashTypeLabel(t) {
-    return ({Users:"ผู้ใช้งาน",Classrooms:"ห้องเรียน",Areas:"เขตพื้นที่",Assignments:"งานมอบหมาย"})[t] || t;
+    return ({Users:"ผู้ใช้งาน",Classrooms:"ห้องเรียน",Areas:"เขตพื้นที่",Assignments:"งานมอบหมาย",Inspections:"ผลตรวจ"})[t] || t;
   }
   async function trashModal() {
     openModal("ถังขยะ", '<div id="trash-body"><div class="muted">กำลังโหลดถังขยะ…</div></div>');
@@ -2288,12 +2288,13 @@ const adminTables = {
       box.innerHTML =
         '<div class="warn mb-4"><b>กู้คืนได้ภายใน 30 วัน</b><br>รายการที่ครบกำหนดจะถูกลบถาวรอัตโนมัติ</div>' +
         table(
-          ["ประเภท","รายการ","ลบเมื่อ","ผู้ลบ","เหลือ","จัดการ"],
+          ["ประเภท","รายการ","เหตุผล","ลบเมื่อ","ผู้ลบ","เหลือ","จัดการ"],
           rows.map(r=>{
             const days=Math.max(0,Math.ceil((Number(r.ExpiresAt)-Date.now())/86400000));
             return[
               esc(trashTypeLabel(r.EntityType)),
               esc(r.Label||r.EntityID),
+              esc(r.Reason||"—"),
               esc(new Date(r.DeletedAt).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})),
               esc(r.DeletedBy||"—"),
               days+" วัน",
