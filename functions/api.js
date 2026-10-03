@@ -1826,7 +1826,7 @@ function areaMapShapeRow(r){
   return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
 }
 async function areaMapLayout(env,u){
-  role(u,["Admin","Supervisor"]);
+  role(u,["Admin","Supervisor","Inspector"]);
   await ensureAreaMapTable(env.DB);
   return {canvas:{width:1600,height:1000},shapes:(await all(env.DB,"SELECT * FROM area_map_shapes ORDER BY sort_order,shape_id")).map(areaMapShapeRow)};
 }

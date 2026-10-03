@@ -1,4 +1,5 @@
 let taskRows = [];
+  let inspectorMapLayout={shapes:[]};
   function inspectorTeamLabel(i) {
     const names = Array.isArray(i?.meta?.inspectorNames) ? i.meta.inspectorNames.filter(Boolean) : [];
     if (names.length > 1) return "ทีมผู้ตรวจ: " + names.join(", ");
@@ -27,6 +28,83 @@ let taskRows = [];
     const m=String(e?.message||e||"");
     return !navigator.onLine || /Failed to fetch|Load failed|NetworkError|เชื่อมต่อ API|API HTTP|Drive ชั่วคราว|นานเกินไป/i.test(m);
   }
+
+  function inspectorMapCacheKey(){return "rsd-inspector-area-map-v1";}
+  function saveInspectorMapCache(layout){try{localStorage.setItem(inspectorMapCacheKey(),JSON.stringify(layout||{shapes:[]}));}catch(e){}}
+  function loadInspectorMapCache(){try{return JSON.parse(localStorage.getItem(inspectorMapCacheKey())||'{"shapes":[]}');}catch(e){return{shapes:[]};}}
+  function inspectorMapStatus(item){
+    if(!item)return{key:"other",label:"พื้นที่อื่น",color:"#cbd5e1"};
+    if(item._offlinePending)return{key:"offline",label:"รอซิงก์",color:"#8b5cf6"};
+    if(item.Status==="งดตรวจ")return{key:"skipped",label:"งดตรวจ",color:"#64748b"};
+    if(item.Status==="รอตรวจ")return{key:"pending",label:"รอตรวจ",color:"#facc15"};
+    if(item.Status==="ตรวจแล้ว"){
+      if(Number(item.Score)===3)return{key:"excellent",label:S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",color:"#22c55e"};
+      if(Number(item.Score)===2)return{key:"medium",label:S.config?.scoreLabels?.["2"]||"ปานกลาง",color:"#f59e0b"};
+      if(Number(item.Score)===1)return{key:"improve",label:S.config?.scoreLabels?.["1"]||"ปรับปรุง",color:"#ef4444"};
+      return{key:"done",label:"ตรวจแล้ว",color:"#14b8a6"};
+    }
+    return{key:"other",label:item.Status||"งานตรวจ",color:"#38bdf8"};
+  }
+  function inspectorMapCenter(s){
+    if(s.ShapeType==="polygon"&&Array.isArray(s.Points)&&s.Points.length){
+      const sum=s.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
+      return{x:sum.x/s.Points.length,y:sum.y/s.Points.length};
+    }
+    return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
+  }
+  function inspectorTaskMapHtml(todayRows){
+    const shapes=inspectorMapLayout?.shapes||[];
+    if(!shapes.length)return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
+    if(!todayRows.length)return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">วันนี้ไม่มีพื้นที่ที่ได้รับมอบหมาย</div></section>';
+
+    const byArea=new Map(todayRows.map(x=>[String(x.meta?.areaId||""),x])),
+      counts={pending:0,excellent:0,medium:0,improve:0,skipped:0,offline:0};
+    todayRows.forEach(x=>{const st=inspectorMapStatus(x);counts[st.key]=(counts[st.key]||0)+1;});
+
+    let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
+    let opacity=.55;try{opacity=Math.max(.1,Math.min(.8,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||55)/100));}catch(e){}
+    const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
+
+    const body=shapes.map(s=>{
+      const item=byArea.get(String(s.AreaID)),status=inspectorMapStatus(item),center=inspectorMapCenter(s),mine=!!item,
+        geo=s.ShapeType==="polygon"
+          ? '<polygon points="'+(s.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+status.color+'"/>'
+          : '<rect x="'+Number(s.X||0)+'" y="'+Number(s.Y||0)+'" width="'+Number(s.Width||0)+'" height="'+Number(s.Height||0)+'" rx="10" fill="'+status.color+'"/>';
+      return '<g class="inspector-map-shape '+(mine?"mine status-"+status.key:"other")+'" '+(mine?'data-area="'+esc(s.AreaID)+'" tabindex="0" role="button"':"")+'>'+geo+
+        (mine?'<text x="'+center.x+'" y="'+(center.y-5)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(item.meta?.areaName||"พื้นที่")+'</tspan><tspan class="sub" x="'+center.x+'" dy="18">'+esc(item.meta?.className||"")+'</tspan></text>':"")+
+      '</g>';
+    }).join("");
+
+    const legend=[
+      ["#facc15","รอตรวจ",counts.pending],["#22c55e",S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",counts.excellent],
+      ["#f59e0b",S.config?.scoreLabels?.["2"]||"ปานกลาง",counts.medium],["#ef4444",S.config?.scoreLabels?.["1"]||"ปรับปรุง",counts.improve],
+      ["#64748b","งดตรวจ",counts.skipped],["#8b5cf6","รอซิงก์",counts.offline]
+    ].filter(x=>x[2]>0).map(x=>'<span><i style="background:'+x[0]+'"></i>'+esc(x[1])+' <b>'+x[2]+'</b></span>').join("");
+
+    return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">แตะพื้นที่เพื่อไปยังงาน</span><h2>พื้นที่ของฉันบนผัง</h2></div><button class="btn small secondary" id="inspector-map-toggle" type="button">ซ่อนผัง</button></div>'+
+      '<div class="inspector-map-legend">'+legend+'</div>'+
+      '<div class="inspector-map-scroll" id="inspector-map-body"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่งานตรวจของฉัน"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div></section>';
+  }
+  function wireInspectorTaskMap(){
+    const body=$("inspector-map-body"),toggle=$("inspector-map-toggle");
+    if(toggle&&body)toggle.onclick=()=>{
+      const hidden=body.classList.toggle("hidden");
+      toggle.textContent=hidden?"แสดงผัง":"ซ่อนผัง";
+    };
+    document.querySelectorAll(".inspector-map-shape.mine").forEach(el=>{
+      const go=()=>{
+        const area=String(el.dataset.area||""),
+          card=[...document.querySelectorAll(".task-grid article[data-area-id]")].find(x=>String(x.dataset.areaId)===area);
+        if(!card)return;
+        card.scrollIntoView({behavior:"smooth",block:"center"});
+        card.classList.add("task-map-focus");
+        setTimeout(()=>card.classList.remove("task-map-focus"),1800);
+      };
+      el.onclick=go;
+      el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}};
+    });
+  }
+
   async function renderTasks(seq) {
     let rows,rewards,offlineView=false;
     if(!navigator.onLine){
@@ -34,10 +112,16 @@ let taskRows = [];
       if(!cached) throw Error("ยังไม่มีรายการงานที่เก็บไว้ในเครื่อง กรุณาเชื่อมต่ออินเทอร์เน็ตอย่างน้อย 1 ครั้ง");
       rows=cached.rows;
       rewards=cached.rewards;
+      inspectorMapLayout=loadInspectorMapCache();
       offlineView=true;
     }else{
       try{
-        const home=await rpc("inspectorHome");
+        const [home,mapLayout]=await Promise.all([
+          rpc("inspectorHome"),
+          rpc("areaMapLayout",{},true).catch(()=>loadInspectorMapCache())
+        ]);
+        inspectorMapLayout=mapLayout||{shapes:[]};
+        if(inspectorMapLayout?.shapes?.length)saveInspectorMapCache(inspectorMapLayout);
         rows=home.tasks||[];
         rewards=home.rewards||[];
         if(home.settings){
@@ -90,6 +174,7 @@ let taskRows = [];
       ) +
       (offlineView?'<div class="offline-work-notice mb-4"><b>โหมดออฟไลน์</b><span>กำลังใช้รายการงานล่าสุดที่เก็บไว้ในเครื่อง ผลตรวจใหม่จะซิงก์เมื่ออินเทอร์เน็ตกลับมา</span></div>':'') +
       (pendingCount?'<div class="offline-work-notice pending mb-4"><b>รอซิงก์ '+pendingCount+' รายการ</b><button class="btn small secondary" id="sync-now" type="button">ซิงก์ตอนนี้</button></div>':'') +
+      inspectorTaskMapHtml(todayRows) +
       '<div class="task-filter-bar mb-4"><div class="search-box"><i data-lucide="search"></i><input id="task-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / หมายเหตุ…"></div><select id="task-status-filter" class="control"><option value="">ทุกสถานะ</option><option value="pending">รอตรวจ</option><option value="done">ตรวจแล้ว</option><option value="offline">รอซิงก์</option></select></div>' +
       '<div class="flex flex-wrap gap-2 mb-5">' +
       rewards
@@ -108,7 +193,7 @@ let taskRows = [];
         ? rows
             .map(
               (i, index) =>
-                '<article class="card'+(i._offlinePending?' offline-pending-card':'')+'" data-task-status="'+(i._offlinePending?'offline':i.Status==="ตรวจแล้ว"?'done':'pending')+'" data-task-search="'+esc([i.meta.areaName,i.meta.className,i.Notes,inspectorTeamLabel(i)].filter(Boolean).join(" ").toLocaleLowerCase("th"))+'"><div class="flex justify-between items-center mb-4"><span class="muted">' +
+                '<article class="card'+(i._offlinePending?' offline-pending-card':'')+'" data-area-id="'+esc(i.meta.areaId||"")+'" data-task-status="'+(i._offlinePending?'offline':i.Status==="ตรวจแล้ว"?'done':'pending')+'" data-task-search="'+esc([i.meta.areaName,i.meta.className,i.Notes,inspectorTeamLabel(i)].filter(Boolean).join(" ").toLocaleLowerCase("th"))+'"><div class="flex justify-between items-center mb-4"><span class="muted">' +
                 esc(i.meta.className) +
                 "</span>" +
                 (i._offlinePending?'<span class="pill offline-pill">รอซิงก์</span>':pill(i.Score)) +
@@ -152,6 +237,7 @@ let taskRows = [];
     if($("task-search")) $("task-search").oninput=applyTaskFilter;
     if($("task-status-filter")) $("task-status-filter").onchange=applyTaskFilter;
     icons();
+    wireInspectorTaskMap();
     $("refresh-tasks").onclick = route;
     $("scan-qr").onclick = scanQrModal;
     if($("sync-now")) $("sync-now").onclick=()=>window.syncOfflineInspections?.(true);
