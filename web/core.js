@@ -1095,6 +1095,7 @@
       new Date(d.updatedAt).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok" }) +
       " · รีเฟรชอัตโนมัติทุก 60 วินาที</p>";
     if($("dashboard-open-control-map"))$("dashboard-open-control-map").onclick=()=>{
+      try{sessionStorage.setItem("rsd-control-open-date",String(date||thaiDay()));}catch(e){}
       try{opControlView="map";}catch(e){}
     };
     icons();

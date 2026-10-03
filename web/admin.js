@@ -14,7 +14,9 @@ const adminTables = {
   let adminTab = "Users",
     reportData = null,
     dailyReportData = null,
-    executivePeriodId = "";
+    executivePeriodId = "",
+    executiveMapPack = null,
+    executiveMapSelected = "";
   function wireTextFilter(inputId, scopeSelector) {
     const input=$(inputId),scope=document.querySelector(scopeSelector);
     if(!input||!scope)return;
@@ -1459,6 +1461,72 @@ const adminTables = {
         ])
       : [['<span class="muted">ยังไม่พบรายการที่ต้องติดตาม</span>','—','0','—']];
   }
+
+  function execMapStatus(item){
+    if(!item)return{key:"none",label:"ไม่มีเวร",color:"#94a3b8"};
+    if(item.Status==="งดตรวจ")return{key:"skipped",label:"งดตรวจ",color:"#64748b"};
+    if(item.Status==="รอตรวจ")return{key:"pending",label:"รอตรวจ",color:"#facc15"};
+    if(item.Status==="ตรวจแล้ว"){
+      if(Number(item.Score)===3)return{key:"excellent",label:S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",color:"#22c55e"};
+      if(Number(item.Score)===2)return{key:"medium",label:S.config?.scoreLabels?.["2"]||"ปานกลาง",color:"#f59e0b"};
+      if(Number(item.Score)===1)return{key:"improve",label:S.config?.scoreLabels?.["1"]||"ปรับปรุง",color:"#ef4444"};
+      return{key:"done",label:item.Rating||"ตรวจแล้ว",color:"#14b8a6"};
+    }
+    return{key:"other",label:item.Status||"มีงานตรวจ",color:"#38bdf8"};
+  }
+  function execMapCenter(s){
+    if(s.ShapeType==="polygon"&&Array.isArray(s.Points)&&s.Points.length){
+      const sum=s.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
+      return{x:sum.x/s.Points.length,y:sum.y/s.Points.length};
+    }
+    return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
+  }
+  function execMapHtml(pack,date){
+    const shapes=pack?.layout?.shapes||[],items=pack?.daily?.items||[];
+    if(!shapes.length)return '<section class="card exec-map-card mb-5"><div class="exec-section-title"><div><span class="muted">ภาพรวมเชิงพื้นที่</span><h2>ผังสถานะพื้นที่</h2></div></div><div class="exec-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
+    const byArea=new Map(items.map(x=>[String(x.AreaID),x])),counts={none:0,pending:0,excellent:0,medium:0,improve:0,skipped:0,done:0,other:0};
+    shapes.forEach(s=>{const st=execMapStatus(byArea.get(String(s.AreaID)));counts[st.key]=(counts[st.key]||0)+1;});
+    let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
+    let opacity=.55;try{opacity=Math.max(.1,Math.min(.8,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||55)/100));}catch(e){}
+    const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
+    const body=shapes.map(s=>{
+      const item=byArea.get(String(s.AreaID)),status=execMapStatus(item),center=execMapCenter(s),
+        geo=s.ShapeType==="polygon"
+          ? '<polygon points="'+(s.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+status.color+'"/>'
+          : '<rect x="'+Number(s.X||0)+'" y="'+Number(s.Y||0)+'" width="'+Number(s.Width||0)+'" height="'+Number(s.Height||0)+'" rx="10" fill="'+status.color+'"/>';
+      return '<g class="exec-map-shape '+(executiveMapSelected===String(s.AreaID)?"selected":"")+'" data-area="'+esc(s.AreaID)+'">'+geo+
+        '<text x="'+center.x+'" y="'+(center.y-5)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(s.AreaName||item?.AreaName||"พื้นที่")+'</tspan><tspan class="sub" x="'+center.x+'" dy="18">'+esc(s.ClassName||item?.ClassName||"")+'</tspan></text></g>';
+    }).join("");
+    const legend=[
+      ["#94a3b8","ไม่มีเวร",counts.none],["#facc15","รอตรวจ",counts.pending],["#22c55e",S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",counts.excellent],
+      ["#f59e0b",S.config?.scoreLabels?.["2"]||"ปานกลาง",counts.medium],["#ef4444",S.config?.scoreLabels?.["1"]||"ปรับปรุง",counts.improve],["#64748b","งดตรวจ",counts.skipped]
+    ].map(x=>'<span><i style="background:'+x[0]+'"></i>'+esc(x[1])+' <b>'+Number(x[2]||0)+'</b></span>').join("");
+    return '<section class="card exec-map-card mb-5"><div class="exec-section-title"><div><span class="muted">วันที่อ้างอิง '+esc(date||"")+'</span><h2>ผังสถานะพื้นที่</h2></div><a class="btn small secondary" href="#control" id="exec-open-control-map"><i data-lucide="maximize-2"></i> เปิดผังเต็ม</a></div>'+
+      '<div class="exec-map-legend">'+legend+'</div>'+
+      '<div class="exec-map-layout"><div class="exec-map-scroll"><svg viewBox="0 0 1600 1000" aria-label="ผังสถานะสำหรับผู้บริหาร"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div><aside id="exec-map-detail" class="exec-map-detail"></aside></div></section>';
+  }
+  function execMapDetail(){
+    const box=$("exec-map-detail");if(!box)return;
+    const areaId=String(executiveMapSelected||""),shape=(executiveMapPack?.layout?.shapes||[]).find(s=>String(s.AreaID)===areaId),
+      item=(executiveMapPack?.daily?.items||[]).find(x=>String(x.AreaID)===areaId);
+    if(!shape){
+      box.innerHTML='<div class="exec-map-detail-empty"><i data-lucide="mouse-pointer-2"></i><b>เลือกพื้นที่บนผัง</b><span>คลิกเพื่อดูผลตรวจ ผู้ตรวจ และสถานะรับรอง</span></div>';icons();return;
+    }
+    const status=execMapStatus(item),inspectors=(item?.Inspectors||[]).map(v=>v.Name).filter(Boolean).join(", ")||"—";
+    box.innerHTML='<div class="exec-map-detail-head"><span style="background:'+status.color+'"></span><div><b>'+esc(shape.AreaName||item?.AreaName||"พื้นที่")+'</b><small>'+esc(shape.ClassName||item?.ClassName||"—")+'</small></div></div>'+
+      '<div class="exec-map-detail-status"><b>'+esc(status.label)+'</b><span>'+esc(executiveMapPack?.daily?.date||"")+'</span></div>'+
+      (item?'<div class="exec-map-detail-grid"><div><span>ผู้ตรวจ</span><b>'+esc(inspectors)+'</b></div><div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div><div><span>การรับรอง</span><b>'+esc(item.ApprovalStatus||"—")+'</b></div>'+(item.Notes?'<div class="wide"><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+'</div>':'<div class="exec-map-no-duty">ไม่มีงานตรวจในวันที่อ้างอิง</div>');
+    icons();
+  }
+  function wireExecMap(date){
+    document.querySelectorAll(".exec-map-shape").forEach(el=>el.onclick=()=>{executiveMapSelected=String(el.dataset.area||"");const card=el.closest(".exec-map-card");card?.querySelectorAll(".exec-map-shape").forEach(x=>x.classList.toggle("selected",x===el));execMapDetail();});
+    if($("exec-open-control-map"))$("exec-open-control-map").onclick=()=>{
+      try{sessionStorage.setItem("rsd-control-open-date",String(date||thaiDay()));}catch(e){}
+      try{opControlView="map";opControlMapSelected=executiveMapSelected||"";}catch(e){}
+    };
+    execMapDetail();
+  }
+
   async function renderExecutiveDashboard(seq){
     $("app").innerHTML=
       heading(
@@ -1474,6 +1542,14 @@ const adminTables = {
   async function loadExecutiveDashboard(seq=S.seq){
     const d=await rpc("executiveDashboard",{periodId:executivePeriodId},true);
     if(seq!==S.seq)return;
+    const refDate=d.referenceDate||d.today||thaiDay();
+    const [mapLayout,mapDaily]=await Promise.all([
+      rpc("areaMapLayout",{},true).catch(()=>({shapes:[]})),
+      rpc("dailyControl",{date:refDate},true).catch(()=>({date:refDate,items:[],summary:{}}))
+    ]);
+    if(seq!==S.seq)return;
+    executiveMapPack={layout:mapLayout||{shapes:[]},daily:mapDaily||{date:refDate,items:[],summary:{}}};
+    executiveMapSelected="";
     if(d.settings){S.config=d.settings;try{localStorage.setItem("rsd-config-cache",JSON.stringify(d.settings));}catch(e){}}
     const t=d.todayStats||{},w=d.currentWeek||{},pw=d.previousWeek||{},m=d.currentMonth||{},pm=d.previousMonth||{},l=d.last30||{},labels=d.settings?.scoreLabels||S.config?.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
     const watch=d.watchAreas||[],leaders=d.leaders||[],isTodayRef=d.referenceDate===d.today,refLabel=isTodayRef?"วันนี้":"วันที่อ้างอิง";
@@ -1491,6 +1567,7 @@ const adminTables = {
         '<article class="exec-kpi improve"><span>'+esc(labels["1"])+' 30 วัน</span><b>'+execPct(l.improveRate)+'</b><small>'+Number(l.improve||0)+' ครั้ง</small></article>'+
         '<article class="exec-kpi"><span>พื้นที่ต้องติดตาม</span><b>'+watch.length+'</b><small>มีผลระดับปรับปรุงใน 30 วัน</small></article>'+
       '</div>'+
+      execMapHtml(executiveMapPack,refDate)+
       '<div class="exec-period-grid">'+
         '<section class="card exec-period-card"><div class="exec-period-head"><div><span>สัปดาห์นี้</span><h3>'+execPct(w.completionRate)+' ตรวจครบ</h3></div>'+execDelta(w.completionRate,pw.completionRate,1,"%")+'</div>'+
           '<div class="exec-period-stats"><span>คะแนนเฉลี่ย <b>'+execScore(w.averageScore)+'</b></span><span>ตรวจแล้ว <b>'+w.done+'/'+w.scheduled+'</b></span><span>ปรับปรุง <b>'+w.improve+'</b></span></div>'+
@@ -1522,6 +1599,7 @@ const adminTables = {
         '</div>'+
       '</section>';
 
+    wireExecMap(refDate);
     if($("exec-period-select"))$("exec-period-select").onchange=()=>{
       executivePeriodId=$("exec-period-select").value;
       loadExecutiveDashboard(S.seq).catch(error);

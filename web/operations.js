@@ -21,6 +21,12 @@ function opMonthText(month){
 let opControlData=null,opControlMapLayout=null,opControlView="list",opControlMapSelected="";
 async function renderDailyControl(seq){
   const today=thaiDay();
+  let requestedDate=today;
+  try{
+    const x=sessionStorage.getItem("rsd-control-open-date")||"";
+    if(/^\d{4}-\d{2}-\d{2}$/.test(x)&&x<=today)requestedDate=x;
+    sessionStorage.removeItem("rsd-control-open-date");
+  }catch(e){}
   $("app").innerHTML=
     heading(
       "ศูนย์ควบคุมงานประจำวัน",
@@ -28,7 +34,7 @@ async function renderDailyControl(seq){
       '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานรายวัน</a><button class="btn" id="control-refresh"><i data-lucide="refresh-cw"></i> รีเฟรช</button></div>'
     )+
     '<form id="control-filter" class="card ops-control-filter mb-4">'+
-      '<div class="field m-0"><label>วันที่</label><input id="control-date" type="date" value="'+today+'" max="'+today+'"></div>'+
+      '<div class="field m-0"><label>วันที่</label><input id="control-date" type="date" value="'+requestedDate+'" max="'+today+'"></div>'+
       '<div class="field m-0"><label>สถานะ</label><select id="control-status"><option value="">ทุกสถานะ</option><option value="รอตรวจ">รอตรวจ</option><option value="ตรวจแล้ว">ตรวจแล้ว</option><option value="งดตรวจ">งดตรวจ</option><option value="รอรับรอง">รอรับรอง</option><option value="เวรทดแทน">เวรทดแทน</option></select></div>'+
       '<div class="search-box"><i data-lucide="search"></i><input id="control-search" type="search" placeholder="ค้นหาห้อง / พื้นที่ / ผู้ตรวจ…"></div>'+
     '</form>'+
