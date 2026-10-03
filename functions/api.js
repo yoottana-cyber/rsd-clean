@@ -1625,13 +1625,30 @@ async function password(env,u,p){ const c=parseJson(u.password,{}); assert(equal
 async function saveHolidays(env,u,p){ role(u,["Admin"]); assert(Array.isArray(p.dates)&&p.dates.length<=400,"วันหยุดมากเกินไป"); const dates=[...new Set(p.dates.map(validateDate))]; await env.DB.prepare("DELETE FROM holidays").run(); if(dates.length) await env.DB.batch(dates.map(d=>env.DB.prepare("INSERT INTO holidays(holiday_date) VALUES(?)").bind(d))); await invalidateToday(env); return true; }
 
 async function bulkPlan(env,table,inputs,needCred){
-  const m=await masterData(env.DB), rows=[], prepared=[]; assert(["Users","Classrooms","Areas"].includes(table),"ตารางไม่ถูกต้อง"); assert(Array.isArray(inputs)&&inputs.length>=1&&inputs.length<=100,"นำเข้าได้ครั้งละ 1–100 รายการ");
+  const m=await masterData(env.DB), rows=[], prepared=[]; assert(["Users","Classrooms","Areas","Assignments"].includes(table),"ตารางไม่ถูกต้อง"); assert(Array.isArray(inputs)&&inputs.length>=1&&inputs.length<=100,"นำเข้าได้ครั้งละ 1–100 รายการ");
   const seen=new Set();
   for(let i=0;i<inputs.length;i++){
     const x=inputs[i]||{}, errors=[], display={};
     if(table==="Classrooms") { const name=text(x.ClassName||x["ชื่อห้องเรียน"]||"",200); display.ClassName=name; if(!name) errors.push("ชื่อห้องเรียนว่าง"); const k=name.toLowerCase(); if(seen.has(k)||m.Classrooms.some(c=>c.ClassName.toLowerCase()===k)) errors.push("ชื่อห้องเรียนซ้ำ"); seen.add(k); if(!errors.length) prepared.push({classroom_id:uuid(),class_name:name}); }
     if(table==="Areas") { const name=text(x.AreaName||x["ชื่อพื้นที่"]||"",200), cls=text(x.ClassName||x["ห้องรับผิดชอบ"]||"",200); display.AreaName=name; display.ClassName=cls; const c=m.Classrooms.find(c=>c.ClassName===cls||c.ClassroomID===cls); if(!name) errors.push("ชื่อพื้นที่ว่าง"); if(!c) errors.push("ไม่พบห้องรับผิดชอบ"); const k=name.toLowerCase(); if(seen.has(k)||m.Areas.some(a=>a.AreaName.toLowerCase()===k)) errors.push("ชื่อพื้นที่ซ้ำ"); seen.add(k); if(!errors.length) prepared.push({area_id:uuid(),area_name:name,responsible_classroom_id:c.ClassroomID}); }
     if(table==="Users") { const username=text(x.Username||"",80).toLowerCase(), full=text(x.FullName||"",200), roleRaw=text(x.Role||"",40), cls=text(x.ClassName||"",200); const map={"ผู้ดูแลระบบ":"Admin","หัวหน้างาน":"Supervisor","ผู้บริหาร":"Supervisor","ผู้ตรวจ":"Inspector","ครูประจำชั้น":"Teacher"}; const rr=map[roleRaw]||roleRaw; display.Username=username;display.FullName=full;display.Role=rr;display.ClassName=cls; if(!/^[a-z0-9._@-]{3,80}$/.test(username)) errors.push("Username ไม่ถูกต้อง"); if(!full) errors.push("ชื่อ–สกุลว่าง"); if(!ROLES.includes(rr)) errors.push("Role ไม่ถูกต้อง"); let c=null; if(rr==="Teacher"){ c=m.Classrooms.find(c=>c.ClassName===cls||c.ClassroomID===cls); if(!c) errors.push("Teacher ต้องระบุห้องเรียน"); } else if(cls) errors.push("สิทธิ์นี้ต้องเว้นห้องเรียน"); const k=username; if(seen.has(k)||m.Users.some(u=>u.Username.toLowerCase()===k)) errors.push("Username ซ้ำ"); seen.add(k); if(needCred&&!x.credential) errors.push("ไม่พบ credential"); if(!errors.length) prepared.push({user_id:uuid(),username,full_name:full,role:rr,linked_classroom_id:c?.ClassroomID||"",credential:x.credential}); }
+    if(table==="Assignments") {
+      const userRef=text(x.Username||x.Inspector||x["ผู้ตรวจ"]||"",200).toLowerCase(),areaRef=text(x.AreaName||x["ชื่อพื้นที่"]||x["พื้นที่"]||"",200),rawDays=text(x.Days||x["วันเข้าเวร"]||"",100);
+      display.Username=userRef;display.AreaName=areaRef;display.Days=rawDays;
+      const inspector=m.Users.find(v=>v.Role==="Inspector"&&(v.Username.toLowerCase()===userRef||v.FullName.toLowerCase()===userRef||v.UserID.toLowerCase()===userRef));
+      const area=m.Areas.find(v=>v.AreaName===areaRef||v.AreaID===areaRef);
+      if(!inspector)errors.push("ไม่พบผู้ตรวจ Inspector");
+      if(!area)errors.push("ไม่พบพื้นที่");
+      let days="";
+      try{days=dutyText(rawDays);}catch(e){errors.push("วันเข้าเวรไม่ถูกต้อง ใช้ 1,2,3,4,5");}
+      const k=(inspector?.UserID||userRef)+"|"+(area?.AreaID||areaRef);
+      if(seen.has(k))errors.push("ผู้ตรวจ/พื้นที่ซ้ำในไฟล์");seen.add(k);
+      if(!errors.length){
+        const old=m.Assignments.find(a=>a.UserID===inspector.UserID&&a.AreaID===area.AreaID);
+        const merged=old?[...new Set([...dutyDays(old.Days),...dutyDays(days)])].sort().join(","):days;
+        prepared.push({assignment_id:old?.AssignmentID||uuid(),user_id:inspector.UserID,area_id:area.AreaID,days:merged,existing:!!old});
+      }
+    }
     rows.push({row:i+2,errors,display});
   }
   return {valid:rows.every(r=>!r.errors.length),rows,total:rows.length,prepared};
@@ -1641,6 +1658,10 @@ async function bulkCreate(env,u,p){ role(u,["Admin"]); const r=await bulkPlan(en
   if(p.table==="Classrooms") r.prepared.forEach(x=>stmts.push(db.prepare("INSERT INTO classrooms(classroom_id,class_name,created_at,updated_at) VALUES(?,?,?,?)").bind(x.classroom_id,x.class_name,nowIso(),nowIso())));
   if(p.table==="Areas") r.prepared.forEach(x=>stmts.push(db.prepare("INSERT INTO areas(area_id,area_name,responsible_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?)").bind(x.area_id,x.area_name,x.responsible_classroom_id,nowIso(),nowIso())));
   if(p.table==="Users") for(const x of r.prepared) stmts.push(db.prepare("INSERT INTO users(user_id,username,password,full_name,role,linked_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").bind(x.user_id,x.username,await credentialJson(env,x.credential),x.full_name,x.role,x.linked_classroom_id,nowIso(),nowIso()));
+  if(p.table==="Assignments") for(const x of r.prepared){
+    if(x.existing)stmts.push(db.prepare("UPDATE assignments SET days=?,updated_at=? WHERE assignment_id=?").bind(x.days,nowIso(),x.assignment_id));
+    else stmts.push(db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)").bind(x.assignment_id,x.user_id,x.area_id,x.days,nowIso(),nowIso()));
+  }
   await db.batch(stmts); await invalidateToday(env); return {saved:true,count:r.prepared.length}; }
 
 async function uploadStart(env,u,p,request){
