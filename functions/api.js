@@ -1546,12 +1546,33 @@ async function deleteDutyOverride(env,u,p){
   if(String(row.override_date)===thaiDay()){await invalidateToday(env);await ensureToday(env);}
   return true;
 }
+async function currentInspectionNameMaps(db){
+  const [areas,classes]=await Promise.all([
+    all(db,"SELECT a.area_id,a.area_name,a.responsible_classroom_id,c.class_name FROM areas a LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id"),
+    all(db,"SELECT classroom_id,class_name FROM classrooms")
+  ]);
+  return{
+    areas:new Map(areas.map(x=>[String(x.area_id),{AreaName:String(x.area_name||""),ClassroomID:String(x.responsible_classroom_id||""),ClassName:String(x.class_name||"")} ])),
+    classes:new Map(classes.map(x=>[String(x.classroom_id),String(x.class_name||"")]))
+  };
+}
+function currentInspectionLabels(i,maps){
+  const m=metaOf(i),area=maps?.areas?.get(String(i.area_id||"")),snapshotClassId=String(m.classId||"");
+  return{
+    AreaName:String(area?.AreaName||m.areaName||"—"),
+    ClassName:String((snapshotClassId&&maps?.classes?.get(snapshotClassId))||area?.ClassName||m.className||"—")
+  };
+}
+
 async function reviewQueue(env,u){
   role(u,["Admin","Supervisor"]);const cfg=await getAppSettings(env.DB);
   if(!cfg.approvalEnabled)return{enabled:false,rows:[]};
-  const rows=await all(env.DB,"SELECT * FROM inspections WHERE inspection_date>=? ORDER BY inspection_date DESC,updated_at DESC LIMIT 500",shiftDate(thaiDay(),-30));
+  const [rows,names]=await Promise.all([
+    all(env.DB,"SELECT * FROM inspections WHERE inspection_date>=? ORDER BY inspection_date DESC,updated_at DESC LIMIT 500",shiftDate(thaiDay(),-30)),
+    currentInspectionNameMaps(env.DB)
+  ]);
   return{enabled:true,rows:rows.filter(i=>["รอรับรอง","ส่งกลับแก้ไข"].includes(String(metaOf(i).approvalStatus||""))).map(i=>{
-    const m=metaOf(i);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:m.areaName||"—",ClassName:m.className||"—",Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",ApprovalStatus:m.approvalStatus||"",ReviewNote:m.reviewNote||"",CompletedBy:m.completedByName||i.completed_by_name||"",PhotoLinks:parseJson(i.photo_links_json,[]).map(x=>({id:x})),UpdatedAt:i.updated_at};
+    const m=metaOf(i),label=currentInspectionLabels(i,names);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:label.AreaName,ClassName:label.ClassName,Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",ApprovalStatus:m.approvalStatus||"",ReviewNote:m.reviewNote||"",CompletedBy:m.completedByName||i.completed_by_name||"",PhotoLinks:parseJson(i.photo_links_json,[]).map(x=>({id:x})),UpdatedAt:i.updated_at};
   })};
 }
 async function reviewInspection(env,u,p){
@@ -1574,8 +1595,12 @@ async function inspectionExceptions(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB,date=validateDate(p.date||thaiDay());
   assert(date<=thaiDay()&&date>=shiftDate(thaiDay(),-30),"จัดการงดตรวจย้อนหลังได้ไม่เกิน 30 วัน");
   if(date===thaiDay())await ensureToday(env);
-  const rows=await all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date);
-  return{date,settings:await getAppSettings(db),rows:rows.map(i=>{const m=metaOf(i);return{InspectionID:i.inspection_id,AreaName:m.areaName||"—",ClassName:m.className||"—",Status:i.status,Score:Number(i.score||0),SkipReason:m.skipReason||"",Notes:i.note||"",ApprovalStatus:m.approvalStatus||"",Version:Number(i.version||0)};})};
+  const [rows,names,settings]=await Promise.all([
+    all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
+    currentInspectionNameMaps(db),
+    getAppSettings(db)
+  ]);
+  return{date,settings,rows:rows.map(i=>{const m=metaOf(i),label=currentInspectionLabels(i,names);return{InspectionID:i.inspection_id,AreaName:label.AreaName,ClassName:label.ClassName,Status:i.status,Score:Number(i.score||0),SkipReason:m.skipReason||"",Notes:i.note||"",ApprovalStatus:m.approvalStatus||"",Version:Number(i.version||0)};})};
 }
 async function setInspectionException(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB,id=text(p.id,120),action=text(p.action,30),cfg=await getAppSettings(db);
@@ -1619,13 +1644,16 @@ function historySummary(rows){
 async function historyData(env,u,p){
   const db=env.DB,type=String(p.type||"area"),id=text(p.id,100),start=validateDate(p.start||shiftDate(thaiDay(),-89)),end=validateDate(p.end||thaiDay());
   assert(["area","class"].includes(type)&&start<=end&&(new Date(end)-new Date(start))<=366*86400000,"เงื่อนไขประวัติไม่ถูกต้อง");
-  const opts=await historyOptions(env,u);
+  const [opts,rows,names]=await Promise.all([
+    historyOptions(env,u),
+    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date DESC,inspection_id",start,end),
+    currentInspectionNameMaps(db)
+  ]);
   if(type==="area")assert(opts.areas.some(x=>String(x.id)===id),"ไม่มีสิทธิ์ดูพื้นที่นี้");
   else assert(opts.classes.some(x=>String(x.id)===id),"ไม่มีสิทธิ์ดูห้องนี้");
-  const rows=await all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date DESC,inspection_id",start,end);
   const selected=rows.filter(i=>type==="area"?String(i.area_id)===id:String(metaOf(i).classId||"")===id);
-  const trend=[...selected].reverse().map(i=>{const m=metaOf(i);return{date:i.inspection_date,score:Number(i.score||0),status:i.status,area:m.areaName||"—",className:m.className||"—"};});
-  return{type,id,start,end,summary:historySummary(selected),trend,rows:selected.map(i=>{const m=metaOf(i);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:m.areaName||"—",ClassName:m.className||"—",Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",ApprovalStatus:m.approvalStatus||"",CompletedBy:m.completedByName||i.completed_by_name||"",Version:Number(i.version||0),AdminEditedBy:String(m.adminEditedByName||""),AdminEditedAt:String(m.adminEditedAt||""),AdminEditReason:String(m.adminEditReason||""),PhotoLinks:parseJson(i.photo_links_json,[]).map(x=>({id:x}))};})};
+  const trend=[...selected].reverse().map(i=>{const label=currentInspectionLabels(i,names);return{date:i.inspection_date,score:Number(i.score||0),status:i.status,area:label.AreaName,className:label.ClassName};});
+  return{type,id,start,end,summary:historySummary(selected),trend,rows:selected.map(i=>{const m=metaOf(i),label=currentInspectionLabels(i,names);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:label.AreaName,ClassName:label.ClassName,Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",ApprovalStatus:m.approvalStatus||"",CompletedBy:m.completedByName||i.completed_by_name||"",Version:Number(i.version||0),AdminEditedBy:String(m.adminEditedByName||""),AdminEditedAt:String(m.adminEditedAt||""),AdminEditReason:String(m.adminEditReason||""),PhotoLinks:parseJson(i.photo_links_json,[]).map(x=>({id:x}))};})};
 }
 async function adminEditInspection(env,u,p){
   role(u,["Admin"]);
@@ -1711,12 +1739,14 @@ async function exportData(env,u,p){
   const db=env.DB,start=validateDate(p.start||shiftDate(thaiDay(),-29)),end=validateDate(p.end||thaiDay()),classId=text(p.classId||"",100),areaId=text(p.areaId||"",100);
   assert(start<=end&&(new Date(end)-new Date(start))<=366*86400000,"ช่วงวันที่ไม่ถูกต้อง");
   if(u.role==="Teacher"){assert(!classId||classId===u.linked_classroom_id,"ไม่มีสิทธิ์ส่งออกห้องนี้");}
-  const rows=await all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,end);
+  const [rows,cfg,names]=await Promise.all([
+    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,end),
+    getAppSettings(db),
+    currentInspectionNameMaps(db)
+  ]);
   const filtered=rows.filter(i=>{const m=metaOf(i);if(u.role==="Teacher"&&String(m.classId)!==String(u.linked_classroom_id))return false;if(classId&&String(m.classId)!==classId)return false;if(areaId&&String(i.area_id)!==areaId)return false;return true;});
-  const cfg=await getAppSettings(db);
-  return{start,end,settings:cfg,rows:filtered.map(i=>{const m=metaOf(i);return{วันที่:i.inspection_date,ห้องเรียน:m.className||"—",พื้นที่:m.areaName||"—",สถานะ:i.status,ระดับ:i.rating||"",คะแนน:Number(i.score||0),หมายเหตุ:i.note||"",เหตุผลงดตรวจ:m.skipReason||"",สถานะรับรอง:m.approvalStatus||"",ผู้ตรวจ:m.completedByName||i.completed_by_name||""};})};
+  return{start,end,settings:cfg,rows:filtered.map(i=>{const m=metaOf(i),label=currentInspectionLabels(i,names);return{วันที่:i.inspection_date,ห้องเรียน:label.ClassName,พื้นที่:label.AreaName,สถานะ:i.status,ระดับ:i.rating||"",คะแนน:Number(i.score||0),หมายเหตุ:i.note||"",เหตุผลงดตรวจ:m.skipReason||"",สถานะรับรอง:m.approvalStatus||"",ผู้ตรวจ:m.completedByName||i.completed_by_name||""};})};
 }
-
 async function schoolDay(env,date) {
   const w=weekday(date); if(w===0||w===6) return false;
   return !(await env.DB.prepare("SELECT 1 x FROM holidays WHERE holiday_date=?").bind(date).first());
