@@ -1081,6 +1081,10 @@ async function activeAcademicPeriod(db){
   const today=thaiDay();
   return db.prepare("SELECT * FROM academic_periods WHERE start_date<=? AND end_date>=? ORDER BY start_date DESC LIMIT 1").bind(today,today).first();
 }
+async function academicPeriodForDate(db,date){
+  await ensureAcademicPeriodsTable(db);
+  return db.prepare("SELECT * FROM academic_periods WHERE start_date<=? AND end_date>=? ORDER BY start_date DESC LIMIT 1").bind(date,date).first();
+}
 async function ensurePushSubscriptionsTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
     subscription_id TEXT PRIMARY KEY,
@@ -1196,7 +1200,7 @@ async function deletePushSubscription(env,u,p){
 async function dailyControl(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB,date=validateDate(p.date||thaiDay());
   if(date===thaiDay())await ensureToday(env);
-  const cfg=await getAppSettings(db),period=await activeAcademicPeriod(db);
+  const cfg=await getAppSettings(db),period=await academicPeriodForDate(db,date);
   const [rows,teams,overrides]=await Promise.all([
     all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
     all(db,`SELECT ii.* FROM inspection_inspectors ii JOIN inspections i ON i.inspection_id=ii.inspection_id WHERE i.inspection_date=? ORDER BY ii.inspection_id,ii.user_name`,date),
@@ -1231,7 +1235,7 @@ async function certificateData(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB;await ensureAcademicPeriodsTable(db);
   const month=/^\d{4}-\d{2}$/.test(String(p.month||""))?String(p.month):thaiDay().slice(0,7);
   const start=month+"-01",end=monthLastDay(month)<thaiDay()?monthLastDay(month):thaiDay(),cfg=await getAppSettings(db);
-  const {ins}=await inspectionBundleRange(db,start,end),rows=await monthly(env,ins,month),period=await activeAcademicPeriod(db);
+  const {ins}=await inspectionBundleRange(db,start,end),rows=await monthly(env,ins,month),period=await academicPeriodForDate(db,end);
   return{
     month,settings:cfg,period:period?{PeriodID:period.period_id,Label:period.label,AcademicYear:period.academic_year,Semester:period.semester}:null,
     rows:rows.filter(x=>["เหรียญทอง","เหรียญเงิน","เหรียญทองแดง"].includes(x.medal)),
