@@ -2,6 +2,7 @@ const TZ = "Asia/Bangkok";
 const SESSION_MS = 8 * 3600000;
 const REMEMBER_SESSION_MS = 90 * 24 * 3600000;
 const MAX_IMAGE = 100 * 1024 * 1024;
+const MAX_CERT_TEMPLATE = 15 * 1024 * 1024;
 const ITERATIONS = 600000;
 const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
 const enc = new TextEncoder();
@@ -270,6 +271,11 @@ async function dispatch(env, action, p, token, request) {
     saveAcademicPeriod: async () => saveAcademicPeriod(env,u,p),
     deleteAcademicPeriod: async () => deleteAcademicPeriod(env,u,p),
     certificateData: async () => certificateData(env,u,p),
+    certificateTemplate: async () => certificateTemplate(env,u),
+    certificateTemplateUploadStart: async () => certificateTemplateUploadStart(env,u,p,request),
+    saveCertificateTemplate: async () => saveCertificateTemplate(env,u,p),
+    certificateTemplateImage: async () => certificateTemplateImage(env,u),
+    deleteCertificateTemplate: async () => deleteCertificateTemplate(env,u),
     pushStatus: async () => pushStatus(env,u),
     savePushSubscription: async () => savePushSubscription(env,u,p),
     deletePushSubscription: async () => deletePushSubscription(env,u,p),
@@ -415,7 +421,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -476,6 +482,8 @@ function auditMeta(action,p,result){
       after:result?.after||{}
     }
   };
+  if(action==="saveCertificateTemplate")return{entityType:"CertificateTemplate",entityId:String(result?.fileId||"settings"),details:{enabled:result?.enabled===true,templateChanged:!!p.uploadTicket}};
+  if(action==="deleteCertificateTemplate")return{entityType:"CertificateTemplate",entityId:"custom",details:{deleted:true}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
@@ -1278,13 +1286,100 @@ async function dailyControl(env,u,p){
   };
   return{date,settings:cfg,period:period?{PeriodID:period.period_id,Label:period.label,StartDate:period.start_date,EndDate:period.end_date}:null,summary,items,updatedAt:nowIso()};
 }
+function defaultCertificateTemplate(){
+  return {
+    enabled:false,fileId:"",mime:"",updatedAt:"",
+    fields:{
+      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700},
+      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700},
+      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500},
+      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400},
+      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400}
+    }
+  };
+}
+function certField(raw,def){
+  raw=raw&&typeof raw==="object"?raw:{};
+  const color=/^#[0-9a-f]{6}$/i.test(String(raw.color||""))?String(raw.color):def.color;
+  return{
+    visible:raw.visible!==false,
+    x:Math.min(100,Math.max(0,Number(raw.x??def.x))),
+    y:Math.min(100,Math.max(0,Number(raw.y??def.y))),
+    size:Math.min(96,Math.max(10,Number(raw.size??def.size))),
+    color,
+    weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):def.weight
+  };
+}
+async function getCertificateTemplate(db){
+  const def=defaultCertificateTemplate(),r=await db.prepare("SELECT value FROM settings WHERE key='certificate_template_json'").first(),x=parseJson(r?.value,{});
+  const fields={};
+  for(const k of Object.keys(def.fields))fields[k]=certField(x?.fields?.[k],def.fields[k]);
+  return{
+    enabled:x?.enabled===true&&!!String(x?.fileId||""),
+    fileId:String(x?.fileId||""),
+    mime:String(x?.mime||""),
+    updatedAt:String(x?.updatedAt||""),
+    fields
+  };
+}
+async function certificateTemplate(env,u){
+  role(u,["Admin","Supervisor"]);
+  const cfg=await getCertificateTemplate(env.DB);
+  return{...cfg,hasImage:!!cfg.fileId};
+}
+async function certificateTemplateUploadStart(env,u,p,request){
+  role(u,["Admin"]);
+  const mime=String(p.mime||""),size=Number(p.size),origin=String(p.origin||new URL(request.url).origin);
+  assert(["image/jpeg","image/png"].includes(mime),"แม่แบบรองรับ JPG หรือ PNG");
+  assert(Number.isInteger(size)&&size>0&&size<=MAX_CERT_TEMPLATE,"ไฟล์แม่แบบต้องไม่เกิน 15 MB");
+  assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ยังไม่ได้ตั้งค่า Google Drive gateway");
+  const r=await gasDrive(env,"templateUploadStart",{userId:u.user_id,mime,size,origin});
+  await env.DB.prepare("INSERT OR REPLACE INTO upload_tickets(ticket,user_id,inspection_id,file_id,size,mime,expires_at) VALUES(?,?,?,?,?,?,?)")
+    .bind(r.ticket,u.user_id,"CERT_TEMPLATE",r.fileId,size,mime,Date.now()+3600000).run();
+  return r;
+}
+async function saveCertificateTemplate(env,u,p){
+  role(u,["Admin"]);
+  const db=env.DB,old=await getCertificateTemplate(db),def=defaultCertificateTemplate(),raw=p.config&&typeof p.config==="object"?p.config:{};
+  let fileId=old.fileId,mime=old.mime;
+  if(p.uploadTicket){
+    const t=await db.prepare("SELECT * FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).first();
+    assert(t&&t.user_id===u.user_id&&t.inspection_id==="CERT_TEMPLATE"&&Number(t.expires_at)>Date.now(),"สิทธิ์อัปโหลดแม่แบบหมดอายุ");
+    await gasDrive(env,"verifyTemplateUpload",{ticket:t.ticket,fileId:t.file_id,size:Number(t.size),mime:t.mime,userId:u.user_id});
+    fileId=String(t.file_id);mime=String(t.mime);
+  }
+  assert(fileId,"กรุณาอัปโหลดภาพแม่แบบก่อน");
+  const fields={};
+  for(const k of Object.keys(def.fields))fields[k]=certField(raw?.fields?.[k],old.fields?.[k]||def.fields[k]);
+  const cfg={enabled:raw.enabled!==false,fileId,mime,updatedAt:nowIso(),fields};
+  await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('certificate_template_json',?)").bind(JSON.stringify(cfg)).run();
+  if(p.uploadTicket){
+    await db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).run();
+    gasDrive(env,"consumeTemplateUpload",{ticket:String(p.uploadTicket)}).catch(()=>{});
+    if(old.fileId&&old.fileId!==fileId)gasDrive(env,"trashFiles",{fileIds:[old.fileId]}).catch(()=>{});
+  }
+  return cfg;
+}
+async function certificateTemplateImage(env,u){
+  role(u,["Admin","Supervisor"]);
+  const cfg=await getCertificateTemplate(env.DB);assert(cfg.fileId,"ยังไม่มีแม่แบบเกียรติบัตร");
+  return gasDrive(env,"templateImage",{fileId:cfg.fileId});
+}
+async function deleteCertificateTemplate(env,u){
+  role(u,["Admin"]);
+  const cfg=await getCertificateTemplate(env.DB);
+  await env.DB.prepare("DELETE FROM settings WHERE key='certificate_template_json'").run();
+  if(cfg.fileId&&env.GAS_DRIVE_URL)gasDrive(env,"trashFiles",{fileIds:[cfg.fileId]}).catch(()=>{});
+  return true;
+}
+
 async function certificateData(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB;await ensureAcademicPeriodsTable(db);
   const month=/^\d{4}-\d{2}$/.test(String(p.month||""))?String(p.month):thaiDay().slice(0,7);
   const start=month+"-01",end=monthLastDay(month)<thaiDay()?monthLastDay(month):thaiDay(),cfg=await getAppSettings(db);
-  const {ins}=await inspectionBundleRange(db,start,end),rows=await monthly(env,ins,month),period=await academicPeriodForDate(db,end);
+  const [{ins},template]=await Promise.all([inspectionBundleRange(db,start,end),getCertificateTemplate(db)]),rows=await monthly(env,ins,month),period=await academicPeriodForDate(db,end);
   return{
-    month,settings:cfg,period:period?{PeriodID:period.period_id,Label:period.label,AcademicYear:period.academic_year,Semester:period.semester}:null,
+    month,settings:cfg,template,period:period?{PeriodID:period.period_id,Label:period.label,AcademicYear:period.academic_year,Semester:period.semester}:null,
     rows:rows.filter(x=>["เหรียญทอง","เหรียญเงิน","เหรียญทองแดง"].includes(x.medal)),
     generatedAt:nowIso()
   };
