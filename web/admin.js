@@ -1731,6 +1731,10 @@ const adminTables = {
           '<div class="card"><div class="muted">Google Drive Gateway</div><div class="mt-2">'+statusBadge(!!r.drive?.ok,"เชื่อมต่อแล้ว","มีปัญหา")+'</div><div class="muted mt-2">'+esc(r.drive?.message||"")+'</div></div>' +
           '<div class="card"><div class="muted">Backup ล่าสุด</div><div class="mt-2"><b>'+fmtStatusDate(b.lastAt)+'</b></div><div class="muted mt-2">Auto: '+esc(b.lastAutoDay||"—")+'</div></div>' +
         '</div>' +
+        '<div class="grid gap-3 md:grid-cols-2 mb-4">' +
+          '<div class="card"><div class="muted">Web Push</div><div class="mt-2">'+statusBadge(!!r.push?.configured,"พร้อมใช้งาน","ยังไม่ตั้ง VAPID")+'</div><div class="muted mt-2">อุปกรณ์ที่ลงทะเบียน '+Number(r.push?.subscriptions||0)+'</div></div>' +
+          '<div class="card"><div class="muted">ปีการศึกษา / ภาคเรียน</div><div class="mt-2"><b>'+Number(c.academicPeriods||0)+' ช่วง</b></div><div class="muted mt-2"><a href="#periods">จัดการภาคเรียน</a></div></div>' +
+        '</div>' +
         '<div class="grid gap-3 md:grid-cols-3 mb-4">' +
           '<div class="card"><div class="muted">Error · 24 ชม.</div><div class="kpi" style="font-size:28px">'+Number(r.monitor24h?.errors||0)+'</div></div>' +
           '<div class="card"><div class="muted">Slow API · 24 ชม.</div><div class="kpi" style="font-size:28px">'+Number(r.monitor24h?.slow||0)+'</div></div>' +
@@ -1750,6 +1754,8 @@ const adminTables = {
             ["ถังขยะ",c.recycleBin||0],
             ["System Events",c.systemEvents||0],
             ["เวรทดแทนวันนี้/ล่วงหน้า",c.dutyOverrides||0],
+            ["ปีการศึกษา/ภาคเรียน",c.academicPeriods||0],
+            ["Push Subscription",c.pushSubscriptions||0],
             ["Session ที่ยังใช้งาน",c.activeSessions||0]
           ].map(x=>[esc(x[0]),String(x[1])])
         ) +
