@@ -1,6 +1,20 @@
 
 const AREA_MAP_W=1600, AREA_MAP_H=1000;
-let areaMapState={shapes:[],selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null};
+const AREA_MAP_REFERENCE_KEY="rsd-area-map-reference-v1";
+const AREA_MAP_REFERENCE_OPACITY_KEY="rsd-area-map-reference-opacity-v1";
+const AREA_MAP_GRID_KEY="rsd-area-map-grid-v1";
+function areaMapLocalGet(key,fallback=""){try{const v=localStorage.getItem(key);return v===null?fallback:v;}catch(e){return fallback;}}
+function areaMapLocalSet(key,value){try{localStorage.setItem(key,value);return true;}catch(e){return false;}}
+function areaMapReferencePrefs(){
+  const raw=Number(areaMapLocalGet(AREA_MAP_REFERENCE_OPACITY_KEY,"65"));
+  return{
+    referenceDataUrl:areaMapLocalGet(AREA_MAP_REFERENCE_KEY,""),
+    referenceVisible:true,
+    referenceOpacity:Math.max(.1,Math.min(1,Number.isFinite(raw)?raw/100:.65)),
+    gridVisible:areaMapLocalGet(AREA_MAP_GRID_KEY,"0")==="1"
+  };
+}
+let areaMapState={shapes:[],selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null,...areaMapReferencePrefs()};
 
 function areaMapUid(){try{return crypto.randomUUID();}catch(e){return "map_"+Date.now()+"_"+Math.random().toString(36).slice(2);}}
 function areaMapArea(id){return S.master.Areas.find(a=>a.AreaID===id);}
@@ -11,26 +25,159 @@ function areaMapMarkDirty(){areaMapState.dirty=true;const badge=$("area-map-dirt
 async function areaMapContent(){
   $("admin-content").innerHTML='<div class="map-editor-loading"><div class="spinner"></div><b>กำลังเปิดผังพื้นที่…</b></div>';
   try{
-    const data=await rpc("areaMapLayout");if(adminTab!=="AreaMap")return;
-    areaMapState={shapes:(data.shapes||[]).map(s=>({...s,Points:Array.isArray(s.Points)?s.Points:[]})),selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null};
+    const data=await rpc("areaMapLayout");
+    if(adminTab!=="AreaMap")return;
+    areaMapState={
+      shapes:(data.shapes||[]).map(s=>({...s,Points:Array.isArray(s.Points)?s.Points:[]})),
+      selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null,
+      ...areaMapReferencePrefs()
+    };
     areaMapRenderEditor();
-  }catch(e){error(e);$("admin-content").innerHTML='<div class="empty">เปิดผังพื้นที่ไม่สำเร็จ</div>';}
+  }catch(e){
+    error(e);
+    $("admin-content").innerHTML='<div class="empty">เปิดผังพื้นที่ไม่สำเร็จ</div>';
+  }
 }
 function areaMapRenderEditor(){
-  const areas=[...S.master.Areas].sort(assignmentAreaSort),mapped=new Set(areaMapState.shapes.map(s=>s.AreaID));
-  const options=areas.map(a=>'<option value="'+esc(a.AreaID)+'" '+(a.AreaID===areaMapState.selectedAreaId?"selected":"")+'>'+(mapped.has(a.AreaID)?"✓ ":"○ ")+esc(a.AreaName)+" · "+esc(areaMapClass(a))+'</option>').join("");
-  $("admin-content").innerHTML='<div class="area-map-shell"><div class="area-map-head"><div><h2 class="text-lg">ผังเขตพื้นที่โรงเรียน</h2><p class="muted mt-1">วาดผังแบบ Vector และเชื่อมกับพื้นที่ตรวจจริงในระบบ</p></div><div class="area-map-head-actions"><span id="area-map-dirty" class="area-map-dirty '+(areaMapState.dirty?"show":"")+'">'+(areaMapState.dirty?"มีการแก้ไขที่ยังไม่บันทึก":"")+'</span><button class="btn secondary" id="area-map-reload">↺ ย้อนการแก้ไข</button><button class="btn" id="area-map-save" '+(areaMapState.dirty?"":"disabled")+'>บันทึกผัง</button></div></div><div class="area-map-stats"><span>พื้นที่ทั้งหมด <b>'+areas.length+'</b></span><span>วางบนผังแล้ว <b>'+mapped.size+'</b></span><span>ยังไม่วาง <b>'+(areas.length-mapped.size)+'</b></span></div><div class="area-map-toolbar"><div class="area-map-area-picker"><label>พื้นที่ที่จะวาด</label><select id="area-map-area"><option value="">— เลือกพื้นที่ —</option>'+options+'</select></div><div class="area-map-tools"><button class="btn small secondary map-tool" data-mode="select">↖ เลือก/ย้าย</button><button class="btn small secondary map-tool" data-mode="rect">▭ สี่เหลี่ยม</button><button class="btn small secondary map-tool" data-mode="polygon">⬠ หลายเหลี่ยม</button><button class="btn small secondary" id="area-map-finish-poly">จบรูป</button><button class="btn small secondary" id="area-map-cancel-poly">ยกเลิกจุด</button></div><div class="area-map-zoom"><button class="btn small secondary" id="area-map-zoom-out">−</button><span id="area-map-zoom-label">'+Math.round(areaMapState.zoom*100)+'%</span><button class="btn small secondary" id="area-map-zoom-in">＋</button><button class="btn small secondary" id="area-map-view-toggle">'+(areaMapState.viewOnly?"✎ กลับโหมดแก้ไข":"👁 โหมดดู")+'</button></div></div><div class="area-map-workspace"><div class="area-map-canvas-card"><div class="area-map-hint" id="area-map-hint"></div><div class="area-map-scroll"><svg id="area-map-svg" viewBox="0 0 '+AREA_MAP_W+' '+AREA_MAP_H+'"></svg></div></div><aside class="area-map-side" id="area-map-side"></aside></div></div>';
-  areaMapBindEditor();areaMapRenderSvg();areaMapRenderSide();areaMapUpdateToolbar();
+  const areas=[...S.master.Areas].sort(assignmentAreaSort),
+    mapped=new Set(areaMapState.shapes.map(s=>s.AreaID)),
+    options=areas.map(a=>
+      '<option value="'+esc(a.AreaID)+'" '+(a.AreaID===areaMapState.selectedAreaId?"selected":"")+'>'+
+      (mapped.has(a.AreaID)?"✓ ":"○ ")+esc(a.AreaName)+" · "+esc(areaMapClass(a))+
+      '</option>'
+    ).join(""),
+    hasReference=!!areaMapState.referenceDataUrl;
+
+  $("admin-content").innerHTML=
+    '<div class="area-map-shell">'+
+      '<div class="area-map-head"><div><h2 class="text-lg">ผังเขตพื้นที่โรงเรียน</h2><p class="muted mt-1">วาดผังแบบ Vector และเชื่อมกับพื้นที่ตรวจจริงในระบบ</p></div>'+
+      '<div class="area-map-head-actions"><span id="area-map-dirty" class="area-map-dirty '+(areaMapState.dirty?"show":"")+'">'+(areaMapState.dirty?"มีการแก้ไขที่ยังไม่บันทึก":"")+'</span><button class="btn secondary" id="area-map-reload">↺ ย้อนการแก้ไข</button><button class="btn" id="area-map-save" '+(areaMapState.dirty?"":"disabled")+'>บันทึกผัง</button></div></div>'+
+      '<div class="area-map-stats"><span>พื้นที่ทั้งหมด <b>'+areas.length+'</b></span><span>วางบนผังแล้ว <b>'+mapped.size+'</b></span><span>ยังไม่วาง <b>'+(areas.length-mapped.size)+'</b></span></div>'+
+      '<div class="area-map-toolbar">'+
+        '<div class="area-map-area-picker"><label>พื้นที่ที่จะวาด</label><select id="area-map-area"><option value="">— เลือกพื้นที่ —</option>'+options+'</select></div>'+
+        '<div class="area-map-tools"><button class="btn small secondary map-tool" data-mode="select">↖ เลือก/ย้าย</button><button class="btn small secondary map-tool" data-mode="rect">▭ สี่เหลี่ยม</button><button class="btn small secondary map-tool" data-mode="polygon">⬠ หลายเหลี่ยม</button><button class="btn small secondary" id="area-map-finish-poly">จบรูป</button><button class="btn small secondary" id="area-map-cancel-poly">ยกเลิกจุด</button></div>'+
+        '<div class="area-map-reference-tools">'+
+          '<input id="area-map-reference-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>'+
+          '<button class="btn small secondary" id="area-map-reference-pick">🖼 '+(hasReference?"เปลี่ยนภาพอ้างอิง":"เลือกภาพอ้างอิง")+'</button>'+
+          '<label class="area-map-reference-check"><input id="area-map-reference-visible" type="checkbox" '+(hasReference&&areaMapState.referenceVisible?"checked":"")+' '+(!hasReference?"disabled":"")+'> แสดงภาพ</label>'+
+          '<label class="area-map-reference-opacity"><span>ความชัด</span><input id="area-map-reference-opacity" type="range" min="10" max="100" step="5" value="'+Math.round(areaMapState.referenceOpacity*100)+'" '+(!hasReference?"disabled":"")+'><b id="area-map-reference-opacity-label">'+Math.round(areaMapState.referenceOpacity*100)+'%</b></label>'+
+          '<label class="area-map-reference-check"><input id="area-map-grid-visible" type="checkbox" '+(areaMapState.gridVisible?"checked":"")+'> เส้นกริด</label>'+
+          (hasReference?'<button class="btn small secondary danger-soft" id="area-map-reference-clear">ลบภาพอ้างอิง</button>':"")+
+        '</div>'+
+        '<div class="area-map-zoom"><button class="btn small secondary" id="area-map-zoom-out">−</button><span id="area-map-zoom-label">'+Math.round(areaMapState.zoom*100)+'%</span><button class="btn small secondary" id="area-map-zoom-in">＋</button><button class="btn small secondary" id="area-map-view-toggle">'+(areaMapState.viewOnly?"✎ กลับโหมดแก้ไข":"👁 โหมดดู")+'</button></div>'+
+      '</div>'+
+      '<div class="area-map-workspace"><div class="area-map-canvas-card"><div class="area-map-hint" id="area-map-hint"></div>'+
+      (hasReference?'<div class="area-map-reference-note">ภาพอ้างอิงใช้ช่วยวาดเท่านั้น · ถูกล็อกไว้ด้านล่างและไม่ถูกบันทึกลง D1</div>':"")+
+      '<div class="area-map-scroll"><svg id="area-map-svg" viewBox="0 0 '+AREA_MAP_W+' '+AREA_MAP_H+'"></svg></div></div><aside class="area-map-side" id="area-map-side"></aside></div>'+
+    '</div>';
+
+  areaMapBindEditor();
+  areaMapRenderSvg();
+  areaMapRenderSide();
+  areaMapUpdateToolbar();
 }
 function areaMapBindEditor(){
-  $("area-map-area").onchange=e=>{areaMapState.selectedAreaId=String(e.target.value||"");const s=areaMapShape(areaMapState.selectedAreaId);areaMapState.selectedShapeId=s?s.ShapeID:"";areaMapRenderSvg();areaMapRenderSide();};
-  document.querySelectorAll(".map-tool").forEach(b=>b.onclick=()=>{if(areaMapState.viewOnly)return;areaMapState.mode=b.dataset.mode;if(areaMapState.mode!=="polygon")areaMapState.draftPoints=[];areaMapRenderSvg();areaMapUpdateToolbar();});
+  $("area-map-area").onchange=e=>{
+    areaMapState.selectedAreaId=String(e.target.value||"");
+    const s=areaMapShape(areaMapState.selectedAreaId);
+    areaMapState.selectedShapeId=s?s.ShapeID:"";
+    areaMapRenderSvg();
+    areaMapRenderSide();
+  };
+
+  document.querySelectorAll(".map-tool").forEach(b=>b.onclick=()=>{
+    if(areaMapState.viewOnly)return;
+    areaMapState.mode=b.dataset.mode;
+    if(areaMapState.mode!=="polygon")areaMapState.draftPoints=[];
+    areaMapRenderSvg();
+    areaMapUpdateToolbar();
+  });
+
   $("area-map-finish-poly").onclick=areaMapFinishPolygon;
   $("area-map-cancel-poly").onclick=()=>{areaMapState.draftPoints=[];areaMapRenderSvg();areaMapUpdateToolbar();};
-  $("area-map-zoom-out").onclick=()=>areaMapSetZoom(areaMapState.zoom-.1);$("area-map-zoom-in").onclick=()=>areaMapSetZoom(areaMapState.zoom+.1);
-  $("area-map-view-toggle").onclick=()=>{areaMapState.viewOnly=!areaMapState.viewOnly;areaMapState.mode="select";areaMapState.draftPoints=[];areaMapRenderEditor();};
+
+  $("area-map-reference-pick").onclick=()=>$("area-map-reference-file").click();
+  $("area-map-reference-file").onchange=e=>areaMapReferenceFileSelected(e.target.files?.[0]);
+  $("area-map-reference-visible").onchange=e=>{
+    areaMapState.referenceVisible=!!e.target.checked;
+    areaMapRenderSvg();
+  };
+  $("area-map-reference-opacity").oninput=e=>{
+    areaMapState.referenceOpacity=Math.max(.1,Math.min(1,Number(e.target.value||65)/100));
+    areaMapLocalSet(AREA_MAP_REFERENCE_OPACITY_KEY,String(Math.round(areaMapState.referenceOpacity*100)));
+    const img=$("area-map-reference-image"),label=$("area-map-reference-opacity-label");
+    if(img)img.setAttribute("opacity",String(areaMapState.referenceOpacity));
+    if(label)label.textContent=Math.round(areaMapState.referenceOpacity*100)+"%";
+  };
+  $("area-map-grid-visible").onchange=e=>{
+    areaMapState.gridVisible=!!e.target.checked;
+    areaMapLocalSet(AREA_MAP_GRID_KEY,areaMapState.gridVisible?"1":"0");
+    areaMapRenderSvg();
+  };
+  if($("area-map-reference-clear"))$("area-map-reference-clear").onclick=areaMapClearReference;
+
+  $("area-map-zoom-out").onclick=()=>areaMapSetZoom(areaMapState.zoom-.1);
+  $("area-map-zoom-in").onclick=()=>areaMapSetZoom(areaMapState.zoom+.1);
+  $("area-map-view-toggle").onclick=()=>{
+    areaMapState.viewOnly=!areaMapState.viewOnly;
+    areaMapState.mode="select";
+    areaMapState.draftPoints=[];
+    areaMapRenderEditor();
+  };
   $("area-map-save").onclick=areaMapSave;
-  $("area-map-reload").onclick=async()=>{if(areaMapState.dirty){const ok=await Swal.fire({icon:"question",title:"ย้อนการแก้ไขทั้งหมด?",text:"การแก้ไขที่ยังไม่ได้บันทึกจะหายไป",showCancelButton:true,confirmButtonText:"โหลดผังเดิม",cancelButtonText:"ยกเลิก"});if(!ok.isConfirmed)return;}areaMapContent();};
+  $("area-map-reload").onclick=async()=>{
+    if(areaMapState.dirty){
+      const ok=await Swal.fire({icon:"question",title:"ย้อนการแก้ไขทั้งหมด?",text:"การแก้ไขที่ยังไม่ได้บันทึกจะหายไป",showCancelButton:true,confirmButtonText:"โหลดผังเดิม",cancelButtonText:"ยกเลิก"});
+      if(!ok.isConfirmed)return;
+    }
+    areaMapContent();
+  };
+}
+
+async function areaMapReferenceFileSelected(file){
+  if(!file)return;
+  if(!/^image\/(png|jpeg|webp)$/.test(String(file.type||"")))return error(new Error("รองรับไฟล์ PNG, JPG และ WebP"));
+  if(Number(file.size||0)>12*1024*1024)return error(new Error("ภาพอ้างอิงต้องไม่เกิน 12 MB"));
+  busy(true,"กำลังเตรียมภาพอ้างอิง…");
+  try{
+    const dataUrl=await areaMapCompressReference(file);
+    areaMapState.referenceDataUrl=dataUrl;
+    areaMapState.referenceVisible=true;
+    const saved=areaMapLocalSet(AREA_MAP_REFERENCE_KEY,dataUrl);
+    toast(saved?"เพิ่มภาพอ้างอิงแล้ว":"ใช้ภาพได้ในครั้งนี้ แต่พื้นที่เก็บข้อมูลของเบราว์เซอร์ไม่พอ");
+    areaMapRenderEditor();
+  }catch(e){error(e);}
+  finally{busy(false);}
+}
+function areaMapLoadImage(file){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("อ่านไฟล์ภาพไม่สำเร็จ"));};
+    img.src=url;
+  });
+}
+async function areaMapCompressReference(file){
+  const img=await areaMapLoadImage(file),canvas=document.createElement("canvas");
+  canvas.width=AREA_MAP_W;
+  canvas.height=AREA_MAP_H;
+  const ctx=canvas.getContext("2d");
+  ctx.fillStyle="#ffffff";
+  ctx.fillRect(0,0,AREA_MAP_W,AREA_MAP_H);
+  const scale=Math.min(AREA_MAP_W/img.naturalWidth,AREA_MAP_H/img.naturalHeight),
+    w=img.naturalWidth*scale,h=img.naturalHeight*scale,
+    x=(AREA_MAP_W-w)/2,y=(AREA_MAP_H-h)/2;
+  ctx.drawImage(img,x,y,w,h);
+  return canvas.toDataURL("image/jpeg",.72);
+}
+async function areaMapClearReference(){
+  const ok=await Swal.fire({icon:"question",title:"ลบภาพอ้างอิงจากเครื่องนี้?",text:"กรอบพื้นที่ที่วาดและบันทึกไว้จะไม่ถูกลบ",showCancelButton:true,confirmButtonText:"ลบภาพอ้างอิง",cancelButtonText:"ยกเลิก"});
+  if(!ok.isConfirmed)return;
+  try{localStorage.removeItem(AREA_MAP_REFERENCE_KEY);}catch(e){}
+  areaMapState.referenceDataUrl="";
+  areaMapState.referenceVisible=false;
+  areaMapRenderEditor();
+  toast("ลบภาพอ้างอิงแล้ว");
 }
 function areaMapUpdateToolbar(){
   document.querySelectorAll(".map-tool").forEach(b=>b.classList.toggle("active",!areaMapState.viewOnly&&b.dataset.mode===areaMapState.mode));
@@ -43,11 +190,51 @@ function areaMapSetZoom(z){areaMapState.zoom=Math.max(.35,Math.min(1.5,Math.roun
 function areaMapPoint(e){const svg=$("area-map-svg"),pt=svg.createSVGPoint(),m=svg.getScreenCTM();pt.x=e.clientX;pt.y=e.clientY;if(!m)return{x:0,y:0};const p=pt.matrixTransform(m.inverse());return{x:Math.max(0,Math.min(AREA_MAP_W,p.x)),y:Math.max(0,Math.min(AREA_MAP_H,p.y))};}
 function areaMapCenter(s){if(s.ShapeType==="polygon"&&s.Points.length){const sum=s.Points.reduce((a,p)=>({x:a.x+Number(p.x),y:a.y+Number(p.y)}),{x:0,y:0});return{x:sum.x/s.Points.length,y:sum.y/s.Points.length};}return{x:Number(s.X)+Number(s.Width)/2,y:Number(s.Y)+Number(s.Height)/2};}
 function areaMapRenderSvg(){
-  const svg=$("area-map-svg");if(!svg)return;
-  const body=[...areaMapState.shapes].sort((a,b)=>Number(a.SortOrder||0)-Number(b.SortOrder||0)).map(s=>{const area=areaMapArea(s.AreaID),center=areaMapCenter(s),selected=s.ShapeID===areaMapState.selectedShapeId,color=/^#[0-9a-f]{6}$/i.test(s.FillColor||"")?s.FillColor:"#38bdf8";const geo=s.ShapeType==="polygon"?'<polygon class="map-shape-geometry" points="'+s.Points.map(p=>p.x+","+p.y).join(" ")+'" fill="'+color+'"/>':'<rect class="map-shape-geometry" x="'+s.X+'" y="'+s.Y+'" width="'+s.Width+'" height="'+s.Height+'" rx="10" fill="'+color+'"/>';const handle=selected&&!areaMapState.viewOnly&&!s.Locked&&s.ShapeType==="rect"?'<rect class="map-resize-handle" data-resize="1" x="'+(Number(s.X)+Number(s.Width)-9)+'" y="'+(Number(s.Y)+Number(s.Height)-9)+'" width="18" height="18" rx="4"/>':"";return '<g class="map-shape-group '+(selected?"selected ":"")+(s.Locked?"locked":"")+'" data-shape="'+esc(s.ShapeID)+'">'+geo+'<text class="map-shape-label" x="'+center.x+'" y="'+(center.y-4)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(area?.AreaName||"พื้นที่")+'</tspan><tspan class="map-shape-sub" x="'+center.x+'" dy="18">'+esc(areaMapClass(area))+'</tspan></text>'+handle+'</g>';}).join("");
-  const draft=areaMapState.draftPoints.length?'<polyline class="map-draft-poly" points="'+areaMapState.draftPoints.map(p=>p.x+","+p.y).join(" ")+'"/>'+areaMapState.draftPoints.map(p=>'<circle class="map-draft-point" cx="'+p.x+'" cy="'+p.y+'" r="7"/>').join(""):"";
-  svg.innerHTML='<defs><pattern id="map-grid-small" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#dbe8eb" stroke-width="1"/></pattern><pattern id="map-grid" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#map-grid-small)"/><path d="M100 0H0V100" fill="none" stroke="#b9cfd5" stroke-width="1.6"/></pattern></defs><rect id="map-bg" width="1600" height="1000" fill="url(#map-grid)"/><text x="800" y="52" text-anchor="middle" class="map-canvas-title">แผนผังแสดงเขตพื้นที่รับผิดชอบของนักเรียน</text><text x="800" y="82" text-anchor="middle" class="map-canvas-subtitle">โรงเรียนรัษฎา · RSD Clean Interactive Map</text>'+body+draft;
-  areaMapSetZoom(areaMapState.zoom);areaMapBindSvg();
+  const svg=$("area-map-svg");
+  if(!svg)return;
+
+  const body=[...areaMapState.shapes]
+    .sort((a,b)=>Number(a.SortOrder||0)-Number(b.SortOrder||0))
+    .map(s=>{
+      const area=areaMapArea(s.AreaID),center=areaMapCenter(s),
+        selected=s.ShapeID===areaMapState.selectedShapeId,
+        color=/^#[0-9a-f]{6}$/i.test(s.FillColor||"")?s.FillColor:"#38bdf8",
+        geo=s.ShapeType==="polygon"
+          ? '<polygon class="map-shape-geometry" points="'+s.Points.map(p=>p.x+","+p.y).join(" ")+'" fill="'+color+'"/>'
+          : '<rect class="map-shape-geometry" x="'+s.X+'" y="'+s.Y+'" width="'+s.Width+'" height="'+s.Height+'" rx="10" fill="'+color+'"/>',
+        handle=selected&&!areaMapState.viewOnly&&!s.Locked&&s.ShapeType==="rect"
+          ? '<rect class="map-resize-handle" data-resize="1" x="'+(Number(s.X)+Number(s.Width)-9)+'" y="'+(Number(s.Y)+Number(s.Height)-9)+'" width="18" height="18" rx="4"/>'
+          : "";
+      return '<g class="map-shape-group '+(selected?"selected ":"")+(s.Locked?"locked":"")+'" data-shape="'+esc(s.ShapeID)+'">'+
+        geo+
+        '<text class="map-shape-label" x="'+center.x+'" y="'+(center.y-4)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(area?.AreaName||"พื้นที่")+'</tspan><tspan class="map-shape-sub" x="'+center.x+'" dy="18">'+esc(areaMapClass(area))+'</tspan></text>'+
+        handle+
+      '</g>';
+    }).join("");
+
+  const draft=areaMapState.draftPoints.length
+    ? '<polyline class="map-draft-poly" points="'+areaMapState.draftPoints.map(p=>p.x+","+p.y).join(" ")+'"/>'+
+      areaMapState.draftPoints.map(p=>'<circle class="map-draft-point" cx="'+p.x+'" cy="'+p.y+'" r="7"/>').join("")
+    : "";
+
+  const showReference=!!areaMapState.referenceDataUrl&&areaMapState.referenceVisible,
+    reference=showReference
+      ? '<image id="area-map-reference-image" href="'+areaMapState.referenceDataUrl+'" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none" opacity="'+areaMapState.referenceOpacity+'" pointer-events="none"/>'
+      : "",
+    grid=areaMapState.gridVisible
+      ? '<rect id="map-grid-layer" width="1600" height="1000" fill="url(#map-grid)" opacity=".55" pointer-events="none"/>'
+      : "",
+    title=showReference
+      ? ""
+      : '<text x="800" y="52" text-anchor="middle" class="map-canvas-title">แผนผังแสดงเขตพื้นที่รับผิดชอบของนักเรียน</text><text x="800" y="82" text-anchor="middle" class="map-canvas-subtitle">โรงเรียนรัษฎา · RSD Clean Interactive Map</text>';
+
+  svg.innerHTML=
+    '<defs><pattern id="map-grid-small" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#dbe8eb" stroke-width="1"/></pattern><pattern id="map-grid" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#map-grid-small)"/><path d="M100 0H0V100" fill="none" stroke="#b9cfd5" stroke-width="1.6"/></pattern></defs>'+
+    '<rect id="map-bg" width="1600" height="1000" fill="#ffffff"/>'+
+    reference+grid+title+body+draft;
+
+  areaMapSetZoom(areaMapState.zoom);
+  areaMapBindSvg();
 }
 function areaMapBindSvg(){
   const svg=$("area-map-svg");if(!svg)return;
