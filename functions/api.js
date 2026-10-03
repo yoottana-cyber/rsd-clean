@@ -292,6 +292,7 @@ async function dispatch(env, action, p, token, request) {
     historyOptions: async () => historyOptions(env,u),
     historyData: async () => historyData(env,u,p),
     adminEditInspection: async () => adminEditInspection(env,u,p),
+    deleteInspection: async () => deleteInspection(env,u,p),
     exportData: async () => exportData(env,u,p),
     tasks: async () => tasks(env,u),
     inspectorHome: async () => inspectorHome(env,u),
@@ -431,7 +432,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","finalizeAreaMapReferenceUpload","clearAreaMapReference"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","deleteInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","finalizeAreaMapReferenceUpload","clearAreaMapReference"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -487,6 +488,7 @@ function auditMeta(action,p,result){
   if(action==="deletePushSubscription")return{entityType:"PushSubscription",entityId:String(p.id||""),details:{deleted:true}};
   if(action==="sendPushReminder")return{entityType:"Push",entityId:String(p.date||thaiDay()),details:{sent:Number(result?.sent||0),failed:Number(result?.failed||0)}};
   if(action==="sendPushTest")return{entityType:"Push",entityId:String(u?.user_id||""),details:{test:true,sent:Number(result?.sent||0)}};
+  if(action==="deleteInspection")return{entityType:"InspectionDeletion",entityId:String(p.id||""),details:{reason:String(p.reason||"").slice(0,500),date:String(result?.Date||""),areaName:String(result?.AreaName||""),className:String(result?.ClassName||""),recycleId:String(result?.RecycleID||"")}};
   if(action==="adminEditInspection")return{
     entityType:"InspectionCorrection",
     entityId:String(p.id||""),
@@ -961,6 +963,7 @@ function recycleLabel(table,row){
   if(table==="Classrooms") return String(row?.ClassName||row?.ClassroomID||"ห้องเรียน");
   if(table==="Areas") return String(row?.AreaName||row?.AreaID||"พื้นที่");
   if(table==="Assignments") return String(row?.AssignmentID||"งานมอบหมาย");
+  if(table==="Inspections") return String((row?.Date||"")+" · "+(row?.ClassName||"—")+" · "+(row?.AreaName||"—"));
   return String(row?.id||"รายการ");
 }
 async function putRecycle(db,u,table,id,snapshot){
@@ -971,16 +974,20 @@ async function putRecycle(db,u,table,id,snapshot){
 }
 async function recycleBin(env,u){
   role(u,["Admin"]); const db=env.DB; await cleanRecycle(db);
-  const rows=await all(db,"SELECT recycle_id,deleted_at,deleted_by_name,entity_type,entity_id,label,expires_at FROM recycle_bin ORDER BY deleted_at DESC LIMIT 500");
-  return rows.map(r=>({
-    RecycleID:r.recycle_id,
-    DeletedAt:r.deleted_at,
-    DeletedBy:r.deleted_by_name,
-    EntityType:r.entity_type,
-    EntityID:r.entity_id,
-    Label:r.label,
-    ExpiresAt:Number(r.expires_at)
-  }));
+  const rows=await all(db,"SELECT recycle_id,deleted_at,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at FROM recycle_bin ORDER BY deleted_at DESC LIMIT 500");
+  return rows.map(r=>{
+    const x=parseJson(r.snapshot_json,{});
+    return{
+      RecycleID:r.recycle_id,
+      DeletedAt:r.deleted_at,
+      DeletedBy:r.deleted_by_name,
+      EntityType:r.entity_type,
+      EntityID:r.entity_id,
+      Label:r.label,
+      Reason:String(x?.DeleteReason||""),
+      ExpiresAt:Number(r.expires_at)
+    };
+  });
 }
 async function restoreTrash(env,u,p){
   role(u,["Admin"]); const db=env.DB; await cleanRecycle(db);
@@ -1005,6 +1012,17 @@ async function restoreTrash(env,u,p){
     assert(await db.prepare("SELECT 1 x FROM areas WHERE area_id=?").bind(String(x.AreaID)).first(),"พื้นที่เดิมไม่มีอยู่แล้ว");
     assert(!(await db.prepare("SELECT 1 x FROM assignments WHERE assignment_id=? OR (user_id=? AND area_id=?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID)).first()),"มีงานมอบหมายนี้อยู่แล้ว");
     await db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)").bind(String(x.AssignmentID),String(x.UserID),String(x.AreaID),String(x.Days||"1,2,3,4,5"),now,now).run();
+  }else if(type==="Inspections"){
+    const i=x?.Inspection,team=Array.isArray(x?.Inspectors)?x.Inspectors:[];
+    assert(i&&i.inspection_id,"ข้อมูลผลตรวจในถังขยะเสียหาย");
+    assert(await db.prepare("SELECT 1 x FROM areas WHERE area_id=?").bind(String(i.area_id)).first(),"พื้นที่ของผลตรวจนี้ไม่มีอยู่แล้ว");
+    assert(!(await db.prepare("SELECT 1 x FROM inspections WHERE inspection_id=? OR (area_id=? AND inspection_date=?)").bind(String(i.inspection_id),String(i.area_id),String(i.inspection_date)).first()),"มีผลตรวจของพื้นที่และวันที่นี้อยู่แล้ว");
+    const stmts=[
+      db.prepare("INSERT INTO inspections(inspection_id,area_id,inspection_date,status,rating,score,note,meta_json,photo_links_json,version,completed_at,completed_by_id,completed_by_name,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(String(i.inspection_id),String(i.area_id),String(i.inspection_date),String(i.status||"รอตรวจ"),String(i.rating||""),Number(i.score||0),String(i.note||""),String(i.meta_json||"{}"),String(i.photo_links_json||"[]"),Number(i.version||0),String(i.completed_at||""),String(i.completed_by_id||""),String(i.completed_by_name||""),String(i.created_at||now),String(i.updated_at||now))
+    ];
+    for(const t of team)stmts.push(db.prepare("INSERT OR IGNORE INTO inspection_inspectors(inspection_id,user_id,user_name) VALUES(?,?,?)").bind(String(i.inspection_id),String(t.user_id||""),String(t.user_name||"")));
+    await db.batch(stmts);
   }else throw Error("ประเภทข้อมูลในถังขยะไม่รองรับ");
   await db.prepare("DELETE FROM recycle_bin WHERE recycle_id=?").bind(r.recycle_id).run();
   await invalidateToday(env);
@@ -1655,6 +1673,34 @@ async function historyData(env,u,p){
   const trend=[...selected].reverse().map(i=>{const label=currentInspectionLabels(i,names);return{date:i.inspection_date,score:Number(i.score||0),status:i.status,area:label.AreaName,className:label.ClassName};});
   return{type,id,start,end,summary:historySummary(selected),trend,rows:selected.map(i=>{const m=metaOf(i),label=currentInspectionLabels(i,names);return{InspectionID:i.inspection_id,Date:i.inspection_date,AreaName:label.AreaName,ClassName:label.ClassName,Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",ApprovalStatus:m.approvalStatus||"",CompletedBy:m.completedByName||i.completed_by_name||"",Version:Number(i.version||0),AdminEditedBy:String(m.adminEditedByName||""),AdminEditedAt:String(m.adminEditedAt||""),AdminEditReason:String(m.adminEditReason||""),PhotoLinks:parseJson(i.photo_links_json,[]).map(x=>({id:x}))};})};
 }
+async function deleteInspection(env,u,p){
+  role(u,["Admin"]);
+  const db=env.DB,id=text(p.id,120),reason=text(p.reason||"",500);
+  assert(id,"ไม่พบรหัสผลตรวจ");
+  assert(reason.length>=3,"กรุณาระบุเหตุผลการลบอย่างน้อย 3 ตัวอักษร");
+  const row=await db.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(id).first();
+  assert(row,"ไม่พบผลตรวจ");
+  assert(String(row.inspection_date)<thaiDay(),"ผลตรวจของวันนี้ให้ใช้การแก้ไขผลแทนการลบ");
+  assert(["ตรวจแล้ว","งดตรวจ"].includes(String(row.status||"")),"ลบได้เฉพาะรายการที่ดำเนินการเสร็จแล้ว");
+  const [team,names,cfg]=await Promise.all([
+    all(db,"SELECT inspection_id,user_id,user_name FROM inspection_inspectors WHERE inspection_id=? ORDER BY user_name",id),
+    currentInspectionNameMaps(db),
+    getAppSettings(db)
+  ]);
+  const label=currentInspectionLabels(row,names),deletedAt=nowIso(),recycleId=uuid(),
+    expiresAt=Date.now()+Number(cfg.recycleDays||30)*24*3600000,
+    snapshot={Inspection:row,Inspectors:team,DeleteReason:reason,Date:String(row.inspection_date),AreaName:label.AreaName,ClassName:label.ClassName};
+  await ensureRecycleTable(db);
+  await db.batch([
+    db.prepare("INSERT INTO recycle_bin(recycle_id,deleted_at,deleted_by_user_id,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at) VALUES(?,?,?,?,?,?,?,?,?)")
+      .bind(recycleId,deletedAt,String(u.user_id||""),String(u.full_name||""),"Inspections",id,recycleLabel("Inspections",snapshot),JSON.stringify(snapshot),expiresAt),
+    db.prepare("DELETE FROM inspection_inspectors WHERE inspection_id=?").bind(id),
+    db.prepare("DELETE FROM inspections WHERE inspection_id=?").bind(id)
+  ]);
+  notificationCache.clear();
+  return{RecycleID:recycleId,InspectionID:id,Date:String(row.inspection_date),AreaName:label.AreaName,ClassName:label.ClassName};
+}
+
 async function adminEditInspection(env,u,p){
   role(u,["Admin"]);
   const db=env.DB,id=text(p.id,120),reason=text(p.reason||"",500);
