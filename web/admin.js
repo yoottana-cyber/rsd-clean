@@ -1483,19 +1483,13 @@ const adminTables = {
     return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
   }
   function execMapHtml(pack,date){
-    const shapes=pack?.layout?.shapes||[],items=pack?.daily?.items||[],decorations=pack?.layout?.decorations||[];
+    const shapes=pack?.layout?.shapes||[],items=pack?.daily?.items||[];
     if(!shapes.length)return '<section class="card exec-map-card mb-5"><div class="exec-section-title"><div><span class="muted">ภาพรวมเชิงพื้นที่</span><h2>ผังสถานะพื้นที่</h2></div></div><div class="exec-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
     const byArea=new Map(items.map(x=>[String(x.AreaID),x])),counts={holiday:0,no_assignment:0,no_inspector:0,pending:0,excellent:0,medium:0,improve:0,skipped:0,done:0};
     items.filter(x=>x.InScope!==false).forEach(x=>{const st=execMapStatus(x);counts[st.key]=(counts[st.key]||0)+1;});
     let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
     let opacity=.55;try{opacity=Math.max(.1,Math.min(.8,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||55)/100));}catch(e){}
     const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
-    const decor=decorations.map(d=>{
-      const c=execMapCenter(d),geo=d.ShapeType==="polygon"
-        ? '<polygon points="'+(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>'
-        : '<rect x="'+Number(d.X||0)+'" y="'+Number(d.Y||0)+'" width="'+Number(d.Width||0)+'" height="'+Number(d.Height||0)+'" rx="7" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>';
-      return '<g class="exec-map-decor">'+geo+(d.Label?'<text x="'+c.x+'" y="'+c.y+'" text-anchor="middle">'+esc(d.Label)+'</text>':"")+'</g>';
-    }).join("");
     const body=shapes.map(s=>{
       const item=byArea.get(String(s.AreaID)),status=execMapStatus(item),center=execMapCenter(s),
         geo=s.ShapeType==="polygon"
@@ -1512,7 +1506,7 @@ const adminTables = {
     ].filter(x=>x[2]>0).map(x=>'<span><i style="background:'+x[0]+'"></i>'+esc(x[1])+' <b>'+Number(x[2]||0)+'</b></span>').join("");
     return '<section class="card exec-map-card mb-5"><div class="exec-section-title"><div><span class="muted">วันที่อ้างอิง '+esc(date||"")+'</span><h2>ผังสถานะพื้นที่</h2></div><a class="btn small secondary" href="#control" id="exec-open-control-map"><i data-lucide="maximize-2"></i> เปิดผังเต็ม</a></div>'+
       '<div class="exec-map-legend">'+legend+'</div>'+
-      '<div class="exec-map-layout"><div class="exec-map-scroll"><svg viewBox="0 0 1600 1000" aria-label="ผังสถานะสำหรับผู้บริหาร"><rect width="1600" height="1000" fill="#fff"/>'+reference+decor+body+'</svg></div><aside id="exec-map-detail" class="exec-map-detail"></aside></div></section>';
+      '<div class="exec-map-layout"><div class="exec-map-scroll"><svg viewBox="0 0 1600 1000" aria-label="ผังสถานะสำหรับผู้บริหาร"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div><aside id="exec-map-detail" class="exec-map-detail"></aside></div></section>';
   }
   function execMapDetail(){
     const box=$("exec-map-detail");if(!box)return;
@@ -1552,7 +1546,8 @@ const adminTables = {
     const d=await rpc("executiveDashboard",{periodId:executivePeriodId},true);
     if(seq!==S.seq)return;
     const refDate=d.referenceDate||d.today||thaiDay();
-    const mapData=await rpc("mapStatus",{date:refDate},true).catch(()=>({date:refDate,shapes:[],decorations:[],items:[],summary:{}}));
+    const mapData=await rpc("mapStatus",{date:refDate},true).catch(()=>({date:refDate,shapes:[],items:[],summary:{}}));
+    if(window.rsdEnsureMapReference)await window.rsdEnsureMapReference(mapData);
     if(seq!==S.seq)return;
     executiveMapPack={layout:mapData,daily:mapData};
     executiveMapSelected="";
