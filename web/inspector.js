@@ -330,6 +330,8 @@ let taskRows = [];
     );
     const status = $("qr-scan-status");
     const setStatus = (t) => { if (status) status.textContent = t; };
+    setStatus("กำลังโหลดตัวอ่าน QR…");
+    try{await window.rsdEnsureQrScanner();}catch(e){setStatus("โหลดตัวอ่าน QR บางส่วนไม่สำเร็จ · ยังลองใช้ความสามารถของเบราว์เซอร์ได้");}
     let decoded = false;
     const onSuccess = async (text) => {
       if (decoded) return;
