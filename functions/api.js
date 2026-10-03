@@ -16,6 +16,8 @@ const DEFAULT_APP_SETTINGS = {
   approvalEnabled:false,
   offlineEnabled:true,
   photoEvidenceEnabled:false,
+  saturdayDutyEnabled:false,
+  sundayDutyEnabled:false,
   recycleDays:30,
   certificateSilverMax:3,
   certificateBronzeMax:5,
@@ -200,11 +202,12 @@ function shiftDate(s, n) {
   const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10);
 }
 function weekday(s) { return new Date(s + "T00:00:00Z").getUTCDay(); }
+function dutyWeekday(s) { const w=weekday(s); return w===0?7:w; }
 function dutyDays(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return [1,2,3,4,5];
-  const out = [...new Set(raw.split(/[^1-5]+/).filter(Boolean).map(Number))].sort();
-  assert(out.length && out.every(n => n >= 1 && n <= 5), "วันเข้าเวรไม่ถูกต้อง");
+  const out = [...new Set(raw.split(/[^1-7]+/).filter(Boolean).map(Number))].sort();
+  assert(out.length && out.every(n => n >= 1 && n <= 7), "วันเข้าเวรไม่ถูกต้อง");
   return out;
 }
 function dutyText(value) { return dutyDays(value).join(","); }
@@ -464,7 +467,7 @@ function auditMeta(action,p,result){
   if(action==="assign")return{entityType:"Assignments",entityId:"",details:{userIds:(p.userIds||[]).map(String).slice(0,100),areaIds:(p.areaIds||[]).map(String).slice(0,100),days:p.days||[],added:Number(result?.added||0),merged:Number(result?.merged||0)}};
   if(action==="setAssignmentDays")return{entityType:"Assignments",entityId:String(p.id||""),details:{days:p.days||[]}};
   if(action==="removeDutyAssignments")return{entityType:"Assignments",entityId:"bulk",details:{mode:String(p.mode||""),day:Number(p.day||0),userId:String(p.userId||""),areaIds:(p.areaIds||[]).map(String).slice(0,100),changed:Number(result?.changed||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
-  if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,5),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
+  if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,7),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="saveAreaMapLayout")return{entityType:"AreaMap",entityId:"layout",details:{shapeCount:Number(result?.saved||0)}};
   if(action==="finalizeAreaMapReferenceUpload"||action==="clearAreaMapReference")return{entityType:"AreaMap",entityId:"reference",details:{hasReference:!!result?.HasReference,size:Number(result?.Size||0)}};
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
@@ -1469,6 +1472,8 @@ async function getAppSettings(db){
   cfg.approvalEnabled=cfg.approvalEnabled===true;
   cfg.offlineEnabled=cfg.offlineEnabled!==false;
   cfg.photoEvidenceEnabled=cfg.photoEvidenceEnabled===true;
+  cfg.saturdayDutyEnabled=cfg.saturdayDutyEnabled===true;
+  cfg.sundayDutyEnabled=cfg.sundayDutyEnabled===true;
   cfg.recycleDays=Math.min(180,Math.max(1,Number(cfg.recycleDays||30)));
   cfg.certificateSilverMax=Math.min(20,Math.max(0,Number(cfg.certificateSilverMax||3)));
   cfg.certificateBronzeMax=Math.min(30,Math.max(cfg.certificateSilverMax,Number(cfg.certificateBronzeMax||5)));
@@ -1499,6 +1504,8 @@ async function saveAppSettings(env,u,p){
     approvalEnabled:x.approvalEnabled===true,
     offlineEnabled:x.offlineEnabled!==false,
     photoEvidenceEnabled:x.photoEvidenceEnabled===true,
+    saturdayDutyEnabled:x.saturdayDutyEnabled===true,
+    sundayDutyEnabled:x.sundayDutyEnabled===true,
     recycleDays:Math.min(180,Math.max(1,Number(x.recycleDays||old.recycleDays||30))),
     certificateSilverMax:Math.min(20,Math.max(0,Number(x.certificateSilverMax??old.certificateSilverMax))),
     certificateBronzeMax:Math.min(30,Math.max(Number(x.certificateSilverMax??old.certificateSilverMax),Number(x.certificateBronzeMax??old.certificateBronzeMax))),
@@ -1509,6 +1516,8 @@ async function saveAppSettings(env,u,p){
   if(!cfg.skipReasons.length)cfg.skipReasons=[...DEFAULT_APP_SETTINGS.skipReasons];
   await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('app_config_json',?)").bind(JSON.stringify(cfg)).run();
   appSettingsCache={value:cfg,at:Date.now()};
+  await invalidateToday(env);
+  await ensureToday(env);
   return cfg;
 }
 async function ensureDutyOverridesTable(db){
@@ -1794,21 +1803,35 @@ async function exportData(env,u,p){
   return{start,end,settings:cfg,rows:filtered.map(i=>{const m=metaOf(i),label=currentInspectionLabels(i,names);return{วันที่:i.inspection_date,ห้องเรียน:label.ClassName,พื้นที่:label.AreaName,สถานะ:i.status,ระดับ:i.rating||"",คะแนน:Number(i.score||0),หมายเหตุ:i.note||"",เหตุผลงดตรวจ:m.skipReason||"",สถานะรับรอง:m.approvalStatus||"",ผู้ตรวจ:m.completedByName||i.completed_by_name||""};})};
 }
 async function schoolDay(env,date) {
-  const w=weekday(date); if(w===0||w===6) return false;
-  return !(await env.DB.prepare("SELECT 1 x FROM holidays WHERE holiday_date=?").bind(date).first());
+  if(await env.DB.prepare("SELECT 1 x FROM holidays WHERE holiday_date=?").bind(date).first())return false;
+  const w=dutyWeekday(date);
+  if(w===6||w===7){
+    const cfg=await getAppSettings(env.DB);
+    return w===6?cfg.saturdayDutyEnabled===true:cfg.sundayDutyEnabled===true;
+  }
+  return true;
 }
 async function invalidateToday(env){
   await env.DB.prepare("DELETE FROM settings WHERE key='today_sync_marker'").run();
 }
 async function ensureToday(env) {
-  const db=env.DB,date=thaiDay(),markerValue="v3:"+date;
+  const db=env.DB,date=thaiDay(),markerValue="v4:"+date;
   const marker=await db.prepare("SELECT value FROM settings WHERE key='today_sync_marker'").first();
   if(String(marker?.value||"")===markerValue)return;
   if(!(await schoolDay(env,date))){
+    const pending=await all(db,"SELECT inspection_id FROM inspections WHERE inspection_date=? AND status='รอตรวจ'",date);
+    if(pending.length){
+      const stmts=[];
+      for(const i of pending){
+        stmts.push(db.prepare("DELETE FROM inspection_inspectors WHERE inspection_id=?").bind(i.inspection_id));
+        stmts.push(db.prepare("DELETE FROM inspections WHERE inspection_id=? AND status='รอตรวจ'").bind(i.inspection_id));
+      }
+      await runDbBatches(db,stmts,50);
+    }
     await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('today_sync_marker',?)").bind(markerValue).run();
     return;
   }
-  const w=weekday(date);
+  const w=dutyWeekday(date);
   const rows=await all(db,`SELECT a.area_id,a.area_name,a.responsible_classroom_id,c.class_name,
     asn.user_id,u.full_name,asn.assignment_id,asn.days
     FROM assignments asn JOIN users u ON u.user_id=asn.user_id
@@ -2155,7 +2178,7 @@ async function setAssignmentDays(env,u,p){ role(u,["Admin"]); const days=dutyTex
 async function removeDutyAssignments(env,u,p){
   role(u,["Admin"]);
   const db=env.DB,m=await masterData(db),day=Number(p.day),mode=String(p.mode||"").trim();
-  assert(Number.isInteger(day)&&day>=1&&day<=5,"วันเข้าเวรไม่ถูกต้อง");
+  assert(Number.isInteger(day)&&day>=1&&day<=7,"วันเข้าเวรไม่ถูกต้อง");
   let targets=m.Assignments.filter(a=>dutyDays(a.Days).includes(day));
 
   if(mode==="areas"){
@@ -2211,9 +2234,9 @@ async function copyDutyAssignments(env,u,p){
   role(u,["Admin"]);
   const db=env.DB,m=await masterData(db),sourceDay=Number(p.sourceDay),
     targets=[...new Set((Array.isArray(p.targetDays)?p.targetDays:[]).map(Number))]
-      .filter(n=>Number.isInteger(n)&&n>=1&&n<=5&&n!==sourceDay)
+      .filter(n=>Number.isInteger(n)&&n>=1&&n<=7&&n!==sourceDay)
       .sort();
-  assert(Number.isInteger(sourceDay)&&sourceDay>=1&&sourceDay<=5,"วันต้นทางไม่ถูกต้อง");
+  assert(Number.isInteger(sourceDay)&&sourceDay>=1&&sourceDay<=7,"วันต้นทางไม่ถูกต้อง");
   assert(targets.length,"เลือกวันปลายทางอย่างน้อย 1 วัน");
 
   const source=m.Assignments.filter(a=>dutyDays(a.Days).includes(sourceDay));
@@ -2281,7 +2304,7 @@ async function bulkPlan(env,table,inputs,needCred){
       if(!inspector)errors.push("ไม่พบผู้ตรวจ Inspector");
       if(!area)errors.push("ไม่พบพื้นที่");
       let days="";
-      try{days=dutyText(rawDays);}catch(e){errors.push("วันเข้าเวรไม่ถูกต้อง ใช้ 1,2,3,4,5");}
+      try{days=dutyText(rawDays);}catch(e){errors.push("วันเข้าเวรไม่ถูกต้อง ใช้ 1–7 (6=เสาร์, 7=อาทิตย์)");}
       const k=(inspector?.UserID||userRef)+"|"+(area?.AreaID||areaRef);
       if(seen.has(k))errors.push("ผู้ตรวจ/พื้นที่ซ้ำในไฟล์");seen.add(k);
       if(!errors.length){
