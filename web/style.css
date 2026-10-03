@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap");
 
 :root{
   font-family:"Kanit",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -1604,7 +1604,7 @@ tbody tr:hover td{background:#fbfefe}
 .ops-template-fields{display:grid;gap:9px;max-height:440px;overflow:auto;padding-right:3px}
 .ops-template-field{
   display:grid;
-  grid-template-columns:minmax(145px,1.4fr) 72px 72px 72px 58px 82px;
+  grid-template-columns:minmax(145px,1.4fr) 72px 72px 72px 58px 82px 150px;
   gap:7px;
   align-items:end;
   padding:10px;
@@ -1719,7 +1719,7 @@ tbody tr:hover td{background:#fbfefe}
 }
 .ops-template-custom-grid{
   display:grid;
-  grid-template-columns:70px 70px 70px 58px 82px;
+  grid-template-columns:70px 70px 70px 58px 82px 150px;
   gap:7px
 }
 .ops-template-custom-grid label{
@@ -1752,4 +1752,11 @@ tbody tr:hover td{background:#fbfefe}
 @media(max-width:760px){
   .ops-template-group-head{flex-direction:column}
   .ops-template-custom-grid{grid-template-columns:1fr 1fr 1fr}
+}
+
+.ops-certificate-custom .ops-cert-variable,
+.ops-template-preview .ops-template-drag{
+  font-feature-settings:"kern" 1;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:geometricPrecision
 }
