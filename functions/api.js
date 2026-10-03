@@ -2053,7 +2053,7 @@ async function mapStatus(env,u,p){
   const rowMap=new Map(rows.map(x=>[String(x.area_id),x]));
   const resolved=rows.filter(x=>x.status==="ตรวจแล้ว"||x.status==="งดตรวจ").length;
   const noActualInspectionHoliday=date<today&&resolved===0;
-  const isHoliday=!calendarSchoolDay||noActualInspectionHoliday;
+  const isHoliday=resolved>0?false:(!calendarSchoolDay||noActualInspectionHoliday);
   const holidayReason=!calendarSchoolDay?"วันหยุดตามปฏิทิน":noActualInspectionHoliday?"ไม่มีการตรวจในวันดังกล่าว":"";
   const items=areas.map(a=>{
     const i=rowMap.get(String(a.area_id)),team=i?(teamMap.get(String(i.inspection_id))||[]):[],ovs=overrideMap.get(String(a.area_id))||[];
