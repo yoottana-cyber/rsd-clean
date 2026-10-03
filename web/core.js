@@ -465,6 +465,9 @@
   const pages = {
     dashboard: { title: "ภาพรวม", icon: "layout-dashboard", roles: ["Admin", "Supervisor", "Inspector"] },
     executive: { title: "ผู้บริหาร", icon: "briefcase-business", roles: ["Admin", "Supervisor"] },
+    control: { title: "ศูนย์งานวันนี้", icon: "panel-top", roles: ["Admin", "Supervisor"], navRoles: [] },
+    periods: { title: "ปีการศึกษา", icon: "calendar-range", roles: ["Admin"], navRoles: [] },
+    certificates: { title: "เกียรติบัตร", icon: "award", roles: ["Admin", "Supervisor"], navRoles: [] },
     tasks: { title: "งานตรวจวันนี้", icon: "clipboard-check", roles: ["Inspector"] },
     teacher: { title: "ห้องเรียนของฉัน", icon: "school", roles: ["Teacher"] },
     admin: { title: "จัดการข้อมูล", icon: "settings-2", roles: ["Admin"] },
@@ -640,11 +643,13 @@
         '<div><b>' + esc(S.user.FullName) + '</b><div class="muted">' + esc(S.user.Role) + '</div></div>' +
       '</div>' +
       '<div class="mobile-more-grid">' +
-        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-executive" type="button"><i data-lucide="briefcase-business"></i><span>Dashboard ผู้บริหาร</span></button><button class="mobile-more-item" id="mobile-review" type="button"><i data-lucide="badge-check"></i><span>รับรองผลตรวจ</span></button><button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติพื้นที่/ห้อง</span></button><button class="mobile-more-item" id="mobile-exports" type="button"><i data-lucide="file-down"></i><span>ส่งออก Excel/PDF</span></button><button class="mobile-more-item" id="mobile-dashboard" type="button"><i data-lucide="layout-dashboard"></i><span>ภาพรวมทั่วไป</span></button>' : '') +
+        (["Admin","Supervisor"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-executive" type="button"><i data-lucide="briefcase-business"></i><span>Dashboard ผู้บริหาร</span></button><button class="mobile-more-item" id="mobile-control" type="button"><i data-lucide="panel-top"></i><span>ศูนย์งานวันนี้</span></button><button class="mobile-more-item" id="mobile-certificates" type="button"><i data-lucide="award"></i><span>เกียรติบัตร</span></button><button class="mobile-more-item" id="mobile-review" type="button"><i data-lucide="badge-check"></i><span>รับรองผลตรวจ</span></button><button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติพื้นที่/ห้อง</span></button><button class="mobile-more-item" id="mobile-exports" type="button"><i data-lucide="file-down"></i><span>ส่งออก Excel/PDF</span></button><button class="mobile-more-item" id="mobile-dashboard" type="button"><i data-lucide="layout-dashboard"></i><span>ภาพรวมทั่วไป</span></button>' : '') +
+        (S.user.Role==="Admin" ? '<button class="mobile-more-item" id="mobile-periods" type="button"><i data-lucide="calendar-range"></i><span>ปีการศึกษา/ภาคเรียน</span></button><button class="mobile-more-item" id="mobile-import-excel" type="button"><i data-lucide="sheet"></i><span>นำเข้า Excel</span></button>' : '') +
         (["Inspector"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติพื้นที่</span></button>' : '') +
         (["Teacher"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-history" type="button"><i data-lucide="history"></i><span>ประวัติห้องเรียน</span></button><button class="mobile-more-item" id="mobile-exports" type="button"><i data-lucide="file-down"></i><span>ส่งออก Excel/PDF</span></button>' : '') +
         (["Admin","Supervisor","Inspector"].includes(S.user.Role) ? '<button class="mobile-more-item" id="mobile-daily-report" type="button"><i data-lucide="send"></i><span>รายงานรายวัน</span></button>' : '') +
         (!isStandaloneApp() ? '<button class="mobile-more-item install-btn" type="button"><i data-lucide="download"></i><span>ติดตั้งแอป</span></button>' : '') +
+        '<button class="mobile-more-item" id="mobile-push" type="button"><i data-lucide="bell-ring"></i><span>การแจ้งเตือนมือถือ</span></button>' +
         '<button class="mobile-more-item" id="mobile-devices" type="button"><i data-lucide="monitor-smartphone"></i><span>อุปกรณ์ที่เข้าสู่ระบบ</span></button>' +
         '<button class="mobile-more-item" id="mobile-guide" type="button"><i data-lucide="circle-help"></i><span>คู่มือใช้งาน</span></button>' +
         '<button class="mobile-more-item" id="mobile-change-pass" type="button"><i data-lucide="key-round"></i><span>เปลี่ยนรหัสผ่าน</span></button>' +
@@ -656,6 +661,11 @@
     icons();
     refreshNotificationBadge();
     if ($("mobile-executive")) $("mobile-executive").onclick = () => { closeModal(); location.hash="executive"; route(); };
+    if ($("mobile-control")) $("mobile-control").onclick = () => { closeModal(); location.hash="control"; route(); };
+    if ($("mobile-certificates")) $("mobile-certificates").onclick = () => { closeModal(); location.hash="certificates"; route(); };
+    if ($("mobile-periods")) $("mobile-periods").onclick = () => { closeModal(); location.hash="periods"; route(); };
+    if ($("mobile-import-excel")) $("mobile-import-excel").onclick = () => { closeModal(); importExcelModal(); };
+    if ($("mobile-push")) $("mobile-push").onclick = () => { closeModal(); pushNotificationModal(); };
     if ($("mobile-review")) $("mobile-review").onclick = () => { closeModal(); location.hash="review"; route(); };
     if ($("mobile-history")) $("mobile-history").onclick = () => { closeModal(); location.hash="history"; route(); };
     if ($("mobile-exports")) $("mobile-exports").onclick = () => { closeModal(); location.hash="exports"; route(); };
@@ -803,6 +813,9 @@
       if (p === "login") renderLogin();
       else if (p === "dashboard") await renderDashboard(seq);
       else if (p === "executive") await renderExecutiveDashboard(seq);
+      else if (p === "control") await renderDailyControl(seq);
+      else if (p === "periods") await renderAcademicPeriods(seq);
+      else if (p === "certificates") await renderCertificateCenter(seq);
       else if (p === "admin") await renderAdmin(seq);
       else if (p === "reports") await renderReports(seq);
       else if (p === "daily") await renderDailyReport(seq);
