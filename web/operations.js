@@ -59,6 +59,7 @@ async function loadDailyControl(seq=S.seq){
     '<section class="card mt-4"><div class="coverage-section-head mb-4"><div><h2>รายการพื้นที่</h2><p class="muted">กดดำเนินการได้จากรายการโดยตรง</p></div>'+
       '<div class="flex flex-wrap gap-2">'+
         (S.user?.Role==="Admin"?'<button class="btn secondary" id="control-substitute"><i data-lucide="user-round-check"></i> ผู้ตรวจทดแทน</button>':'')+
+        (d.date===thaiDay()&&s.pending?'<button class="btn secondary" id="control-push-reminder"><i data-lucide="bell-ring"></i> เตือนผู้ตรวจที่ยังค้าง</button>':'')+
         '<button class="btn secondary" id="control-exception"><i data-lucide="circle-off"></i> งดตรวจ</button>'+
         (d.settings?.approvalEnabled?'<a class="btn secondary" href="#review"><i data-lucide="badge-check"></i> รับรองผล</a>':'')+
       '</div></div>'+
@@ -67,6 +68,14 @@ async function loadDailyControl(seq=S.seq){
       '</div>'+
     '</section>';
   if($("control-substitute"))$("control-substitute").onclick=dutyOverrideModal;
+  if($("control-push-reminder"))$("control-push-reminder").onclick=async()=>{
+    const ok=await Swal.fire({icon:"question",title:"ส่ง Push เตือนผู้ตรวจที่ยังค้าง?",text:"ระบบจะส่งไปยังอุปกรณ์ที่เปิดรับ Push Notification",showCancelButton:true,confirmButtonText:"ส่งแจ้งเตือน",cancelButtonText:"ยกเลิก"});
+    if(!ok.isConfirmed)return;
+    try{
+      const r=await rpc("sendPushReminder",{date:d.date},true);
+      await Swal.fire({icon:r.sent?"success":"info",title:r.sent?"ส่งแจ้งเตือนแล้ว":"ยังไม่มีอุปกรณ์รับ Push",html:"ส่งสำเร็จ <b>"+r.sent+"</b> อุปกรณ์ · ล้มเหลว "+r.failed+" · ผู้ตรวจค้าง "+r.inspectors+" คน"});
+    }catch(e){error(e);}
+  };
   $("control-exception").onclick=()=>inspectionExceptionModal(d.date);
   document.querySelectorAll(".control-photo").forEach(b=>b.onclick=()=>coveragePhoto(d.items[Number(b.dataset.index)]));
   icons();
@@ -333,8 +342,15 @@ async function pushNotificationModal(){
       (!supported?'<div class="warn mt-4">เบราว์เซอร์/โหมดนี้ไม่รองรับ Web Push กรุณาติดตั้ง PWA หรือใช้เบราว์เซอร์ที่รองรับ</div>':
         !r.configured?'<div class="warn mt-4"><b>ยังไม่ได้ตั้ง VAPID Public Key ที่ Cloudflare</b><br>โค้ดรองรับ Push แล้ว แต่ Admin ต้องตั้งค่า VAPID ก่อนจึงเปิดรับแจ้งเตือนได้</div>':
         '<div class="card mt-4"><p>สถานะอุปกรณ์นี้: <b>'+(localSub?"เปิดรับ Push แล้ว":"ยังไม่ได้เปิด")+'</b></p>'+
-          '<button class="btn '+(localSub?"danger":"")+'" id="push-toggle">'+(localSub?"ปิดการแจ้งเตือนบนอุปกรณ์นี้":"เปิดการแจ้งเตือน")+'</button></div>')+
+          '<div class="flex flex-wrap gap-2"><button class="btn '+(localSub?"danger":"")+'" id="push-toggle">'+(localSub?"ปิดการแจ้งเตือนบนอุปกรณ์นี้":"เปิดการแจ้งเตือน")+'</button>'+
+          (localSub?'<button class="btn secondary" id="push-test"><i data-lucide="send"></i> ทดสอบ Push</button>':'')+'</div></div>')+
       '<p class="muted mt-4">Subscription ในบัญชีนี้: '+Number(r.subscriptions?.length||0)+' อุปกรณ์</p>';
+    if($("push-test"))$("push-test").onclick=async()=>{
+      try{
+        const result=await rpc("sendPushTest",{},true);
+        toast(result.sent?"ส่ง Push ทดสอบแล้ว":"ยังส่ง Push ไม่สำเร็จ");
+      }catch(e){error(e);}
+    };
     if($("push-toggle"))$("push-toggle").onclick=async()=>{
       try{
         const reg=await navigator.serviceWorker.ready,current=await reg.pushManager.getSubscription();
