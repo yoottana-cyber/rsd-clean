@@ -1711,6 +1711,17 @@ const adminTables = {
     }
   }
 
+  async function refreshDriveStatusCard(){
+    const card=$("drive-status-card");if(!card)return;
+    try{
+      const d=await rpc("driveStatus",{},true);
+      if(!card.isConnected)return;
+      card.innerHTML='<div class="muted">Google Drive Gateway</div><div class="mt-2">'+statusBadge(!!d.ok,"เชื่อมต่อแล้ว","มีปัญหา")+'</div><div class="muted mt-2">'+esc(d.message||"")+(d.cached?' · cache 60 วินาที':'')+'</div>';
+    }catch(e){
+      if(card.isConnected)card.innerHTML='<div class="muted">Google Drive Gateway</div><div class="mt-2">'+statusBadge(false,"เชื่อมต่อแล้ว","ตรวจสอบไม่ได้")+'</div><div class="muted mt-2">'+esc(e.message||String(e))+'</div>';
+    }
+  }
+
   function statusBadge(ok, okText, badText) {
     return ok
       ? '<span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:700">' + esc(okText) + '</span>'
@@ -1724,7 +1735,7 @@ const adminTables = {
   async function systemStatusModal() {
     openModal(
       "สถานะระบบ",
-      '<div id="system-status-body"><div class="muted">กำลังตรวจสอบ D1, Drive Gateway และ Backup…</div></div>'
+      '<div id="system-status-body"><div class="muted">กำลังตรวจสอบ D1 และสถานะระบบ…</div></div>'
     );
     await refreshSystemStatus();
   }
@@ -1745,7 +1756,7 @@ const adminTables = {
         warningHtml +
         '<div class="grid gap-3 md:grid-cols-3 mb-4">' +
           '<div class="card"><div class="muted">Cloudflare D1</div><div class="mt-2">'+statusBadge(!!r.d1?.ok,"ปกติ","ผิดปกติ")+'</div><div class="muted mt-2">'+esc(r.d1?.message||"")+'</div></div>' +
-          '<div class="card"><div class="muted">Google Drive Gateway</div><div class="mt-2">'+statusBadge(!!r.drive?.ok,"เชื่อมต่อแล้ว","มีปัญหา")+'</div><div class="muted mt-2">'+esc(r.drive?.message||"")+'</div></div>' +
+          '<div class="card" id="drive-status-card"><div class="muted">Google Drive Gateway</div><div class="mt-2"><span style="display:inline-block;padding:4px 9px;border-radius:999px;background:#f1f5f9;color:#64748b;font-weight:700">กำลังตรวจแยก…</span></div><div class="muted mt-2">ไม่บล็อกการเปิดหน้าสถานะระบบ</div></div>' +
           '<div class="card"><div class="muted">Backup ล่าสุด</div><div class="mt-2"><b>'+fmtStatusDate(b.lastAt)+'</b></div><div class="muted mt-2">Auto: '+esc(b.lastAutoDay||"—")+'</div></div>' +
         '</div>' +
         '<div class="grid gap-3 md:grid-cols-2 mb-4">' +
@@ -1783,6 +1794,7 @@ const adminTables = {
           '<div class="mt-1"><b>Audit ล่าสุด:</b> '+fmtStatusDate(r.lastAudit?.timestamp)+' '+esc(r.lastAudit?.actorName||"")+'</div>' +
         '</div>' +
         '<div class="flex gap-2 mt-4"><button class="btn" id="status-refresh">↻ ตรวจสอบอีกครั้ง</button><button class="btn secondary" id="status-backup-now">☁ Backup ตอนนี้</button></div>';
+      refreshDriveStatusCard().catch(()=>{});
       $("status-refresh").onclick = refreshSystemStatus;
       $("status-backup-now").onclick = async () => {
         await backupToDriveNow();
