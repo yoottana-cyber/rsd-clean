@@ -350,75 +350,351 @@ const adminTables = {
     if (days.length === 5) return "จันทร์–ศุกร์";
     return days.map((n) => dutyDayOptions.find((d) => d[0] === n)?.[2] || n).join(" ");
   }
+  // assignment-ui: manual-daily-v1
+  let assignmentSelectedDutyDay = (() => {
+    const d = new Date().getDay();
+    return d >= 1 && d <= 5 ? d : 1;
+  })();
+  function assignmentAreaSort(a, b) {
+    return String(a.AreaName || "").localeCompare(String(b.AreaName || ""), "th", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
   function assignmentContent() {
     const m = S.master,
-      inspectors = m.Users.filter((u) => u.Role === "Inspector");
-    const dayChecks = dutyDayOptions
-      .map(([n, full]) =>
-        '<label class="duty-check"><input type="checkbox" name="day" value="' + n + '" checked> ' + full + '</label>',
+      inspectors = m.Users
+        .filter((u) => u.Role === "Inspector")
+        .sort((a, b) => String(a.FullName || "").localeCompare(String(b.FullName || ""), "th")),
+      areas = [...m.Areas].sort(assignmentAreaSort),
+      selectedDay = assignmentSelectedDutyDay,
+      dayMeta = dutyDayOptions.find((d) => d[0] === selectedDay) || dutyDayOptions[0],
+      dayAssignments = m.Assignments.filter((a) => dutyDaysArray(a.Days).includes(selectedDay)),
+      byArea = new Map();
+
+    dayAssignments.forEach((a) => {
+      if (!byArea.has(a.AreaID)) byArea.set(a.AreaID, []);
+      byArea.get(a.AreaID).push(a);
+    });
+
+    const areaNumber = new Map(
+      areas.map((a, i) => [a.AreaID, String(i + 1).padStart(2, "0")]),
+    );
+    const assignedAreaCount = new Set(dayAssignments.map((a) => a.AreaID)).size;
+    const activeInspectorCount = new Set(dayAssignments.map((a) => a.UserID)).size;
+    const unassignedCount = Math.max(0, areas.length - assignedAreaCount);
+
+    const dayTabs = dutyDayOptions
+      .map(
+        ([n, full, short]) =>
+          '<button type="button" class="assignment-day-tab ' +
+          (n === selectedDay ? "active" : "") +
+          '" data-day="' +
+          n +
+          '" aria-pressed="' +
+          (n === selectedDay ? "true" : "false") +
+          '"><span>' +
+          esc(short) +
+          '</span><small>' +
+          esc(full) +
+          "</small></button>",
       )
       .join("");
-    const inspectorChecks = inspectors.length
-      ? inspectors
-          .map((u) =>
-            '<label class="rounded-xl border p-3"><input type="checkbox" name="user" value="' +
-            esc(u.UserID) + '"> ' + esc(u.FullName) + '</label>',
-          )
-          .join("")
-      : '<p class="muted">ยังไม่มีบัญชีผู้ตรวจ</p>';
-    const areaChecks = m.Areas.length
-      ? m.Areas
-          .map((a) =>
-            '<label class="rounded-xl border p-3"><input type="checkbox" name="area" value="' +
-            esc(a.AreaID) + '"> ' + esc(a.AreaName) + ' <small class="muted">' +
-            esc(masterLabel("ResponsibleClassroomID", a.ResponsibleClassroomID)) + '</small></label>',
-          )
-          .join("")
-      : '<p class="muted">ยังไม่มีเขตพื้นที่</p>';
 
-    const rows = [...m.Assignments]
-      .sort((a, b) => {
-        const aa = m.Areas.find((x) => x.AreaID === a.AreaID)?.AreaName || "";
-        const bb = m.Areas.find((x) => x.AreaID === b.AreaID)?.AreaName || "";
-        return aa.localeCompare(bb, "th") || dutyDaysLabel(a.Days).localeCompare(dutyDaysLabel(b.Days), "th");
-      })
-      .map((a) => [
-        esc(m.Users.find((u) => u.UserID === a.UserID)?.FullName || "—"),
-        esc(m.Areas.find((x) => x.AreaID === a.AreaID)?.AreaName || "—"),
-        '<span class="pill gray">' + esc(dutyDaysLabel(a.Days)) + '</span>',
-        '<button class="btn small secondary edit-duty" data-id="' + esc(a.AssignmentID) + '">แก้วัน</button> ' +
-          '<button class="btn small danger unassign" data-id="' + esc(a.AssignmentID) + '">ยกเลิกเวร</button>',
-      ]);
+    const areaCards = areas.length
+      ? areas
+          .map((a) => {
+            const className = masterLabel("ResponsibleClassroomID", a.ResponsibleClassroomID),
+              team = byArea.get(a.AreaID) || [],
+              teamNames = team.map(
+                (x) => m.Users.find((u) => u.UserID === x.UserID)?.FullName || "—",
+              ),
+              teamUserIds = team.map((x) => x.UserID).join("|"),
+              searchText = [a.AreaName, className, ...teamNames]
+                .join(" ")
+                .toLocaleLowerCase("th"),
+              teamHtml = team.length
+                ? team
+                    .map((x) => {
+                      const name =
+                        m.Users.find((u) => u.UserID === x.UserID)?.FullName || "—";
+                      return (
+                        '<span class="assignment-person-chip"><span>' +
+                        esc(name) +
+                        '</span><button type="button" class="assignment-person-remove assignment-remove-day" data-id="' +
+                        esc(x.AssignmentID) +
+                        '" title="นำออกจากเวร' +
+                        esc(dayMeta[1]) +
+                        '" aria-label="นำ ' +
+                        esc(name) +
+                        " ออกจากเวร" +
+                        esc(dayMeta[1]) +
+                        '">×</button></span>'
+                      );
+                    })
+                    .join("")
+                : '<span class="assignment-empty-chip">ยังไม่มีผู้ตรวจ</span>';
+            return (
+              '<article class="assignment-area-card" data-assigned="' +
+              (team.length ? "1" : "0") +
+              '" data-users="' +
+              esc(teamUserIds) +
+              '" data-search="' +
+              esc(searchText) +
+              '">' +
+              '<label class="assignment-area-main">' +
+              '<input class="assignment-area-check" type="checkbox" name="area" value="' +
+              esc(a.AreaID) +
+              '">' +
+              '<span class="assignment-area-no">' +
+              areaNumber.get(a.AreaID) +
+              '</span><span class="assignment-area-copy"><strong>' +
+              esc(a.AreaName) +
+              '</strong><small>' +
+              esc(className) +
+              "</small></span>" +
+              '<span class="assignment-area-status ' +
+              (team.length ? "assigned" : "empty") +
+              '">' +
+              (team.length ? team.length + " คน" : "ว่าง") +
+              "</span></label>" +
+              '<div class="assignment-area-team">' +
+              teamHtml +
+              "</div></article>"
+            );
+          })
+          .join("")
+      : '<div class="empty">ยังไม่มีเขตพื้นที่</div>';
+
+    const inspectorSummary =
+      inspectors
+        .map((u) => {
+          const userAreas = areas.filter((a) =>
+            (byArea.get(a.AreaID) || []).some((x) => x.UserID === u.UserID),
+          );
+          if (!userAreas.length) return "";
+          const nums = userAreas.map((a) => areaNumber.get(a.AreaID)).join(", ");
+          return (
+            '<div class="assignment-inspector-card"><div><strong>' +
+            esc(u.FullName) +
+            '</strong><small>' +
+            userAreas.length +
+            " พื้นที่</small></div><span>" +
+            esc(nums) +
+            "</span></div>"
+          );
+        })
+        .filter(Boolean)
+        .join("") || '<div class="muted">วันนี้ยังไม่มีผู้ตรวจที่ได้รับมอบหมาย</div>';
 
     $("admin-content").innerHTML =
-      '<div class="flex flex-wrap items-start justify-between gap-3 mb-3"><div><h2 class="text-lg">ตั้งเวรผู้ตรวจสภานักเรียน</h2>' +
-      '<p class="muted mt-1">พื้นที่เดียวมีผู้ตรวจได้หลายคน และผู้ตรวจหนึ่งคนรับผิดชอบได้หลายพื้นที่ เลือกวันเข้าเวรได้ จันทร์–ศุกร์</p></div></div>' +
-      '<div class="notice-duty mb-5"><b>หลักการ:</b> หากวันเดียวกันมีผู้ตรวจหลายคนในพื้นที่เดียวกัน ทุกคนจะเห็นงานเดียวกัน แต่พื้นที่นั้นมีผลตรวจเพียง 1 ผลต่อวัน ผู้ตรวจคนใดคนหนึ่งบันทึกแล้ว สมาชิกทีมคนอื่นจะเห็นผลเดียวกัน</div>' +
-      '<form id="assign-form"><div class="field"><label>1) เลือกวันเข้าเวร</label><div class="duty-days">' + dayChecks + '</div></div>' +
-      '<div class="field"><label>2) เลือกผู้ตรวจ (เลือกได้หลายคน)</label><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-60 overflow-auto p-1">' + inspectorChecks + '</div></div>' +
-      '<div class="field"><label>3) เลือกพื้นที่ (เลือกได้หลายพื้นที่)</label><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-auto p-1">' + areaChecks + '</div></div>' +
-      '<button class="btn" ' + (!inspectors.length || !m.Areas.length ? 'disabled' : '') + '>เพิ่ม / รวมเวรที่เลือก</button></form>' +
-      '<div class="flex flex-wrap items-center justify-between gap-3 mt-8 mb-3"><div><h2 class="text-lg">ตารางเวรปัจจุบัน</h2><span class="muted">ทั้งหมด ' + rows.length + ' รายการ</span></div><div class="search-box"><i data-lucide="search"></i><input id="assignment-search" type="search" placeholder="ค้นหาผู้ตรวจ / พื้นที่ / วัน…"></div></div>' +
-      table(["ผู้ตรวจ", "พื้นที่", "วันเข้าเวร", "จัดการ"], rows);
+      '<div class="assignment-shell">' +
+      '<div class="flex flex-wrap items-start justify-between gap-3 mb-3"><div><h2 class="text-lg">มอบหมายเวรตรวจเขตพื้นที่</h2>' +
+      '<p class="muted mt-1">เลือกวัน → เลือกผู้ตรวจ 1 คน → เลือกหลายพื้นที่ → บันทึกครั้งเดียว เหมาะสำหรับเวรสภานักเรียนประจำวัน</p></div></div>' +
+      '<div class="notice-duty mb-4"><b>หมายเหตุ:</b> เวรนี้เป็นเวรประจำวันในสัปดาห์ พื้นที่เดียวสามารถมีผู้ตรวจมากกว่า 1 คนได้ หากต้องการทำงานเป็นทีม</div>' +
+      '<div class="assignment-day-tabs" aria-label="เลือกวันเข้าเวร">' +
+      dayTabs +
+      "</div>" +
+      '<div class="assignment-stats">' +
+      '<div class="assignment-stat"><span>พื้นที่ทั้งหมด</span><b>' +
+      areas.length +
+      '</b></div><div class="assignment-stat"><span>มอบหมายแล้ว</span><b>' +
+      assignedAreaCount +
+      '</b></div><div class="assignment-stat"><span>ยังไม่มีผู้ตรวจ</span><b>' +
+      unassignedCount +
+      '</b></div><div class="assignment-stat"><span>ผู้ตรวจเข้าเวร</span><b>' +
+      activeInspectorCount +
+      "</b></div></div>" +
+      '<form id="assign-form">' +
+      '<section class="assignment-step"><div class="assignment-step-head"><span>1</span><div><b>เลือกผู้ตรวจ</b><small>มอบหมายทีละคน เพื่อควบคุมพื้นที่ได้ง่าย</small></div></div>' +
+      '<div class="field m-0"><select id="assignment-inspector" name="user" required>' +
+      opts(inspectors, "UserID", "FullName", "", "— เลือกผู้ตรวจ —") +
+      "</select></div></section>" +
+      '<section class="assignment-step"><div class="assignment-step-head"><span>2</span><div><b>เลือกพื้นที่ของ ' +
+      esc(dayMeta[1]) +
+      '</b><small>พื้นที่ที่มีผู้ตรวจแล้วก็เลือกเพิ่มได้ หากต้องการให้ตรวจเป็นทีม</small></div></div>' +
+      '<div class="assignment-toolbar"><div class="search-box assignment-search"><i data-lucide="search"></i><input id="assignment-area-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / ผู้ตรวจ…"></div>' +
+      '<label class="assignment-filter-check"><input id="assignment-only-unassigned" type="checkbox"> เฉพาะพื้นที่ว่าง</label>' +
+      '<button class="btn small secondary" type="button" id="assignment-select-visible">เลือกทั้งหมดที่แสดง</button>' +
+      '<button class="btn small secondary" type="button" id="assignment-clear">ล้างที่เลือก</button></div>' +
+      '<div class="assignment-area-meta"><span>แสดง <b id="assignment-visible-count">' +
+      areas.length +
+      '</b> พื้นที่</span><span>เลือกแล้ว <b id="assignment-selected-count">0</b> พื้นที่</span></div>' +
+      '<div class="assignment-area-grid">' +
+      areaCards +
+      "</div></section>" +
+      '<div class="assignment-action-bar"><div><b id="assignment-action-title">ยังไม่ได้เลือกพื้นที่</b><small>ผู้ตรวจจะได้รับเวรเฉพาะวัน' +
+      esc(dayMeta[1]) +
+      '</small></div><button class="btn" id="assignment-submit" disabled>มอบหมายพื้นที่ที่เลือก</button></div>' +
+      "</form>" +
+      '<section class="assignment-summary"><div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h3 class="text-lg">สรุปเวรวัน' +
+      esc(dayMeta[1]) +
+      '</h3><span class="muted">ดูจำนวนพื้นที่ของผู้ตรวจแต่ละคนได้ทันที</span></div></div>' +
+      '<div class="assignment-inspector-grid">' +
+      inspectorSummary +
+      "</div></section></div>";
 
-    wireTextFilter("assignment-search","#admin-content");
     icons();
+
+    const cards = [...document.querySelectorAll(".assignment-area-card")],
+      inspectorSelect = $("assignment-inspector"),
+      searchInput = $("assignment-area-search"),
+      onlyUnassigned = $("assignment-only-unassigned"),
+      submitBtn = $("assignment-submit");
+
+    const updateSelection = () => {
+      const checked = cards
+        .map((card) => card.querySelector(".assignment-area-check"))
+        .filter((cb) => cb && cb.checked && !cb.disabled);
+      cards.forEach((card) => {
+        const cb = card.querySelector(".assignment-area-check");
+        card.classList.toggle("selected", !!cb?.checked && !cb.disabled);
+      });
+      $("assignment-selected-count").textContent = String(checked.length);
+      $("assignment-action-title").textContent = checked.length
+        ? "เลือกแล้ว " + checked.length + " พื้นที่"
+        : "ยังไม่ได้เลือกพื้นที่";
+      submitBtn.disabled = !inspectorSelect.value || checked.length === 0;
+      submitBtn.textContent = checked.length
+        ? "มอบหมาย " + checked.length + " พื้นที่"
+        : "มอบหมายพื้นที่ที่เลือก";
+    };
+
+    const applyFilter = () => {
+      const q = String(searchInput.value || "")
+          .trim()
+          .toLocaleLowerCase("th"),
+        only = onlyUnassigned.checked;
+      let visible = 0;
+      cards.forEach((card) => {
+        const show =
+          (!q || String(card.dataset.search || "").includes(q)) &&
+          (!only || card.dataset.assigned === "0");
+        card.hidden = !show;
+        if (show) visible++;
+      });
+      $("assignment-visible-count").textContent = String(visible);
+      updateSelection();
+    };
+
+    const syncInspectorState = () => {
+      const uid = String(inspectorSelect.value || "");
+      cards.forEach((card) => {
+        const users = String(card.dataset.users || "")
+          .split("|")
+          .filter(Boolean);
+        const already = !!uid && users.includes(uid);
+        const cb = card.querySelector(".assignment-area-check");
+        if (cb) {
+          cb.disabled = already;
+          if (already) cb.checked = false;
+        }
+        card.classList.toggle("already-for-user", already);
+      });
+      updateSelection();
+    };
+
+    document.querySelectorAll(".assignment-day-tab").forEach((b) => {
+      b.onclick = () => {
+        assignmentSelectedDutyDay = Number(b.dataset.day) || 1;
+        assignmentContent();
+      };
+    });
+    cards.forEach((card) => {
+      const cb = card.querySelector(".assignment-area-check");
+      if (cb) cb.onchange = updateSelection;
+    });
+    searchInput.oninput = applyFilter;
+    onlyUnassigned.onchange = applyFilter;
+    inspectorSelect.onchange = syncInspectorState;
+    $("assignment-select-visible").onclick = () => {
+      cards.forEach((card) => {
+        const cb = card.querySelector(".assignment-area-check");
+        if (!card.hidden && cb && !cb.disabled) cb.checked = true;
+      });
+      updateSelection();
+    };
+    $("assignment-clear").onclick = () => {
+      cards.forEach((card) => {
+        const cb = card.querySelector(".assignment-area-check");
+        if (cb) cb.checked = false;
+      });
+      updateSelection();
+    };
+    document.querySelectorAll(".assignment-remove-day").forEach((b) => {
+      b.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        removeAssignmentDutyDay(b.dataset.id, selectedDay);
+      };
+    });
+
     $("assign-form").onsubmit = async (e) => {
       e.preventDefault();
-      const f = new FormData(e.target), userIds = f.getAll("user"), areaIds = f.getAll("area"), days = f.getAll("day");
-      if (!days.length) return error(new Error("เลือกวันเข้าเวรอย่างน้อย 1 วัน"));
-      if (!userIds.length) return error(new Error("เลือกผู้ตรวจอย่างน้อย 1 คน"));
+      const f = new FormData(e.target),
+        userId = String(f.get("user") || ""),
+        areaIds = f.getAll("area").map(String);
+      if (!userId) return error(new Error("เลือกผู้ตรวจก่อน"));
       if (!areaIds.length) return error(new Error("เลือกพื้นที่อย่างน้อย 1 พื้นที่"));
+      busy(true, "กำลังบันทึกเวร…");
       try {
-        const result = await rpc("assign", { userIds, areaIds, days });
-        toast("บันทึกเวรแล้ว");
-        await route();
-      } catch (e) { error(e); }
+        await rpc("assign", {
+          userIds: [userId],
+          areaIds,
+          days: [String(selectedDay)],
+        });
+        S.master = await rpc("master", {}, true);
+        toast("บันทึกเวรวัน" + dayMeta[1] + "แล้ว " + areaIds.length + " พื้นที่");
+        assignmentContent();
+      } catch (e) {
+        error(e);
+      } finally {
+        busy(false);
+      }
     };
-    document.querySelectorAll(".unassign").forEach((b) => (b.onclick = () => deleteRow("Assignments", b.dataset.id)));
-    document.querySelectorAll(".edit-duty").forEach((b) => {
-      b.onclick = () => editDutyDays(m.Assignments.find((x) => x.AssignmentID === b.dataset.id));
+
+    applyFilter();
+    syncInspectorState();
+  }
+  async function removeAssignmentDutyDay(assignmentId, day) {
+    const row = S.master.Assignments.find((x) => x.AssignmentID === assignmentId);
+    if (!row) return;
+    const n = Number(day),
+      days = dutyDaysArray(row.Days),
+      remaining = days.filter((x) => x !== n),
+      userName = S.master.Users.find((u) => u.UserID === row.UserID)?.FullName || "—",
+      areaName = S.master.Areas.find((a) => a.AreaID === row.AreaID)?.AreaName || "—",
+      dayName = dutyDayOptions.find((d) => d[0] === n)?.[1] || String(n);
+    const confirm = await Swal.fire({
+      icon: "question",
+      title: "นำออกจากเวรวัน" + dayName + "?",
+      html:
+        "<b>" +
+        esc(userName) +
+        "</b><br>" +
+        esc(areaName) +
+        (remaining.length
+          ? '<br><span class="muted">เวรวันอื่นของรายการนี้จะยังคงเดิม</span>'
+          : '<br><span class="muted">รายการเวรนี้ไม่มีวันอื่นแล้ว จึงจะย้ายไปถังขยะ</span>'),
+      showCancelButton: true,
+      confirmButtonText: "นำออกจากวันนี้",
+      cancelButtonText: "ยกเลิก",
     });
+    if (!confirm.isConfirmed) return;
+    busy(true, "กำลังปรับเวร…");
+    try {
+      if (remaining.length)
+        await rpc("setAssignmentDays", { id: row.AssignmentID, days: remaining.map(String) });
+      else
+        await rpc("deleteMaster", { table: "Assignments", id: row.AssignmentID });
+      S.master = await rpc("master", {}, true);
+      toast("ปรับเวรเรียบร้อย");
+      assignmentContent();
+    } catch (e) {
+      error(e);
+    } finally {
+      busy(false);
+    }
   }
   function editDutyDays(row) {
     if (!row) return;
