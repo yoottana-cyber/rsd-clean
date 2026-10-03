@@ -300,8 +300,9 @@ async function dispatch(env, action, p, token, request) {
     qrAdmin: async () => qrAdmin(env,u,p),
     master: async () => master(env,u),
     areaMapLayout: async () => areaMapLayout(env,u),
-    areaMapDecorations: async () => areaMapDecorations(env,u),
-    saveAreaMapDecorations: async () => saveAreaMapDecorations(env,u,p),
+    areaMapReference: async () => areaMapReference(env,u),
+    saveAreaMapReference: async () => saveAreaMapReference(env,u,p),
+    clearAreaMapReference: async () => clearAreaMapReference(env,u),
     mapStatus: async () => mapStatus(env,u,p),
     saveAreaMapLayout: async () => saveAreaMapLayout(env,u,p),
     report: async () => report(env,u,validateDate(p.start),validateDate(p.end)),
@@ -429,7 +430,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","saveAreaMapDecorations"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","saveAreaMapReference","clearAreaMapReference"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -463,7 +464,7 @@ function auditMeta(action,p,result){
   if(action==="removeDutyAssignments")return{entityType:"Assignments",entityId:"bulk",details:{mode:String(p.mode||""),day:Number(p.day||0),userId:String(p.userId||""),areaIds:(p.areaIds||[]).map(String).slice(0,100),changed:Number(result?.changed||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,5),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="saveAreaMapLayout")return{entityType:"AreaMap",entityId:"layout",details:{shapeCount:Number(result?.saved||0)}};
-  if(action==="saveAreaMapDecorations")return{entityType:"AreaMap",entityId:"decorations",details:{decorationCount:Number(result?.saved||0)}};
+  if(action==="saveAreaMapReference"||action==="clearAreaMapReference")return{entityType:"AreaMap",entityId:"reference",details:{hasReference:!!result?.HasReference}};
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
   if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
   if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
@@ -1838,29 +1839,6 @@ async function ensureAreaMapTable(db){
 function areaMapShapeRow(r){
   return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),AreaName:String(r.area_name||""),ClassName:String(r.class_name||""),ResponsibleClassroomID:String(r.responsible_classroom_id||""),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
 }
-function normalizeMapDecoration(raw,index=0){
-  raw=raw&&typeof raw==="object"?raw:{};
-  const type=["rect","polygon"].includes(String(raw.ShapeType||""))?String(raw.ShapeType):"rect";
-  const kind=["building","road","field","label","landmark","other"].includes(String(raw.Kind||""))?String(raw.Kind):"building";
-  const fill=/^#[0-9a-f]{6}$/i.test(String(raw.FillColor||""))?String(raw.FillColor):"#dbeafe";
-  const stroke=/^#[0-9a-f]{6}$/i.test(String(raw.StrokeColor||""))?String(raw.StrokeColor):"#64748b";
-  const n=(v,min,max,def)=>{const x=Number(v);return Number.isFinite(x)?Math.max(min,Math.min(max,x)):def;};
-  const points=Array.isArray(raw.Points)?raw.Points.slice(0,80).map(p=>({x:n(p?.x,0,1600,0),y:n(p?.y,0,1000,0)})):[];
-  return{DecorationID:text(raw.DecorationID||"",120)||("decor-"+(index+1)),Kind:kind,Label:text(raw.Label||"",200),ShapeType:type,X:n(raw.X,0,1590,0),Y:n(raw.Y,0,990,0),Width:n(raw.Width,10,1600,120),Height:n(raw.Height,10,1000,80),Points:points,FillColor:fill,StrokeColor:stroke,Opacity:n(raw.Opacity,.05,1,.45),Locked:raw.Locked===true,SortOrder:Number.isFinite(Number(raw.SortOrder))?Math.trunc(Number(raw.SortOrder)):index};
-}
-async function getAreaMapDecorations(db){
-  const r=await db.prepare("SELECT value FROM settings WHERE key=?").bind("area_map_decorations_json").first(),arr=parseJson(r?.value,[]);
-  return Array.isArray(arr)?arr.slice(0,200).map((x,i)=>normalizeMapDecoration(x,i)):[];
-}
-async function areaMapDecorations(env,u){role(u,["Admin","Supervisor","Inspector","Teacher"]);return getAreaMapDecorations(env.DB);}
-async function saveAreaMapDecorations(env,u,p){
-  role(u,["Admin"]);
-  const arr=Array.isArray(p.decorations)?p.decorations:[];assert(arr.length<=200,"สิ่งประกอบผังมากเกินไป");
-  const rows=arr.map((x,i)=>normalizeMapDecoration(x,i));
-  for(const d of rows){assert(d.ShapeType==="rect"||(d.Points.length>=3&&d.Points.length<=80),"รูปหลายเหลี่ยมต้องมี 3–80 จุด");}
-  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_decorations_json",JSON.stringify(rows)).run();
-  return{saved:rows.length};
-}
 const MAP_STATUS_META={
   holiday:{label:"วันหยุด",color:"#cbd5e1"},
   no_assignment:{label:"ไม่มีเวร",color:"#94a3b8"},
@@ -1891,14 +1869,48 @@ function mapStatusFromInspection(i,teamCount=0){
 async function areaMapLayout(env,u){
   role(u,["Admin","Supervisor","Inspector","Teacher"]);
   await ensureAreaMapTable(env.DB);
-  const [shapeRows,decorations]=await Promise.all([all(env.DB,"SELECT s.*,a.area_name,a.responsible_classroom_id,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id"),getAreaMapDecorations(env.DB)]);
-  return {canvas:{width:1600,height:1000},shapes:shapeRows.map(areaMapShapeRow),decorations};
-}async function mapStatus(env,u,p){
+  const shapeRows=await all(env.DB,"SELECT s.*,a.area_name,a.responsible_classroom_id,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id");
+  return {canvas:{width:1600,height:1000},shapes:shapeRows.map(areaMapShapeRow)};
+}
+async function areaMapReferenceMeta(db){
+  const rows=await all(db,"SELECT key,value FROM settings WHERE key IN (?,?)","area_map_reference_version","area_map_reference_data");
+  const m=Object.fromEntries(rows.map(r=>[String(r.key),String(r.value||"")]));
+  return{ReferenceVersion:m.area_map_reference_version||"",HasReference:!!m.area_map_reference_data};
+}
+async function areaMapReference(env,u){
+  role(u,["Admin","Supervisor","Inspector","Teacher"]);
+  const rows=await all(env.DB,"SELECT key,value FROM settings WHERE key IN (?,?)","area_map_reference_version","area_map_reference_data");
+  const m=Object.fromEntries(rows.map(r=>[String(r.key),String(r.value||"")]));
+  return{ReferenceVersion:m.area_map_reference_version||"",DataUrl:m.area_map_reference_data||""};
+}
+async function saveAreaMapReference(env,u,p){
+  role(u,["Admin"]);
+  const data=String(p.dataUrl||"");
+  assert(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data),"รูปภาพอ้างอิงไม่ถูกต้อง");
+  assert(data.length<=3000000,"ภาพอ้างอิงมีขนาดใหญ่เกินไป");
+  const version=nowIso();
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_data",data),
+    env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version)
+  ]);
+  return{ReferenceVersion:version,HasReference:true};
+}
+async function clearAreaMapReference(env,u){
+  role(u,["Admin"]);
+  const version=nowIso();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM settings WHERE key=?").bind("area_map_reference_data"),
+    env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version)
+  ]);
+  return{ReferenceVersion:version,HasReference:false};
+}
+
+async function mapStatus(env,u,p){
   role(u,["Admin","Supervisor","Inspector","Teacher"]);
   const db=env.DB,date=validateDate(p.date||thaiDay()),today=thaiDay();
   if(date===today)await ensureToday(env);
   await ensureDutyOverridesTable(db);
-  const [layout,areas,rows,teams,overrides,calendarSchoolDay,cfg,period]=await Promise.all([
+  const [layout,areas,rows,teams,overrides,calendarSchoolDay,cfg,period,reference]=await Promise.all([
     areaMapLayout(env,u),
     all(db,"SELECT a.area_id,a.area_name,a.responsible_classroom_id,c.class_name FROM areas a LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY a.area_name"),
     all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
@@ -1906,7 +1918,8 @@ async function areaMapLayout(env,u){
     all(db,"SELECT d.*,su.full_name substitute_name,ru.full_name replace_name FROM duty_overrides d JOIN users su ON su.user_id=d.substitute_user_id LEFT JOIN users ru ON ru.user_id=d.replace_user_id WHERE d.override_date=? ORDER BY d.area_id",date),
     schoolDay(env,date),
     getAppSettings(db),
-    academicPeriodForDate(db,date)
+    academicPeriodForDate(db,date),
+    areaMapReferenceMeta(db)
   ]);
   const teamMap=new Map(),overrideMap=new Map();
   teams.forEach(x=>{const id=String(x.inspection_id);if(!teamMap.has(id))teamMap.set(id,[]);teamMap.get(id).push(x);});
@@ -1945,7 +1958,7 @@ async function areaMapLayout(env,u){
   summary.approvalPending=scheduled.filter(x=>x.ApprovalStatus==="รอรับรอง").length;
   summary.substitute=scheduled.filter(x=>x.HasSubstitute).length;
   return{
-    date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,decorations:layout.decorations||[],items,summary,settings:cfg,
+    date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,items,summary,settings:cfg,ReferenceVersion:reference.ReferenceVersion,HasReference:reference.HasReference,
     period:period?{PeriodID:period.period_id,Label:period.label,StartDate:period.start_date,EndDate:period.end_date}:null,updatedAt:nowIso()
   };
 }
