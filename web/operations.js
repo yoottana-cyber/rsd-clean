@@ -387,17 +387,22 @@ async function downloadCertificatesZip(){
 }
 function certTemplateDefaults(){
   return{
-    enabled:true,fields:{
+    enabled:true,
+    fields:{
       className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700},
       medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700},
       month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500},
       period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400},
       issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400}
-    }
+    },
+    textBlocks:[]
   };
 }
 function certTemplateSampleValues(){
   return{className:"มัธยมศึกษาปีที่ 3/3",medal:"เหรียญทอง",month:"ตุลาคม 2569",period:"ภาคเรียนที่ 2 ปีการศึกษา 2569",issueDate:"31 ตุลาคม 2569"};
+}
+function certCustomBlock(textValue="",y=50,size=22,color="#17334b",weight=400){
+  return{id:"custom-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),text:textValue,visible:true,x:50,y,size,color,weight};
 }
 async function certificateTemplateModal(){
   if(S.user?.Role!=="Admin")return;
@@ -409,7 +414,11 @@ async function certificateTemplateModal(){
     if(cfg.hasImage){
       try{image=await rpc("certificateTemplateImage",{},true);}catch(e){console.warn(e);}
     }
-    const state={enabled:cfg.hasImage?cfg.enabled:true,fields:{}};
+    const state={
+      enabled:cfg.hasImage?cfg.enabled:true,
+      fields:{},
+      textBlocks:Array.isArray(cfg.textBlocks)?cfg.textBlocks.map((b,i)=>({...certCustomBlock("",50,22),...b,id:b.id||("custom-"+i)})):[]
+    };
     Object.keys(base.fields).forEach(k=>state.fields[k]={...base.fields[k],...(cfg.fields?.[k]||{})});
     const labels={className:"ชื่อห้องเรียน",medal:"ระดับเหรียญ",month:"เดือน",period:"ภาคเรียน / ปีการศึกษา",issueDate:"วันที่ออกเกียรติบัตร"};
     const controls=Object.keys(state.fields).map(k=>{
@@ -424,35 +433,34 @@ async function certificateTemplateModal(){
       '</div>';
     }).join("");
     box.innerHTML=
-      '<div class="warn mb-4"><b>แนะนำ:</b> ใช้ภาพ A4 แนวนอน อัตราส่วนประมาณ 1.414:1 (PNG/JPG ไม่เกิน 8 MB) โดยใส่กรอบ โลโก้ ลายเซ็น และข้อความคงที่ไว้ในภาพแม่แบบ แล้วให้ระบบเติมเฉพาะข้อมูลที่เปลี่ยนแปลง</div>'+
+      '<div class="warn mb-4"><b>แบบที่แนะนำ:</b> อัปโหลดเฉพาะภาพพื้นหลัง A4 แนวนอน เช่น กรอบ ลวดลาย โลโก้ และลายเซ็น ส่วนข้อความทั้งหมดสามารถเพิ่มและจัดตำแหน่งจากเว็บได้</div>'+
       '<div class="ops-template-layout">'+
         '<div>'+
           '<div class="ops-template-preview" id="cert-template-preview">'+
-            '<div class="ops-template-empty" id="cert-template-empty">อัปโหลดภาพแม่แบบเพื่อเริ่มตั้งค่า</div>'+
+            '<div class="ops-template-empty" id="cert-template-empty">อัปโหลดภาพพื้นหลังเกียรติบัตรเพื่อเริ่มตั้งค่า</div>'+
             '<img id="cert-template-image" alt="แม่แบบเกียรติบัตร" class="'+(image?"":"hidden")+'" src="'+esc(image)+'">'+
             '<div id="cert-template-overlays"></div>'+
           '</div>'+
-          '<p class="muted mt-2">ลากข้อความบน Preview เพื่อจัดตำแหน่งได้โดยตรง หรือกรอก X/Y ด้านล่าง</p>'+
+          '<p class="muted mt-2">ลากข้อความบน Preview เพื่อจัดตำแหน่งได้โดยตรง หรือกรอก X/Y ด้านขวา</p>'+
         '</div>'+
         '<div class="ops-template-tools">'+
-          '<div class="field"><label>ภาพแม่แบบ</label><input id="cert-template-file" type="file" accept="image/png,image/jpeg"><small class="muted">PNG/JPG · สูงสุด 8 MB</small></div>'+
-          '<label class="coverage-toggle"><input id="cert-template-enabled" type="checkbox" '+(state.enabled?"checked":"")+'><span><b>ใช้แม่แบบนี้ในการสร้างเกียรติบัตร</b><small>ปิดได้โดยไม่ลบไฟล์และตำแหน่งที่ตั้งไว้</small></span></label>'+
-          '<div class="ops-template-fields">'+controls+'</div>'+
+          '<div class="field"><label>ภาพพื้นหลังเกียรติบัตร</label><input id="cert-template-file" type="file" accept="image/png,image/jpeg"><small class="muted">PNG/JPG · สูงสุด 8 MB · แนะนำ A4 แนวนอน</small></div>'+
+          '<label class="coverage-toggle"><input id="cert-template-enabled" type="checkbox" '+(state.enabled?"checked":"")+'><span><b>ใช้แม่แบบนี้ในการสร้างเกียรติบัตร</b><small>ปิดได้โดยไม่ลบภาพและตำแหน่งที่ตั้งไว้</small></span></label>'+
+          '<div class="ops-template-group"><div class="ops-template-group-head"><div><b>ข้อมูลอัตโนมัติ</b><small>ระบบเปลี่ยนค่าให้แต่ละห้องอัตโนมัติ</small></div></div><div class="ops-template-fields">'+controls+'</div></div>'+
+          '<div class="ops-template-group">'+
+            '<div class="ops-template-group-head"><div><b>ข้อความกำหนดเอง</b><small>ใช้ตัวแปร {className} {medal} {month} {period} {issueDate} ได้</small></div>'+
+              '<div class="flex flex-wrap gap-2"><button class="btn small secondary" id="cert-add-sample-text" type="button">ชุดข้อความตัวอย่าง</button><button class="btn small" id="cert-add-text" type="button">+ เพิ่มข้อความ</button></div></div>'+
+            '<div id="cert-custom-fields" class="ops-template-custom-list"></div>'+
+          '</div>'+
           '<div class="flex flex-wrap gap-2"><button class="btn" id="cert-template-save"><i data-lucide="save"></i> บันทึกแม่แบบ</button>'+
             (cfg.hasImage?'<button class="btn danger" id="cert-template-delete"><i data-lucide="trash-2"></i> ลบแม่แบบ</button>':'')+
           '</div>'+
         '</div>'+
       '</div>';
+
     const sample=certTemplateSampleValues();
-    const render=()=>{
-      const overlay=$("cert-template-overlays");if(!overlay)return;
-      overlay.innerHTML=Object.entries(sample).map(([k,value])=>{
-        const v=state.fields[k];if(!v?.visible)return "";
-        return '<div class="ops-template-drag" data-field="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(value)+'</div>';
-      }).join("");
-      wireDrag();
-    };
-    const syncInputs=(field)=>{
+    const findCustom=id=>state.textBlocks.find(x=>x.id===id);
+    const syncField=(field)=>{
       const v=state.fields[field];
       box.querySelectorAll('[data-cert-field="'+field+'"]').forEach(el=>{
         const p=el.dataset.certProp;
@@ -461,39 +469,116 @@ async function certificateTemplateModal(){
         else el.value=v[p];
       });
     };
+    const syncCustom=(id)=>{
+      const v=findCustom(id);if(!v)return;
+      box.querySelectorAll('[data-custom-id="'+id+'"]').forEach(el=>{
+        const p=el.dataset.customProp;
+        if(p==="visible")el.checked=!!v.visible;
+        else if(p==="color")el.value=v.color;
+        else if(p==="text")el.value=v.text;
+        else el.value=v[p];
+      });
+    };
+    const renderCustomControls=()=>{
+      const wrap=$("cert-custom-fields");if(!wrap)return;
+      wrap.innerHTML=state.textBlocks.length?state.textBlocks.map((v,index)=>
+        '<div class="ops-template-custom-row">'+
+          '<div class="ops-template-custom-top"><label class="ops-template-visible"><input type="checkbox" data-custom-id="'+esc(v.id)+'" data-custom-prop="visible" '+(v.visible!==false?"checked":"")+'><b>ข้อความ '+(index+1)+'</b></label><button class="btn small danger cert-remove-text" type="button" data-id="'+esc(v.id)+'">ลบ</button></div>'+
+          '<textarea rows="2" maxlength="500" data-custom-id="'+esc(v.id)+'" data-custom-prop="text" placeholder="พิมพ์ข้อความ เช่น ขอมอบเกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า">'+esc(v.text||"")+'</textarea>'+
+          '<div class="ops-template-custom-grid">'+
+            '<label>X (%)<input type="number" min="0" max="100" step=".5" value="'+v.x+'" data-custom-id="'+esc(v.id)+'" data-custom-prop="x"></label>'+
+            '<label>Y (%)<input type="number" min="0" max="100" step=".5" value="'+v.y+'" data-custom-id="'+esc(v.id)+'" data-custom-prop="y"></label>'+
+            '<label>ขนาด<input type="number" min="10" max="96" value="'+v.size+'" data-custom-id="'+esc(v.id)+'" data-custom-prop="size"></label>'+
+            '<label>สี<input type="color" value="'+esc(v.color)+'" data-custom-id="'+esc(v.id)+'" data-custom-prop="color"></label>'+
+            '<label>น้ำหนัก<select data-custom-id="'+esc(v.id)+'" data-custom-prop="weight">'+[400,500,600,700].map(w=>'<option value="'+w+'" '+(Number(v.weight)===w?"selected":"")+'>'+w+'</option>').join("")+'</select></label>'+
+          '</div>'+
+        '</div>'
+      ).join(""):'<div class="empty">ยังไม่มีข้อความกำหนดเอง</div>';
+      wrap.querySelectorAll("[data-custom-id]").forEach(el=>{
+        el.oninput=()=>{
+          const v=findCustom(el.dataset.customId);if(!v)return;
+          const p=el.dataset.customProp;
+          v[p]=p==="visible"?el.checked:(p==="text"||p==="color"?el.value:Number(el.value));
+          renderPreview();
+        };
+      });
+      wrap.querySelectorAll(".cert-remove-text").forEach(b=>b.onclick=()=>{
+        state.textBlocks=state.textBlocks.filter(x=>x.id!==b.dataset.id);
+        renderCustomControls();renderPreview();
+      });
+    };
     const wireDrag=()=>{
       box.querySelectorAll(".ops-template-drag").forEach(el=>{
         el.onpointerdown=e=>{
           e.preventDefault();el.setPointerCapture?.(e.pointerId);
-          const field=el.dataset.field,preview=$("cert-template-preview");
+          const kind=el.dataset.kind||"field",id=el.dataset.id,preview=$("cert-template-preview");
+          const target=kind==="custom"?findCustom(id):state.fields[id];
+          if(!target)return;
           const move=ev=>{
             const r=preview.getBoundingClientRect();
-            state.fields[field].x=Math.round(Math.min(100,Math.max(0,(ev.clientX-r.left)/r.width*100))*10)/10;
-            state.fields[field].y=Math.round(Math.min(100,Math.max(0,(ev.clientY-r.top)/r.height*100))*10)/10;
-            el.style.left=state.fields[field].x+"%";el.style.top=state.fields[field].y+"%";syncInputs(field);
+            target.x=Math.round(Math.min(100,Math.max(0,(ev.clientX-r.left)/r.width*100))*10)/10;
+            target.y=Math.round(Math.min(100,Math.max(0,(ev.clientY-r.top)/r.height*100))*10)/10;
+            el.style.left=target.x+"%";el.style.top=target.y+"%";
+            kind==="custom"?syncCustom(id):syncField(id);
           };
           const up=()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up);};
           window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true});
         };
       });
     };
+    const renderPreview=()=>{
+      const overlay=$("cert-template-overlays");if(!overlay)return;
+      const autoHtml=Object.entries(sample).map(([k,value])=>{
+        const v=state.fields[k];if(!v?.visible)return "";
+        return '<div class="ops-template-drag" data-kind="field" data-id="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(value)+'</div>';
+      }).join("");
+      const customHtml=state.textBlocks.map(v=>{
+        if(v.visible===false||!String(v.text||"").trim())return "";
+        return '<div class="ops-template-drag ops-template-drag-custom" data-kind="custom" data-id="'+esc(v.id)+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(certificateResolveText(v.text,sample))+'</div>';
+      }).join("");
+      overlay.innerHTML=autoHtml+customHtml;
+      wireDrag();
+    };
+
     box.querySelectorAll("[data-cert-field]").forEach(el=>{
       el.oninput=()=>{
         const k=el.dataset.certField,p=el.dataset.certProp;
         state.fields[k][p]=p==="visible"?el.checked:p==="color"?el.value:Number(el.value);
-        render();
+        renderPreview();
       };
     });
+    $("cert-add-text").onclick=()=>{
+      state.textBlocks.push(certCustomBlock("",50,22));
+      renderCustomControls();renderPreview();
+      setTimeout(()=>$("cert-custom-fields")?.querySelector("textarea:last-of-type")?.focus(),0);
+    };
+    $("cert-add-sample-text").onclick=()=>{
+      if(state.textBlocks.length){
+        return Swal.fire({icon:"info",title:"มีข้อความกำหนดเองอยู่แล้ว",text:"ลบข้อความเดิมก่อน หากต้องการใช้ชุดข้อความตัวอย่าง"});
+      }
+      state.textBlocks=[
+        certCustomBlock("โรงเรียนรัษฎา อำเภอรัษฎา จังหวัดตรัง",28,24,"#4b84b8",600),
+        certCustomBlock("ขอมอบเกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า",37,20,"#111827",400),
+        certCustomBlock("นักเรียนระดับชั้น {className}",48,32,"#4b84b8",700),
+        certCustomBlock("ได้ดูแลเขตพื้นที่ของห้องเรียนอยู่ในระดับ {medal}",58,21,"#111827",400),
+        certCustomBlock("ประจำเดือน {month} · {period}",65,18,"#111827",400),
+        certCustomBlock("ให้ไว้ ณ วันที่ {issueDate}",72,16,"#111827",400)
+      ];
+      Object.keys(state.fields).forEach(k=>state.fields[k].visible=false);
+      box.querySelectorAll("[data-cert-field]").forEach(el=>{if(el.dataset.certProp==="visible")el.checked=false;});
+      renderCustomControls();renderPreview();
+    };
     $("cert-template-file").onchange=()=>{
       const file=$("cert-template-file").files?.[0];if(!file)return;
       if(!["image/png","image/jpeg"].includes(file.type))return error(Error("รองรับเฉพาะ PNG หรือ JPG"));
       if(file.size>8*1024*1024)return error(Error("ไฟล์แม่แบบต้องไม่เกิน 8 MB"));
       if(localUrl)URL.revokeObjectURL(localUrl);
       selectedFile=file;uploadTicket="";localUrl=URL.createObjectURL(file);
-      $("cert-template-image").src=localUrl;$("cert-template-image").classList.remove("hidden");$("cert-template-empty").classList.add("hidden");render();
+      $("cert-template-image").src=localUrl;$("cert-template-image").classList.remove("hidden");$("cert-template-empty").classList.add("hidden");renderPreview();
     };
-    if(image){$("cert-template-empty").classList.add("hidden");render();}
-    else render();
+    if(image)$("cert-template-empty").classList.add("hidden");
+    renderCustomControls();renderPreview();
+
     $("cert-template-save").onclick=async()=>{
       busy(true,selectedFile?"กำลังอัปโหลดแม่แบบ…":"กำลังบันทึกแม่แบบ…");
       try{
@@ -508,7 +593,7 @@ async function certificateTemplateModal(){
           uploadTicket=up.ticket;
         }
         state.enabled=$("cert-template-enabled").checked;
-        const saved=await rpc("saveCertificateTemplate",{uploadTicket,config:state},true);
+        await rpc("saveCertificateTemplate",{uploadTicket,config:state},true);
         opCertificateTemplateImage="";
         toast("บันทึกแม่แบบเกียรติบัตรแล้ว");closeModal();
         if(S.route==="certificates")await loadCertificates(S.seq);
@@ -522,7 +607,6 @@ async function certificateTemplateModal(){
     icons();
   }catch(e){box.innerHTML='<div class="warn">'+esc(e.message||String(e))+'</div>';}
 }
-
 
 /* =========================
    5) WEB PUSH ENROLLMENT
