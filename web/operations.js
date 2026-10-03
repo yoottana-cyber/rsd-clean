@@ -240,18 +240,28 @@ async function saveExcelImport(kind,rows){
    4) CERTIFICATE GENERATOR
    ========================= */
 let opCertificateData=null;
+let opCertificateTemplateImage="";
 async function renderCertificateCenter(seq){
   const month=thaiDay().slice(0,7);
   $("app").innerHTML=
-    heading("เกียรติบัตรอัตโนมัติ 🏅","สร้างเกียรติบัตรรายเดือนจากผลตรวจที่ผ่านเกณฑ์")+
+    heading(
+      "เกียรติบัตรอัตโนมัติ 🏅",
+      "สร้างเกียรติบัตรรายเดือนจากผลตรวจที่ผ่านเกณฑ์",
+      (S.user?.Role==="Admin"?'<button class="btn secondary" id="cert-template-manage"><i data-lucide="layout-template"></i> จัดการแม่แบบ</button>':'')
+    )+
     '<form id="certificate-filter" class="card daily-filter mb-4"><div class="field m-0"><label>เดือน</label><input id="certificate-month" type="month" value="'+month+'" max="'+month+'"></div><button class="btn" type="submit">ประมวลผล</button></form>'+
     '<div id="certificate-content"><div class="card empty">กำลังคำนวณเกียรติบัตร…</div></div>';
+  if($("cert-template-manage"))$("cert-template-manage").onclick=certificateTemplateModal;
   $("certificate-filter").onsubmit=e=>{e.preventDefault();loadCertificates(S.seq).catch(error);};icons();
   await loadCertificates(seq);
 }
 async function loadCertificates(seq=S.seq){
-  const month=$("certificate-month").value,d=await rpc("certificateData",{month},true);if(seq!==S.seq)return;opCertificateData=d;
+  const month=$("certificate-month").value,d=await rpc("certificateData",{month},true);if(seq!==S.seq)return;
+  opCertificateData=d;opCertificateTemplateImage="";
   const groups={ทอง:d.rows.filter(x=>x.medal==="เหรียญทอง"),เงิน:d.rows.filter(x=>x.medal==="เหรียญเงิน"),ทองแดง:d.rows.filter(x=>x.medal==="เหรียญทองแดง")};
+  const templateStatus=d.template?.enabled
+    ? '<span class="pill green">ใช้แม่แบบที่อัปโหลด</span>'
+    : '<span class="pill gray">ใช้แบบมาตรฐานของระบบ</span>';
   $("certificate-content").innerHTML=
     '<div class="exec-kpi-grid">'+
       '<article class="exec-kpi excellent"><span>เหรียญทอง</span><b>'+groups.ทอง.length+'</b><small>ห้องเรียน</small></article>'+
@@ -259,15 +269,42 @@ async function loadCertificates(seq=S.seq){
       '<article class="exec-kpi improve"><span>เหรียญทองแดง</span><b>'+groups.ทองแดง.length+'</b><small>ห้องเรียน</small></article>'+
       '<article class="exec-kpi"><span>รวมได้เกียรติบัตร</span><b>'+d.rows.length+'</b><small>'+esc(d.period?.Label||opMonthText(d.month))+'</small></article>'+
     '</div>'+
-    '<section class="card mt-4"><div class="coverage-section-head"><div><h2>รายชื่อที่ผ่านเกณฑ์</h2><p class="muted">'+esc(opMonthText(d.month))+'</p></div>'+
-      '<div class="flex flex-wrap gap-2"><button class="btn" id="cert-pdf"><i data-lucide="file-down"></i> ดาวน์โหลด PDF ทั้งหมด</button><button class="btn secondary" id="cert-zip"><i data-lucide="archive"></i> ZIP รูป PNG</button></div></div>'+
+    '<section class="card mt-4"><div class="coverage-section-head"><div><h2>รายชื่อที่ผ่านเกณฑ์</h2><p class="muted">'+esc(opMonthText(d.month))+' · '+templateStatus+'</p></div>'+
+      '<div class="flex flex-wrap gap-2">'+
+        (S.user?.Role==="Admin"?'<button class="btn secondary" id="cert-template-manage-inline"><i data-lucide="layout-template"></i> แม่แบบ</button>':'')+
+        '<button class="btn" id="cert-pdf"><i data-lucide="file-down"></i> ดาวน์โหลด PDF ทั้งหมด</button><button class="btn secondary" id="cert-zip"><i data-lucide="archive"></i> ZIP รูป PNG</button></div></div>'+
       (d.rows.length?table(["ห้องเรียน","ระดับ","ปรับปรุง","จำนวนวันตรวจ"],d.rows.map(x=>[esc(x.name),'<b>'+esc(x.medal)+'</b>'+(x.provisional?' <span class="pill gray">ชั่วคราว</span>':''),String(x.improve||0),String(x.inspectionDays||0)])):'<div class="empty">ไม่มีห้องที่ผ่านเกณฑ์ในเดือนนี้</div>')+
     '</section>';
+  if($("cert-template-manage-inline"))$("cert-template-manage-inline").onclick=certificateTemplateModal;
   if($("cert-pdf"))$("cert-pdf").onclick=downloadCertificatesPdf;
   if($("cert-zip"))$("cert-zip").onclick=downloadCertificatesZip;
   icons();
 }
+function certIssueDateText(d){
+  try{return new Date(d.generatedAt||Date.now()).toLocaleDateString("th-TH",{day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"});}
+  catch(e){return "";}
+}
+function certificateVariableValues(row,d){
+  return{
+    className:String(row.name||""),
+    medal:String(row.medal||""),
+    month:opMonthText(d.month),
+    period:String(d.period?.Label||""),
+    issueDate:certIssueDateText(d)
+  };
+}
+function customCertificateHtml(row,d){
+  const t=d.template||{},fields=t.fields||{},values=certificateVariableValues(row,d),image=d.templateImage||opCertificateTemplateImage;
+  const overlays=Object.entries(values).map(([key,value])=>{
+    const f=fields[key];if(!f||f.visible===false||!value)return "";
+    return '<div class="ops-cert-variable" style="left:'+Number(f.x||50)+'%;top:'+Number(f.y||50)+'%;font-size:'+Number(f.size||20)+'px;color:'+esc(f.color||"#17334b")+';font-weight:'+Number(f.weight||400)+'">'+esc(value)+'</div>';
+  }).join("");
+  return '<section class="ops-certificate-sheet ops-certificate-custom">'+
+    '<img class="ops-cert-template-bg" src="'+esc(image)+'" alt="">'+overlays+
+  '</section>';
+}
 function certificateHtml(row,d){
+  if(d.template?.enabled&&(d.templateImage||opCertificateTemplateImage))return customCertificateHtml(row,d);
   const cfg=d.settings||{},period=d.period?.Label||opMonthText(d.month);
   return '<section class="ops-certificate-sheet">'+
     '<div class="ops-cert-border"><div class="ops-cert-inner">'+
@@ -281,11 +318,23 @@ function certificateHtml(row,d){
       '<div class="ops-cert-footer">'+esc(cfg.reportFooter||"RSD Clean")+'</div>'+
     '</div></div></section>';
 }
+async function ensureCertificateTemplateImage(d){
+  if(!d?.template?.enabled)return "";
+  if(d.templateImage)return d.templateImage;
+  if(opCertificateTemplateImage){d.templateImage=opCertificateTemplateImage;return opCertificateTemplateImage;}
+  $("loading-text").textContent="กำลังโหลดแม่แบบเกียรติบัตร…";
+  const image=await rpc("certificateTemplateImage",{},true);
+  d.templateImage=image;opCertificateTemplateImage=image;
+  return image;
+}
 async function certificateCanvas(row,d){
+  if(d.template?.enabled)await ensureCertificateTemplateImage(d);
   await loadCoverageScript("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",()=>!!window.html2canvas);
   const stage=document.createElement("div");stage.className="ops-certificate-stage";stage.innerHTML=certificateHtml(row,d);document.body.appendChild(stage);
   try{
     await document.fonts?.ready?.catch?.(()=>{});
+    const imgs=[...stage.querySelectorAll("img")];
+    await Promise.all(imgs.map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=img.onerror=resolve;})));
     return await html2canvas(stage.firstElementChild,{scale:1.4,useCORS:true,backgroundColor:"#fff"});
   }finally{stage.remove();}
 }
@@ -299,6 +348,7 @@ async function downloadCertificatesPdf(){
   if(!(await confirmProvisionalCertificates(d)))return;
   busy(true,"กำลังสร้างเกียรติบัตร PDF…");
   try{
+    if(d.template?.enabled)await ensureCertificateTemplateImage(d);
     await loadCoverageScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",()=>!!window.jspdf?.jsPDF);
     const {jsPDF}=window.jspdf,pdf=new jsPDF("landscape","mm","a4");
     for(let i=0;i<d.rows.length;i++){
@@ -315,6 +365,7 @@ async function downloadCertificatesZip(){
   if(!(await confirmProvisionalCertificates(d)))return;
   busy(true,"กำลังสร้าง ZIP รูปเกียรติบัตร…");
   try{
+    if(d.template?.enabled)await ensureCertificateTemplateImage(d);
     await loadCoverageScript("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",()=>!!window.JSZip);
     const zip=new JSZip();
     for(let i=0;i<d.rows.length;i++){
@@ -326,6 +377,144 @@ async function downloadCertificatesZip(){
     toast("สร้าง ZIP เกียรติบัตรแล้ว");
   }catch(e){error(e);}finally{busy(false);}
 }
+function certTemplateDefaults(){
+  return{
+    enabled:true,fields:{
+      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700},
+      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700},
+      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500},
+      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400},
+      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400}
+    }
+  };
+}
+function certTemplateSampleValues(){
+  return{className:"มัธยมศึกษาปีที่ 3/3",medal:"เหรียญทอง",month:"ตุลาคม 2569",period:"ภาคเรียนที่ 2 ปีการศึกษา 2569",issueDate:"31 ตุลาคม 2569"};
+}
+async function certificateTemplateModal(){
+  if(S.user?.Role!=="Admin")return;
+  openModal("แม่แบบเกียรติบัตร",'<div id="cert-template-body"><div class="muted">กำลังโหลดแม่แบบ…</div></div>');
+  const box=$("cert-template-body");
+  try{
+    const cfg=await rpc("certificateTemplate",{},true),base=certTemplateDefaults();
+    let image="",localUrl="",selectedFile=null,uploadTicket="";
+    if(cfg.hasImage){
+      try{image=await rpc("certificateTemplateImage",{},true);}catch(e){console.warn(e);}
+    }
+    const state={enabled:cfg.hasImage?cfg.enabled:true,fields:{}};
+    Object.keys(base.fields).forEach(k=>state.fields[k]={...base.fields[k],...(cfg.fields?.[k]||{})});
+    const labels={className:"ชื่อห้องเรียน",medal:"ระดับเหรียญ",month:"เดือน",period:"ภาคเรียน / ปีการศึกษา",issueDate:"วันที่ออกเกียรติบัตร"};
+    const controls=Object.keys(state.fields).map(k=>{
+      const v=state.fields[k];
+      return '<div class="ops-template-field" data-row="'+k+'">'+
+        '<label class="ops-template-visible"><input type="checkbox" data-cert-field="'+k+'" data-cert-prop="visible" '+(v.visible?"checked":"")+'><b>'+labels[k]+'</b></label>'+
+        '<label>X (%)<input type="number" min="0" max="100" step=".5" value="'+v.x+'" data-cert-field="'+k+'" data-cert-prop="x"></label>'+
+        '<label>Y (%)<input type="number" min="0" max="100" step=".5" value="'+v.y+'" data-cert-field="'+k+'" data-cert-prop="y"></label>'+
+        '<label>ขนาด<input type="number" min="10" max="96" value="'+v.size+'" data-cert-field="'+k+'" data-cert-prop="size"></label>'+
+        '<label>สี<input type="color" value="'+esc(v.color)+'" data-cert-field="'+k+'" data-cert-prop="color"></label>'+
+        '<label>น้ำหนัก<select data-cert-field="'+k+'" data-cert-prop="weight">'+[400,500,600,700].map(w=>'<option value="'+w+'" '+(Number(v.weight)===w?"selected":"")+'>'+w+'</option>').join("")+'</select></label>'+
+      '</div>';
+    }).join("");
+    box.innerHTML=
+      '<div class="warn mb-4"><b>แนะนำ:</b> ใช้ภาพ A4 แนวนอน อัตราส่วนประมาณ 1.414:1 (PNG/JPG ไม่เกิน 8 MB) โดยใส่กรอบ โลโก้ ลายเซ็น และข้อความคงที่ไว้ในภาพแม่แบบ แล้วให้ระบบเติมเฉพาะข้อมูลที่เปลี่ยนแปลง</div>'+
+      '<div class="ops-template-layout">'+
+        '<div>'+
+          '<div class="ops-template-preview" id="cert-template-preview">'+
+            '<div class="ops-template-empty" id="cert-template-empty">อัปโหลดภาพแม่แบบเพื่อเริ่มตั้งค่า</div>'+
+            '<img id="cert-template-image" alt="แม่แบบเกียรติบัตร" class="'+(image?"":"hidden")+'" src="'+esc(image)+'">'+
+            '<div id="cert-template-overlays"></div>'+
+          '</div>'+
+          '<p class="muted mt-2">ลากข้อความบน Preview เพื่อจัดตำแหน่งได้โดยตรง หรือกรอก X/Y ด้านล่าง</p>'+
+        '</div>'+
+        '<div class="ops-template-tools">'+
+          '<div class="field"><label>ภาพแม่แบบ</label><input id="cert-template-file" type="file" accept="image/png,image/jpeg"><small class="muted">PNG/JPG · สูงสุด 8 MB</small></div>'+
+          '<label class="coverage-toggle"><input id="cert-template-enabled" type="checkbox" '+(state.enabled?"checked":"")+'><span><b>ใช้แม่แบบนี้ในการสร้างเกียรติบัตร</b><small>ปิดได้โดยไม่ลบไฟล์และตำแหน่งที่ตั้งไว้</small></span></label>'+
+          '<div class="ops-template-fields">'+controls+'</div>'+
+          '<div class="flex flex-wrap gap-2"><button class="btn" id="cert-template-save"><i data-lucide="save"></i> บันทึกแม่แบบ</button>'+
+            (cfg.hasImage?'<button class="btn danger" id="cert-template-delete"><i data-lucide="trash-2"></i> ลบแม่แบบ</button>':'')+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    const sample=certTemplateSampleValues();
+    const render=()=>{
+      const overlay=$("cert-template-overlays");if(!overlay)return;
+      overlay.innerHTML=Object.entries(sample).map(([k,value])=>{
+        const v=state.fields[k];if(!v?.visible)return "";
+        return '<div class="ops-template-drag" data-field="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+v.size+'px;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(value)+'</div>';
+      }).join("");
+      wireDrag();
+    };
+    const syncInputs=(field)=>{
+      const v=state.fields[field];
+      box.querySelectorAll('[data-cert-field="'+field+'"]').forEach(el=>{
+        const p=el.dataset.certProp;
+        if(p==="visible")el.checked=!!v.visible;
+        else if(p==="color")el.value=v.color;
+        else el.value=v[p];
+      });
+    };
+    const wireDrag=()=>{
+      box.querySelectorAll(".ops-template-drag").forEach(el=>{
+        el.onpointerdown=e=>{
+          e.preventDefault();el.setPointerCapture?.(e.pointerId);
+          const field=el.dataset.field,preview=$("cert-template-preview");
+          const move=ev=>{
+            const r=preview.getBoundingClientRect();
+            state.fields[field].x=Math.round(Math.min(100,Math.max(0,(ev.clientX-r.left)/r.width*100))*10)/10;
+            state.fields[field].y=Math.round(Math.min(100,Math.max(0,(ev.clientY-r.top)/r.height*100))*10)/10;
+            el.style.left=state.fields[field].x+"%";el.style.top=state.fields[field].y+"%";syncInputs(field);
+          };
+          const up=()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",up);};
+          window.addEventListener("pointermove",move);window.addEventListener("pointerup",up,{once:true});
+        };
+      });
+    };
+    box.querySelectorAll("[data-cert-field]").forEach(el=>{
+      el.oninput=()=>{
+        const k=el.dataset.certField,p=el.dataset.certProp;
+        state.fields[k][p]=p==="visible"?el.checked:p==="color"?el.value:Number(el.value);
+        render();
+      };
+    });
+    $("cert-template-file").onchange=()=>{
+      const file=$("cert-template-file").files?.[0];if(!file)return;
+      if(!["image/png","image/jpeg"].includes(file.type))return error(Error("รองรับเฉพาะ PNG หรือ JPG"));
+      if(file.size>8*1024*1024)return error(Error("ไฟล์แม่แบบต้องไม่เกิน 8 MB"));
+      if(localUrl)URL.revokeObjectURL(localUrl);
+      selectedFile=file;uploadTicket="";localUrl=URL.createObjectURL(file);
+      $("cert-template-image").src=localUrl;$("cert-template-image").classList.remove("hidden");$("cert-template-empty").classList.add("hidden");render();
+    };
+    if(image){$("cert-template-empty").classList.add("hidden");render();}
+    else render();
+    $("cert-template-save").onclick=async()=>{
+      busy(true,selectedFile?"กำลังอัปโหลดแม่แบบ…":"กำลังบันทึกแม่แบบ…");
+      try{
+        if(selectedFile&&!uploadTicket){
+          const up=await rpc("certificateTemplateUploadStart",{mime:selectedFile.type,size:selectedFile.size,origin:location.origin},true);
+          const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
+          let res;
+          try{
+            res=await fetch(up.url,{method:"PUT",headers:{"Content-Type":selectedFile.type,"Content-Range":"bytes 0-"+(selectedFile.size-1)+"/"+selectedFile.size},body:selectedFile,signal:controller.signal});
+          }finally{clearTimeout(timer);}
+          if(!(res.status===200||res.status===201))throw Error("อัปโหลดแม่แบบไม่สำเร็จ (HTTP "+res.status+")");
+          uploadTicket=up.ticket;
+        }
+        state.enabled=$("cert-template-enabled").checked;
+        const saved=await rpc("saveCertificateTemplate",{uploadTicket,config:state},true);
+        opCertificateTemplateImage="";
+        toast("บันทึกแม่แบบเกียรติบัตรแล้ว");closeModal();
+        if(S.route==="certificates")await loadCertificates(S.seq);
+      }catch(e){error(e);}finally{busy(false);}
+    };
+    if($("cert-template-delete"))$("cert-template-delete").onclick=async()=>{
+      const ok=await Swal.fire({icon:"warning",title:"ลบแม่แบบเกียรติบัตร?",text:"ระบบจะกลับไปใช้รูปแบบมาตรฐาน",showCancelButton:true,confirmButtonText:"ลบแม่แบบ",cancelButtonText:"ยกเลิก"});
+      if(!ok.isConfirmed)return;
+      try{await rpc("deleteCertificateTemplate",{},true);opCertificateTemplateImage="";toast("ลบแม่แบบแล้ว");closeModal();if(S.route==="certificates")await loadCertificates(S.seq);}catch(e){error(e);}
+    };
+    icons();
+  }catch(e){box.innerHTML='<div class="warn">'+esc(e.message||String(e))+'</div>';}
+}
+
 
 /* =========================
    5) WEB PUSH ENROLLMENT
