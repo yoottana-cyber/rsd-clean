@@ -342,11 +342,15 @@ const adminTables = {
   }
   const dutyDayOptions = [
     [1, "จันทร์", "จ."], [2, "อังคาร", "อ."], [3, "พุธ", "พ."], [4, "พฤหัสบดี", "พฤ."], [5, "ศุกร์", "ศ."],
+    [6, "เสาร์", "ส."], [7, "อาทิตย์", "อา."],
   ];
+  function activeDutyDayOptions(){
+    return dutyDayOptions.filter(([n])=>n<=5||(n===6&&S.config?.saturdayDutyEnabled===true)||(n===7&&S.config?.sundayDutyEnabled===true));
+  }
   function dutyDaysArray(value) {
     const raw = String(value || "").trim();
     if (!raw) return [1, 2, 3, 4, 5];
-    return [...new Set(raw.split(/[^1-5]+/).filter(Boolean).map(Number))].sort();
+    return [...new Set(raw.split(/[^1-7]+/).filter(Boolean).map(Number))].sort();
   }
   function dutyDaysLabel(value) {
     const days = dutyDaysArray(value);
@@ -355,8 +359,8 @@ const adminTables = {
   }
   // assignment-ui: area-first-v2
   let assignmentSelectedDutyDay = (() => {
-    const d = new Date().getDay();
-    return d >= 1 && d <= 5 ? d : 1;
+    const raw = new Date().getDay(),d=raw===0?7:raw;
+    return d>=1&&d<=7?d:1;
   })();
   function assignmentAreaSort(a, b) {
     return String(a.AreaName || "").localeCompare(String(b.AreaName || ""), "th", {
@@ -365,6 +369,8 @@ const adminTables = {
     });
   }
   function assignmentContent() {
+    const availableDays=activeDutyDayOptions();
+    if(!availableDays.some(([n])=>n===assignmentSelectedDutyDay))assignmentSelectedDutyDay=availableDays[0]?.[0]||1;
     const m = S.master,
       inspectors = m.Users
         .filter((u) => u.Role === "Inspector")
@@ -387,7 +393,7 @@ const adminTables = {
     const activeInspectorCount = new Set(dayAssignments.map((a) => a.UserID)).size;
     const unassignedCount = Math.max(0, areas.length - assignedAreaCount);
 
-    const dayTabs = dutyDayOptions
+    const dayTabs = availableDays
       .map(
         ([n, full, short]) =>
           '<button type="button" class="assignment-day-tab ' +
@@ -493,7 +499,7 @@ const adminTables = {
       '</b></div><div class="assignment-stat"><span>ผู้ตรวจเข้าเวร</span><b>' +
       activeInspectorCount +
       "</b></div></div>" +
-      '<div class="assignment-export-bar"><div><b>ตารางเวรประจำสัปดาห์</b><small>ส่งออกเวร จ.–ศ. ครบทุกพื้นที่</small></div><div class="assignment-export-actions"><button type="button" class="btn secondary" id="assignment-print-roster">🖨 พิมพ์ / PDF</button><button type="button" class="btn secondary" id="assignment-export-csv">⬇ ส่งออก CSV</button></div></div>' +
+      '<div class="assignment-export-bar"><div><b>ตารางเวรประจำสัปดาห์</b><small>ส่งออกเวรตามวันที่เปิดใช้งานครบทุกพื้นที่</small></div><div class="assignment-export-actions"><button type="button" class="btn secondary" id="assignment-print-roster">🖨 พิมพ์ / PDF</button><button type="button" class="btn secondary" id="assignment-export-csv">⬇ ส่งออก CSV</button></div></div>' +
       '<div class="assignment-toolbar area-first-toolbar"><div class="search-box assignment-search"><i data-lucide="search"></i><input id="assignment-area-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / ผู้ตรวจ…"></div>' +
       '<label class="assignment-filter-check"><input id="assignment-only-unassigned" type="checkbox"> เฉพาะพื้นที่ยังว่าง</label>' +
       '<label class="assignment-filter-check"><input id="assignment-only-assigned" type="checkbox"> เฉพาะพื้นที่มีเวร</label><button type="button" class="btn secondary" id="assignment-copy-days">⧉ คัดลอกไปวันอื่น</button><button type="button" class="btn assignment-copy-all" id="assignment-copy-all">⚡ ใช้เวรนี้ทุกวัน</button><button type="button" class="btn secondary assignment-delete-tools" id="assignment-delete-tools">🗑 ลบเวรเร็ว</button></div>' +
@@ -594,7 +600,7 @@ const adminTables = {
       no:String(index+1).padStart(2,"0"),
       area:area.AreaName||"—",
       classroom:masterLabel("ResponsibleClassroomID",area.ResponsibleClassroomID)||"—",
-      days:[1,2,3,4,5].map(day=>(byAreaDay.get(String(area.AreaID)+"|"+day)||[]).join(", ")||"—")
+      days:activeDutyDayOptions().map(([day])=>(byAreaDay.get(String(area.AreaID)+"|"+day)||[]).join(", ")||"—")
     }));
   }
 
@@ -609,6 +615,7 @@ const adminTables = {
       dateStyle:"medium",
       timeStyle:"short"
     });
+    const activeDays=activeDutyDayOptions(),dayNames=activeDays.map(x=>x[1]);
     const body=rows.map(r=>
       "<tr><td class='center'>"+esc(r.no)+"</td><td>"+esc(r.area)+"</td><td>"+esc(r.classroom)+"</td>"+
       r.days.map(v=>"<td>"+esc(v)+"</td>").join("")+"</tr>"
@@ -623,8 +630,8 @@ const adminTables = {
       'footer{margin-top:8px;display:flex;justify-content:space-between;gap:10px;font-size:9px;color:#7b8d94}'+
       '@media print{.toolbar{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
       '</style></head><body><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button><button onclick="window.close()">ปิด</button></div>'+
-      '<header><h1>ตารางเวรตรวจความสะอาดและเขตพื้นที่ประจำสัปดาห์</h1><h2>โรงเรียนรัษฎา</h2><div class="meta">RSD Clean · จันทร์–ศุกร์ · พื้นที่ทั้งหมด '+rows.length+' พื้นที่</div></header>'+
-      '<table><thead><tr><th class="no">ลำดับ</th><th class="area">พื้นที่</th><th class="room">ห้องรับผิดชอบ</th><th class="day">จันทร์</th><th class="day">อังคาร</th><th class="day">พุธ</th><th class="day">พฤหัสบดี</th><th class="day">ศุกร์</th></tr></thead><tbody>'+body+'</tbody></table>'+
+      '<header><h1>ตารางเวรตรวจความสะอาดและเขตพื้นที่ประจำสัปดาห์</h1><h2>โรงเรียนรัษฎา</h2><div class="meta">RSD Clean · '+esc(dayNames.join(" · "))+' · พื้นที่ทั้งหมด '+rows.length+' พื้นที่</div></header>'+
+      '<table><thead><tr><th class="no">ลำดับ</th><th class="area">พื้นที่</th><th class="room">ห้องรับผิดชอบ</th>'+dayNames.map(n=>'<th class="day">'+esc(n)+'</th>').join("")+'</tr></thead><tbody>'+body+'</tbody></table>'+
       '<footer><span>ระบบ RSD Clean · โรงเรียนรัษฎา</span><span>จัดทำเมื่อ '+esc(generated)+' น.</span></footer></body></html>';
     win.document.open();
     win.document.write(html);
@@ -636,7 +643,7 @@ const adminTables = {
     const rows=assignmentRosterMatrix();
     if(!rows.length)return error(new Error("ยังไม่มีข้อมูลพื้นที่สำหรับส่งออก"));
     const cell=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
-    const header=["ลำดับ","พื้นที่","ห้องรับผิดชอบ","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์"];
+    const header=["ลำดับ","พื้นที่","ห้องรับผิดชอบ",...activeDutyDayOptions().map(x=>x[1])];
     const csv=[header,...rows.map(r=>[r.no,r.area,r.classroom,...r.days])]
       .map(row=>row.map(cell).join(","))
       .join("\r\n");
@@ -767,12 +774,12 @@ const adminTables = {
     const n=Number(sourceDay),
       dayName=dutyDayOptions.find(d=>d[0]===n)?.[1]||String(n),
       sourceRows=S.master.Assignments.filter(a=>dutyDaysArray(a.Days).includes(n)),
-      targets=[1,2,3,4,5].filter(d=>d!==n);
+      targets=activeDutyDayOptions().map(x=>x[0]).filter(d=>d!==n);
     if(!sourceRows.length)return error(new Error("วัน"+dayName+"ยังไม่มีเวรให้คัดลอก"));
     const ok=await Swal.fire({
       icon:"question",
       title:"ใช้เวรวัน"+dayName+"เป็นเวรทุกวัน?",
-      html:"จะทำให้วันอื่น จ.–ศ. มีผู้ตรวจและพื้นที่ <b>เหมือนวัน"+esc(dayName)+"</b><br><span class='muted'>เวรเดิมของวันปลายทางจะถูกแทนที่ แต่เวรวัน"+esc(dayName)+"จะไม่เปลี่ยน</span>",
+      html:"จะทำให้วันอื่นที่เปิดใช้งานมีผู้ตรวจและพื้นที่ <b>เหมือนวัน"+esc(dayName)+"</b><br><span class='muted'>เวรเดิมของวันปลายทางจะถูกแทนที่ แต่เวรวัน"+esc(dayName)+"จะไม่เปลี่ยน</span>",
       showCancelButton:true,
       confirmButtonText:"ใช้เวรนี้ทุกวัน",
       cancelButtonText:"ยกเลิก"
@@ -782,7 +789,7 @@ const adminTables = {
     try{
       const r=await rpc("copyDutyAssignments",{sourceDay:n,targetDays:targets});
       S.master=await rpc("master",{},true);
-      toast("ตั้งเวรเหมือนวัน"+dayName+"ครบ จ.–ศ. แล้ว");
+      toast("ตั้งเวรเหมือนวัน"+dayName+"ครบทุกวันที่เปิดใช้งานแล้ว");
       assignmentContent();
     }catch(e){error(e);}finally{busy(false);}
   }
@@ -793,7 +800,7 @@ const adminTables = {
       sourceRows=S.master.Assignments.filter(a=>dutyDaysArray(a.Days).includes(n));
     if(!sourceRows.length)return error(new Error("วัน"+dayName+"ยังไม่มีเวรให้คัดลอก"));
 
-    const checks=dutyDayOptions
+    const checks=activeDutyDayOptions()
       .filter(([d])=>d!==n)
       .map(([d,full])=>'<label class="copy-duty-day"><input type="checkbox" name="targetDay" value="'+d+'"><span><b>'+esc(full)+'</b><small>แทนที่ด้วยเวรวัน'+esc(dayName)+'</small></span></label>')
       .join("");
