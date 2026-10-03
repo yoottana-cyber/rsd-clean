@@ -1941,7 +1941,7 @@ async function areaMapLayout(env,u){
   summary.done=scheduled.filter(x=>x.Status==="ตรวจแล้ว").length;
   summary.skipped=scheduled.filter(x=>x.Status==="งดตรวจ").length;
   summary.resolved=summary.done+summary.skipped;
-  summary.pending=scheduled.filter(x=>x.Status==="รอตรวจ").length;
+  summary.pending=isHoliday?0:scheduled.filter(x=>x.Status==="รอตรวจ").length;
   summary.approvalPending=scheduled.filter(x=>x.ApprovalStatus==="รอรับรอง").length;
   summary.substitute=scheduled.filter(x=>x.HasSubstitute).length;
   return{
