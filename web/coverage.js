@@ -260,10 +260,22 @@ async function loadCoverageHistory(seq=S.seq){
       '</div></section>'+
     '</div>'+
     '<section class="card mt-5"><div class="flex flex-wrap justify-between items-center gap-3 mb-4"><h2>รายการย้อนหลัง</h2><button class="btn secondary" id="history-export">ส่งออกช่วงนี้</button></div>'+
-      (d.rows.length?table(["วันที่","ห้องเรียน","พื้นที่","สถานะ/ผล","หมายเหตุ","รับรอง","รูป"],d.rows.map((x,idx)=>[
-        coverageDateText(x.Date),esc(x.ClassName),esc(x.AreaName),coverageStatusPill(x.Status,x.Score)+(x.SkipReason?'<br><small>'+esc(x.SkipReason)+'</small>':''),
-        esc(x.Notes||"—"),coverageApprovalPill(x.ApprovalStatus),x.PhotoLinks?.length?'<button class="btn small secondary history-photo" data-index="'+idx+'">ดูรูป</button>':'—'
-      ])):'<div class="empty">ไม่พบข้อมูลในช่วงนี้</div>')+
+      (d.rows.length?table(
+        ["วันที่","ห้องเรียน","พื้นที่","สถานะ/ผล","หมายเหตุ","รับรอง","รูป"].concat(S.user?.Role==="Admin"?["แก้ไข"]:[]),
+        d.rows.map((x,idx)=>{
+          const base=[
+            coverageDateText(x.Date),
+            esc(x.ClassName),
+            esc(x.AreaName),
+            coverageStatusPill(x.Status,x.Score)+(x.SkipReason?'<br><small>'+esc(x.SkipReason)+'</small>':''),
+            esc(x.Notes||"—")+(x.AdminEditedBy?'<br><small class="muted">แก้ย้อนหลังโดย '+esc(x.AdminEditedBy)+(x.AdminEditReason?' · '+esc(x.AdminEditReason):'')+'</small>':''),
+            coverageApprovalPill(x.ApprovalStatus),
+            x.PhotoLinks?.length?'<button class="btn small secondary history-photo" data-index="'+idx+'">ดูรูป</button>':'—'
+          ];
+          if(S.user?.Role==="Admin")base.push('<button class="btn small secondary history-edit" data-index="'+idx+'"><i data-lucide="pencil"></i> แก้ไข</button>');
+          return base;
+        })
+      ):'<div class="empty">ไม่พบข้อมูลในช่วงนี้</div>')+
     '</section>';
   S.charts.forEach(c=>c.destroy());S.charts=[];
   if(window.Chart&&$("history-chart")){
@@ -271,12 +283,111 @@ async function loadCoverageHistory(seq=S.seq){
     S.charts.push(new Chart($("history-chart"),{type:"line",data:{labels:tr.map(x=>coverageDateText(x.date)),datasets:[{label:"คะแนน",data:tr.map(x=>x.status==="ตรวจแล้ว"?x.score:null),borderColor:"#0f766e",backgroundColor:"rgba(15,118,110,.12)",fill:true,tension:.3,spanGaps:true}]},options:{maintainAspectRatio:false,scales:{y:{min:0,max:3,ticks:{stepSize:1}},x:{ticks:{maxTicksLimit:8}}},plugins:{legend:{display:false}}}}));
   }
   document.querySelectorAll(".history-photo").forEach(b=>b.onclick=()=>coveragePhoto(d.rows[Number(b.dataset.index)]));
+  document.querySelectorAll(".history-edit").forEach(b=>b.onclick=()=>adminEditInspectionModal(d.rows[Number(b.dataset.index)],()=>loadCoverageHistory(S.seq)));
   $("history-export").onclick=()=>{
     try{sessionStorage.setItem("rsd-export-prefill",JSON.stringify({start:d.start,end:d.end,type:d.type,id:d.id}));}catch(e){}
     location.hash="exports";route();
   };
   icons();
 }
+function adminEditInspectionModal(row,onSaved){
+  if(S.user?.Role!=="Admin")return;
+  const cfg=S.config||{},labels=cfg.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"},reasons=cfg.skipReasons||["ผู้ตรวจลา","กิจกรรมโรงเรียน","ฝนตก/สภาพอากาศ","พื้นที่ปิด/เข้าไม่ได้","เหตุจำเป็นอื่น"];
+  openModal(
+    "แก้ไขผลตรวจย้อนหลัง",
+    '<div class="warn mb-4"><b>Admin Correction</b><br>การแก้ไขนี้จะถูกบันทึกใน Audit Log พร้อมค่าก่อนและหลังการแก้ไข</div>'+
+    '<div class="card mb-4">'+
+      '<div><b>'+esc(row.ClassName||"—")+'</b> · '+esc(row.AreaName||"—")+'</div>'+
+      '<div class="muted mt-1">วันที่ '+esc(coverageDateText(row.Date))+' · ผู้ตรวจเดิม '+esc(row.CompletedBy||"—")+'</div>'+
+    '</div>'+
+    '<form id="admin-edit-inspection-form">'+
+      '<div class="coverage-form-grid">'+
+        '<div class="field"><label>สถานะ</label><select name="status">'+
+          '<option value="ตรวจแล้ว" '+(row.Status==="ตรวจแล้ว"?"selected":"")+'>ตรวจแล้ว</option>'+
+          '<option value="งดตรวจ" '+(row.Status==="งดตรวจ"?"selected":"")+'>งดตรวจ / ไม่สามารถตรวจได้</option>'+
+          '<option value="รอตรวจ" '+(row.Status==="รอตรวจ"?"selected":"")+'>รอตรวจ</option>'+
+        '</select></div>'+
+        '<div class="field" id="admin-edit-score-field"><label>ระดับประเมิน</label><select name="score">'+
+          '<option value="">— เลือก —</option>'+
+          [3,2,1].map(n=>'<option value="'+n+'" '+(Number(row.Score)===n?"selected":"")+'>'+esc(labels[String(n)]||String(n))+' — '+n+' คะแนน</option>').join("")+
+        '</select></div>'+
+        '<div class="field coverage-span-2 hidden" id="admin-edit-skip-field"><label>เหตุผลงดตรวจ</label><select name="skipReason"><option value="">— เลือกเหตุผล —</option>'+
+          reasons.map(x=>'<option value="'+esc(x)+'" '+(row.SkipReason===x?"selected":"")+'>'+esc(x)+'</option>').join("")+
+        '</select></div>'+
+        '<div class="field coverage-span-2"><label>หมายเหตุผลตรวจ</label><textarea name="notes" rows="4" maxlength="2000">'+esc(row.Notes||"")+'</textarea></div>'+
+        '<div class="field coverage-span-2"><label>เหตุผลที่ Admin แก้ไขย้อนหลัง <span class="text-red-600">*</span></label><textarea name="reason" rows="3" maxlength="500" required placeholder="เช่น ผู้ตรวจเลือกคะแนนผิด / แก้ตามหลักฐานการตรวจจริง"></textarea></div>'+
+      '</div>'+
+      '<div class="warn mt-3">เมื่อ Admin บันทึกผลที่เป็น “ตรวจแล้ว” หรือ “งดตรวจ” ระบบจะถือว่า <b>รับรองแล้ว</b> โดย Admin อัตโนมัติ</div>'+
+      '<button class="btn w-full mt-4" type="submit"><i data-lucide="save"></i> บันทึกการแก้ไขย้อนหลัง</button>'+
+    '</form>'
+  );
+  const form=$("admin-edit-inspection-form");
+  const toggle=()=>{
+    const status=form.elements.status.value,isDone=status==="ตรวจแล้ว",isSkip=status==="งดตรวจ";
+    $("admin-edit-score-field")?.classList.toggle("hidden",!isDone);
+    $("admin-edit-skip-field")?.classList.toggle("hidden",!isSkip);
+    form.elements.score.required=isDone;
+    form.elements.skipReason.required=isSkip;
+    if(!isDone)form.elements.score.value="";
+    if(!isSkip)form.elements.skipReason.value="";
+  };
+  form.elements.status.onchange=toggle;toggle();
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    const f=form.elements,payload={
+      id:row.InspectionID,
+      version:Number(row.Version||0),
+      status:f.status.value,
+      score:f.score.value?Number(f.score.value):0,
+      skipReason:f.skipReason.value||"",
+      notes:f.notes.value||"",
+      reason:f.reason.value.trim()
+    };
+    const ok=await Swal.fire({
+      icon:"warning",
+      title:"ยืนยันแก้ไขผลตรวจย้อนหลัง?",
+      html:"<b>"+esc(row.ClassName)+" · "+esc(row.AreaName)+"</b><br>"+esc(coverageDateText(row.Date))+"<br><br>การแก้ไขจะถูกบันทึกใน Audit Log",
+      showCancelButton:true,
+      confirmButtonText:"ยืนยันแก้ไข",
+      cancelButtonText:"ยกเลิก"
+    });
+    if(!ok.isConfirmed)return;
+    try{
+      await rpc("adminEditInspection",payload,true);
+      toast("แก้ไขผลตรวจย้อนหลังแล้ว");
+      closeModal();
+      if(typeof onSaved==="function")await onSaved();
+    }catch(err){error(err);}
+  };
+  icons();
+}
+async function adminHistoricalDayEditModal(date){
+  if(S.user?.Role!=="Admin")return;
+  openModal("แก้ไขผลตรวจย้อนหลัง · "+coverageDateText(date),'<div id="admin-day-edit-body"><div class="muted">กำลังโหลดรายการ…</div></div>');
+  const box=$("admin-day-edit-body");
+  try{
+    const d=await rpc("dailyControl",{date},true),rows=d.items||[];
+    box.innerHTML=rows.length
+      ? '<div class="ops-control-list">'+rows.map((x,idx)=>
+          '<article class="ops-control-card">'+
+            '<div class="ops-control-main"><div class="ops-control-title"><span>'+esc(x.ClassName)+'</span><h3>'+esc(x.AreaName)+'</h3></div><div>'+coverageStatusPill(x.Status,x.Score)+'</div></div>'+
+            '<div class="ops-control-meta"><span>ผู้ตรวจ '+esc(x.CompletedBy||((x.Inspectors||[]).map(v=>v.Name).join(", ")||"—"))+'</span>'+
+              (x.AdminEditedBy?'<span>แก้ย้อนหลังโดย '+esc(x.AdminEditedBy)+'</span>':'')+
+            '</div>'+
+            '<div class="ops-control-actions"><button class="btn small secondary day-edit-inspection" data-index="'+idx+'"><i data-lucide="pencil"></i> แก้ไขผล</button></div>'+
+          '</article>'
+        ).join("")+'</div>'
+      : '<div class="empty">ไม่พบรายการผลตรวจในวันที่เลือก</div>';
+    box.querySelectorAll(".day-edit-inspection").forEach(b=>b.onclick=()=>{
+      const row=rows[Number(b.dataset.index)];
+      adminEditInspectionModal(row,async()=>{
+        await adminHistoricalDayEditModal(date);
+      });
+    });
+    icons();
+  }catch(e){box.innerHTML='<div class="warn">'+esc(e.message||String(e))+'</div>';}
+}
+
 function coverageBar(label,n,total,cls){
   const pct=total?Math.round(Number(n||0)*100/total):0;
   return '<div class="coverage-bar '+cls+'"><div><span>'+label+'</span><b>'+n+' · '+pct+'%</b></div><div class="coverage-bar-track"><i style="width:'+pct+'%"></i></div></div>';
