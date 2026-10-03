@@ -13,7 +13,8 @@ const adminTables = {
   };
   let adminTab = "Users",
     reportData = null,
-    dailyReportData = null;
+    dailyReportData = null,
+    executivePeriodId = "";
   function wireTextFilter(inputId, scopeSelector) {
     const input=$(inputId),scope=document.querySelector(scopeSelector);
     if(!input||!scope)return;
@@ -855,17 +856,18 @@ const adminTables = {
     await loadExecutiveDashboard(seq);
   }
   async function loadExecutiveDashboard(seq=S.seq){
-    const d=await rpc("executiveDashboard",{},true);
+    const d=await rpc("executiveDashboard",{periodId:executivePeriodId},true);
     if(seq!==S.seq)return;
     if(d.settings){S.config=d.settings;try{localStorage.setItem("rsd-config-cache",JSON.stringify(d.settings));}catch(e){}}
     const t=d.todayStats||{},w=d.currentWeek||{},pw=d.previousWeek||{},m=d.currentMonth||{},pm=d.previousMonth||{},l=d.last30||{},labels=d.settings?.scoreLabels||S.config?.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
-    const watch=d.watchAreas||[],leaders=d.leaders||[];
+    const watch=d.watchAreas||[],leaders=d.leaders||[],isTodayRef=d.referenceDate===d.today,refLabel=isTodayRef?"วันนี้":"วันที่อ้างอิง";
     const statusClass=!t.scheduled?"neutral":t.pending?"warning":"good";
     const statusText=!t.scheduled?"ไม่มีงานวันนี้":t.pending?"ยังมีงานรอตรวจ":"ตรวจครบแล้ว";
     $("executive-content").innerHTML=
+      '<section class="card exec-period-selector mb-4"><div><span class="muted">บริบทข้อมูล</span><b>'+(d.period?esc(d.period.Label):'ไม่ได้กำหนดภาคเรียน')+'</b></div><select id="exec-period-select" class="control"><option value="">Active / ปัจจุบัน</option>'+(d.periods||[]).map(x=>'<option value="'+esc(x.PeriodID)+'" '+(d.period?.PeriodID===x.PeriodID?'selected':'')+'>'+esc(x.Label)+(x.IsActive?' · Active':'')+'</option>').join("")+'</select></section>'+
       '<section class="exec-hero '+statusClass+'">'+
-        '<div><span class="exec-eyebrow">EXECUTIVE SUMMARY · '+esc(d.today)+'</span><h2>'+esc(statusText)+'</h2><p>'+esc(execSummaryText(d))+'</p></div>'+
-        '<div class="exec-hero-rate"><span>อัตราตรวจครบวันนี้</span><b>'+execPct(t.completionRate)+'</b><small>'+t.done+' / '+t.scheduled+' พื้นที่</small></div>'+
+        '<div><span class="exec-eyebrow">EXECUTIVE SUMMARY · '+esc(d.referenceDate||d.today)+'</span><h2>'+esc(statusText)+'</h2><p>'+esc(execSummaryText(d))+'</p></div>'+
+        '<div class="exec-hero-rate"><span>อัตราตรวจครบ'+refLabel+'</span><b>'+execPct(t.completionRate)+'</b><small>'+t.done+' / '+t.scheduled+' พื้นที่</small></div>'+
       '</section>'+
       '<div class="exec-kpi-grid">'+
         '<article class="exec-kpi"><span>คะแนนเฉลี่ย 30 วัน</span><b>'+execScore(l.averageScore)+'</b><small>จากคะแนนเต็ม 3</small></article>'+
@@ -895,7 +897,7 @@ const adminTables = {
           ).join("")+'</div>':'<div class="empty">ยังไม่มีข้อมูลเพียงพอ</div>')+
         '</section>'+
       '</div>'+
-      '<section class="card exec-quality-card"><div class="exec-section-title"><div><span class="muted">วันนี้</span><h2>สัดส่วนผลประเมิน</h2></div><span class="muted">อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</span></div>'+
+      '<section class="card exec-quality-card"><div class="exec-section-title"><div><span class="muted">'+refLabel+'</span><h2>สัดส่วนผลประเมิน</h2></div><span class="muted">อัปเดต '+esc(new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"}))+' น.</span></div>'+
         '<div class="exec-quality-grid">'+
           '<div class="excellent"><span>'+esc(labels["3"])+'</span><b>'+t.excellent+'</b></div>'+
           '<div class="medium"><span>'+esc(labels["2"])+'</span><b>'+t.medium+'</b></div>'+
@@ -904,6 +906,10 @@ const adminTables = {
         '</div>'+
       '</section>';
 
+    if($("exec-period-select"))$("exec-period-select").onchange=()=>{
+      executivePeriodId=$("exec-period-select").value;
+      loadExecutiveDashboard(S.seq).catch(error);
+    };
     S.charts.forEach(c=>c.destroy());S.charts=[];
     if(window.Chart){
       Chart.defaults.font.family="Kanit";
