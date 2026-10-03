@@ -1244,6 +1244,7 @@ async function dailyControl(env,u,p){
     total:items.length,
     done:items.filter(x=>x.Status==="ตรวจแล้ว").length,
     skipped:items.filter(x=>x.Status==="งดตรวจ").length,
+    resolved:items.filter(x=>x.Status==="ตรวจแล้ว"||x.Status==="งดตรวจ").length,
     pending:items.filter(x=>x.Status==="รอตรวจ").length,
     approvalPending:items.filter(x=>x.ApprovalStatus==="รอรับรอง").length,
     substitute:items.filter(x=>x.HasSubstitute).length
