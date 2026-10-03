@@ -1862,3 +1862,16 @@ tbody tr:hover td{background:#fbfefe}
   #assignment-copy-days{width:100%}
   .copy-duty-days{grid-template-columns:1fr}
 }
+
+
+/* assignment-roster-export-v1 */
+.assignment-export-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;padding:12px 14px;border:1px solid #d5e8ec;border-radius:15px;background:linear-gradient(135deg,#f4fbfc,#ffffff)}
+.assignment-export-bar>div:first-child{display:flex;flex-direction:column;min-width:0}
+.assignment-export-bar b{font-size:13px;color:#244a57}
+.assignment-export-bar small{font-size:10px;color:#7b8f97;margin-top:2px}
+.assignment-export-actions{display:flex;flex-wrap:wrap;gap:7px;justify-content:flex-end}
+@media(max-width:700px){
+  .assignment-export-bar{align-items:stretch;flex-direction:column}
+  .assignment-export-actions{display:grid;grid-template-columns:1fr 1fr}
+  .assignment-export-actions .btn{width:100%;justify-content:center}
+}

@@ -490,6 +490,7 @@ const adminTables = {
       '</b></div><div class="assignment-stat"><span>ผู้ตรวจเข้าเวร</span><b>' +
       activeInspectorCount +
       "</b></div></div>" +
+      '<div class="assignment-export-bar"><div><b>ตารางเวรประจำสัปดาห์</b><small>ส่งออกเวร จ.–ศ. ครบทุกพื้นที่</small></div><div class="assignment-export-actions"><button type="button" class="btn secondary" id="assignment-print-roster">🖨 พิมพ์ / PDF</button><button type="button" class="btn secondary" id="assignment-export-csv">⬇ ส่งออก CSV</button></div></div>' +
       '<div class="assignment-toolbar area-first-toolbar"><div class="search-box assignment-search"><i data-lucide="search"></i><input id="assignment-area-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / ผู้ตรวจ…"></div>' +
       '<label class="assignment-filter-check"><input id="assignment-only-unassigned" type="checkbox"> เฉพาะพื้นที่ยังว่าง</label>' +
       '<label class="assignment-filter-check"><input id="assignment-only-assigned" type="checkbox"> เฉพาะพื้นที่มีเวร</label><button type="button" class="btn secondary" id="assignment-copy-days">⧉ คัดลอกไปวันอื่น</button><button type="button" class="btn assignment-copy-all" id="assignment-copy-all">⚡ ใช้เวรนี้ทุกวัน</button><button type="button" class="btn secondary assignment-delete-tools" id="assignment-delete-tools">🗑 ลบเวรเร็ว</button></div>' +
@@ -554,6 +555,8 @@ const adminTables = {
     document.querySelectorAll(".assignment-clear-area").forEach((b) => {
       b.onclick = () => clearAreaDuty(b.dataset.area, selectedDay);
     });
+    $("assignment-print-roster").onclick = assignmentPrintRoster;
+    $("assignment-export-csv").onclick = assignmentExportRosterCsv;
     $("assignment-copy-days").onclick = () => assignmentCopyDaysModal(selectedDay);
     $("assignment-copy-all").onclick = () => assignmentCopyAllDays(selectedDay);
     $("assignment-delete-tools").onclick = () => assignmentDeleteToolsModal(selectedDay);
@@ -565,6 +568,85 @@ const adminTables = {
       };
     });
     applyFilter();
+  }
+
+
+  function assignmentRosterMatrix() {
+    const m=S.master,
+      areas=[...m.Areas].sort(assignmentAreaSort),
+      users=new Map(m.Users.map(u=>[u.UserID,u.FullName||"—"])),
+      byAreaDay=new Map();
+
+    for(const a of m.Assignments){
+      const name=users.get(a.UserID)||"—";
+      for(const day of dutyDaysArray(a.Days)){
+        const key=String(a.AreaID)+"|"+day;
+        if(!byAreaDay.has(key))byAreaDay.set(key,[]);
+        byAreaDay.get(key).push(name);
+      }
+    }
+    for(const names of byAreaDay.values()) names.sort((a,b)=>String(a).localeCompare(String(b),"th"));
+
+    return areas.map((area,index)=>({
+      no:String(index+1).padStart(2,"0"),
+      area:area.AreaName||"—",
+      classroom:masterLabel("ResponsibleClassroomID",area.ResponsibleClassroomID)||"—",
+      days:[1,2,3,4,5].map(day=>(byAreaDay.get(String(area.AreaID)+"|"+day)||[]).join(", ")||"—")
+    }));
+  }
+
+  function assignmentPrintRoster() {
+    const rows=assignmentRosterMatrix();
+    if(!rows.length)return error(new Error("ยังไม่มีข้อมูลพื้นที่สำหรับพิมพ์"));
+    const win=window.open("","_blank");
+    if(!win)return error(new Error("เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้"));
+
+    const generated=new Date().toLocaleString("th-TH",{
+      timeZone:"Asia/Bangkok",
+      dateStyle:"medium",
+      timeStyle:"short"
+    });
+    const body=rows.map(r=>
+      "<tr><td class='center'>"+esc(r.no)+"</td><td>"+esc(r.area)+"</td><td>"+esc(r.classroom)+"</td>"+
+      r.days.map(v=>"<td>"+esc(v)+"</td>").join("")+"</tr>"
+    ).join("");
+
+    const html='<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ตารางเวรตรวจเขตพื้นที่ - โรงเรียนรัษฎา</title>'+
+      '<style>'+
+      '@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{font-family:"Kanit","Noto Sans Thai",Tahoma,sans-serif;color:#17313b;margin:0;background:#fff}'+
+      '.toolbar{position:sticky;top:0;z-index:10;background:#fff;padding:10px 0 14px;display:flex;gap:8px}.toolbar button{border:0;border-radius:9px;background:#0f8294;color:#fff;padding:9px 14px;font:600 13px inherit;cursor:pointer}'+
+      'header{text-align:center;margin:2px 0 10px}h1{font-size:20px;margin:0 0 3px}h2{font-size:14px;font-weight:500;margin:0;color:#526d77}.meta{font-size:10px;color:#71858d;margin-top:5px}'+
+      'table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px}thead{display:table-header-group}th,td{border:1px solid #aebfc5;padding:5px 5px;vertical-align:top;overflow-wrap:anywhere}th{background:#eaf6f8;text-align:center;font-size:9px}tr{break-inside:avoid;page-break-inside:avoid}.center{text-align:center}.no{width:5%}.area{width:19%}.room{width:11%}.day{width:13%}'+
+      'footer{margin-top:8px;display:flex;justify-content:space-between;gap:10px;font-size:9px;color:#7b8d94}'+
+      '@media print{.toolbar{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
+      '</style></head><body><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button><button onclick="window.close()">ปิด</button></div>'+
+      '<header><h1>ตารางเวรตรวจความสะอาดและเขตพื้นที่ประจำสัปดาห์</h1><h2>โรงเรียนรัษฎา</h2><div class="meta">RSD Clean · จันทร์–ศุกร์ · พื้นที่ทั้งหมด '+rows.length+' พื้นที่</div></header>'+
+      '<table><thead><tr><th class="no">ลำดับ</th><th class="area">พื้นที่</th><th class="room">ห้องรับผิดชอบ</th><th class="day">จันทร์</th><th class="day">อังคาร</th><th class="day">พุธ</th><th class="day">พฤหัสบดี</th><th class="day">ศุกร์</th></tr></thead><tbody>'+body+'</tbody></table>'+
+      '<footer><span>ระบบ RSD Clean · โรงเรียนรัษฎา</span><span>จัดทำเมื่อ '+esc(generated)+' น.</span></footer></body></html>';
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    setTimeout(()=>{try{win.focus();win.print();}catch(e){}},450);
+  }
+
+  function assignmentExportRosterCsv() {
+    const rows=assignmentRosterMatrix();
+    if(!rows.length)return error(new Error("ยังไม่มีข้อมูลพื้นที่สำหรับส่งออก"));
+    const cell=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+    const header=["ลำดับ","พื้นที่","ห้องรับผิดชอบ","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์"];
+    const csv=[header,...rows.map(r=>[r.no,r.area,r.classroom,...r.days])]
+      .map(row=>row.map(cell).join(","))
+      .join("\r\n");
+    const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob),a=document.createElement("a");
+    const stamp=new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Bangkok"});
+    a.href=url;
+    a.download="RSD-Clean-Duty-Roster-"+stamp+".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    toast("ส่งออกตารางเวร CSV แล้ว");
   }
 
   function assignmentAreaInspectorModal(areaId, day) {
