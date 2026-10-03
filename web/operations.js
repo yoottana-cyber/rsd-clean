@@ -172,7 +172,7 @@ async function importExcelModal(){
     '<div class="ops-import-wrap">'+
       '<div class="warn"><b>แนะนำ:</b> สำรองข้อมูลก่อนนำเข้าจำนวนมาก ระบบจะ Preview และตรวจข้อมูลก่อนบันทึกจริง</div>'+
       '<div class="coverage-form-grid mt-4">'+
-        '<div class="field"><label>ประเภทข้อมูล</label><select id="excel-kind"><option value="Classrooms">ห้องเรียน</option><option value="Areas">พื้นที่</option><option value="Users">ผู้ใช้งาน</option></select></div>'+
+        '<div class="field"><label>ประเภทข้อมูล</label><select id="excel-kind"><option value="Classrooms">ห้องเรียน</option><option value="Areas">พื้นที่</option><option value="Users">ผู้ใช้งาน</option><option value="Assignments">เวรผู้ตรวจ</option></select></div>'+
         '<div class="field"><label>ไฟล์ Excel</label><input id="excel-file" type="file" accept=".xlsx,.xls"></div>'+
       '</div>'+
       '<div class="flex flex-wrap gap-2"><button class="btn secondary" id="excel-template">ดาวน์โหลดแม่แบบ Excel</button><button class="btn" id="excel-preview">ตรวจสอบไฟล์</button></div>'+
@@ -261,7 +261,7 @@ async function loadCertificates(seq=S.seq){
     '</div>'+
     '<section class="card mt-4"><div class="coverage-section-head"><div><h2>รายชื่อที่ผ่านเกณฑ์</h2><p class="muted">'+esc(opMonthText(d.month))+'</p></div>'+
       '<div class="flex flex-wrap gap-2"><button class="btn" id="cert-pdf"><i data-lucide="file-down"></i> ดาวน์โหลด PDF ทั้งหมด</button><button class="btn secondary" id="cert-zip"><i data-lucide="archive"></i> ZIP รูป PNG</button></div></div>'+
-      (d.rows.length?table(["ห้องเรียน","ระดับ","ปรับปรุง","จำนวนวันตรวจ"],d.rows.map(x=>[esc(x.name),'<b>'+esc(x.medal)+'</b>',String(x.improve||0),String(x.inspectionDays||0)])):'<div class="empty">ไม่มีห้องที่ผ่านเกณฑ์ในเดือนนี้</div>')+
+      (d.rows.length?table(["ห้องเรียน","ระดับ","ปรับปรุง","จำนวนวันตรวจ"],d.rows.map(x=>[esc(x.name),'<b>'+esc(x.medal)+'</b>'+(x.provisional?' <span class="pill gray">ชั่วคราว</span>':''),String(x.improve||0),String(x.inspectionDays||0)])):'<div class="empty">ไม่มีห้องที่ผ่านเกณฑ์ในเดือนนี้</div>')+
     '</section>';
   if($("cert-pdf"))$("cert-pdf").onclick=downloadCertificatesPdf;
   if($("cert-zip"))$("cert-zip").onclick=downloadCertificatesZip;
@@ -289,8 +289,14 @@ async function certificateCanvas(row,d){
     return await html2canvas(stage.firstElementChild,{scale:1.4,useCORS:true,backgroundColor:"#fff"});
   }finally{stage.remove();}
 }
+async function confirmProvisionalCertificates(d){
+  if(!d?.rows?.some(x=>x.provisional))return true;
+  const r=await Swal.fire({icon:"warning",title:"ผลเดือนนี้ยังเป็นข้อมูลชั่วคราว",text:"เดือนที่เลือกยังไม่สิ้นสุด เกียรติบัตรอาจเปลี่ยนได้เมื่อมีผลตรวจเพิ่ม ต้องการสร้างต่อหรือไม่?",showCancelButton:true,confirmButtonText:"สร้างต่อ",cancelButtonText:"ยกเลิก"});
+  return r.isConfirmed;
+}
 async function downloadCertificatesPdf(){
   const d=opCertificateData;if(!d?.rows?.length)return;
+  if(!(await confirmProvisionalCertificates(d)))return;
   busy(true,"กำลังสร้างเกียรติบัตร PDF…");
   try{
     await loadCoverageScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",()=>!!window.jspdf?.jsPDF);
@@ -306,6 +312,7 @@ async function downloadCertificatesPdf(){
 }
 async function downloadCertificatesZip(){
   const d=opCertificateData;if(!d?.rows?.length)return;
+  if(!(await confirmProvisionalCertificates(d)))return;
   busy(true,"กำลังสร้าง ZIP รูปเกียรติบัตร…");
   try{
     await loadCoverageScript("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",()=>!!window.JSZip);
