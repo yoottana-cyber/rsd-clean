@@ -170,6 +170,7 @@ const adminTables = {
   async function qrAreaModal(areaId) {
     busy(true, "กำลังสร้าง QR Code…");
     try {
+      await window.rsdEnsureQrCode();
       const rows = await rpc("qrAdmin", { areaIds: [areaId] }, true),
         q = rows[0] ? withQrUrl(rows[0]) : null;
       if (!q) throw Error("ไม่พบพื้นที่");
@@ -210,6 +211,7 @@ const adminTables = {
     win.document.write('<!doctype html><meta charset="utf-8"><title>กำลังเตรียม QR…</title><p style="font-family:sans-serif;padding:24px">กำลังเตรียม QR Code…</p>');
     busy(true, "กำลังเตรียม QR Code สำหรับพิมพ์…");
     try {
+      await window.rsdEnsureQrCode();
       const rawRows = prefetched || (await rpc("qrAdmin", {}, true));
       const rows = rawRows.map((q) => q.url ? q : withQrUrl(q));
       if (!rows.length) throw Error("ยังไม่มีเขตพื้นที่");
