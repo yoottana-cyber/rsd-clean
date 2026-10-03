@@ -760,9 +760,9 @@ async function certificateTemplateModal(){
   const box=$("cert-template-body");
   try{
     const cfg=await rpc("certificateTemplate",{},true),base=certTemplateDefaults();
-    let image="",localUrl="",selectedFile=null,uploadTicket="";
+    let image="",localUrl="",selectedFile=null,selectedOriginalFile=null,uploadTicket="",originalUploadTicket="";
     if(cfg.hasImage){
-      try{image=await rpc("certificateTemplateImage",{},true);}catch(e){console.warn(e);}
+      try{image=await certificateGetTemplateImage(cfg);}catch(e){console.warn(e);}
     }
     const state={
       enabled:cfg.hasImage?cfg.enabled:true,
@@ -783,6 +783,9 @@ async function certificateTemplateModal(){
         '<label>ฟอนต์<select data-cert-field="'+k+'" data-cert-prop="font">'+certificateFontOptions(v.font)+'</select></label>'+
       '</div>';
     }).join("");
+    const optimizationStatus=cfg.optimized&&cfg.workingSize
+      ? "Working Copy "+certificateFileSizeText(cfg.workingSize)+(cfg.originalSize?" · ต้นฉบับ "+certificateFileSizeText(cfg.originalSize):"")
+      : "";
     box.innerHTML=
       '<div class="warn mb-4"><b>แบบที่แนะนำ:</b> อัปโหลดเฉพาะภาพพื้นหลัง A4 แนวนอน เช่น กรอบ ลวดลาย โลโก้ และลายเซ็น ส่วนข้อความทั้งหมดสามารถเพิ่มและจัดตำแหน่งจากเว็บได้</div>'+
       '<div class="ops-template-layout">'+
@@ -795,7 +798,7 @@ async function certificateTemplateModal(){
           '<p class="muted mt-2">ลากข้อความบน Preview เพื่อจัดตำแหน่งได้โดยตรง หรือกรอก X/Y ด้านขวา</p>'+
         '</div>'+
         '<div class="ops-template-tools">'+
-          '<div class="field"><label>ภาพพื้นหลังเกียรติบัตร</label><input id="cert-template-file" type="file" accept="image/png,image/jpeg"><small class="muted">PNG/JPG · สูงสุด 8 MB · แนะนำ A4 แนวนอน</small></div>'+
+          '<div class="field"><label>ภาพพื้นหลังเกียรติบัตร</label><input id="cert-template-file" type="file" accept="image/png,image/jpeg"><small class="muted">PNG/JPG · ต้นฉบับสูงสุด 8 MB · ระบบสร้าง Working Copy 2244×1588 และบีบอัดให้อัตโนมัติ</small><div id="cert-template-optimize-info" class="muted mt-2">'+esc(optimizationStatus)+'</div></div>'+
           '<label class="coverage-toggle"><input id="cert-template-enabled" type="checkbox" '+(state.enabled?"checked":"")+'><span><b>ใช้แม่แบบนี้ในการสร้างเกียรติบัตร</b><small>ปิดได้โดยไม่ลบภาพและตำแหน่งที่ตั้งไว้</small></span></label>'+
           '<div class="ops-template-group"><div class="ops-template-group-head"><div><b>ฟอนต์ทั้งแม่แบบ</b><small>เปลี่ยนข้อความทุกชิ้นพร้อมกัน</small></div><div class="flex gap-2"><button class="btn small secondary" id="cert-all-kanit" type="button">ใช้ Kanit ทั้งหมด</button><button class="btn small secondary" id="cert-all-sarabun" type="button">ใช้ Sarabun ทั้งหมด</button></div></div></div>'+
           '<div class="ops-template-group"><div class="ops-template-group-head"><div><b>ข้อมูลอัตโนมัติ</b><small>ระบบเปลี่ยนค่าให้แต่ละห้องอัตโนมัติ</small></div></div><div class="ops-template-fields">'+controls+'</div></div>'+
