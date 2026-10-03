@@ -323,6 +323,29 @@ async function downloadCertificatesZip(){
 /* =========================
    5) WEB PUSH ENROLLMENT
    ========================= */
+function opBytesToBase64Url(bytes){
+  let bin="";for(const b of new Uint8Array(bytes))bin+=String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+async function generateVapidSetup(){
+  try{
+    const keys=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+    const raw=await crypto.subtle.exportKey("raw",keys.publicKey),jwk=await crypto.subtle.exportKey("jwk",keys.privateKey);
+    const publicKey=opBytesToBase64Url(raw),privateJwk=JSON.stringify(jwk);
+    await Swal.fire({
+      width:760,
+      title:"VAPID Key สำหรับ RSD Clean",
+      html:
+        '<div style="text-align:left"><p class="muted">คีย์นี้สร้างในเบราว์เซอร์ของ Admin และไม่ได้ส่งขึ้น GitHub กรุณานำไปตั้งใน Cloudflare Pages → Settings → Environment variables</p>'+
+        '<label style="font-weight:600">VAPID_PUBLIC_KEY</label><textarea id="vapid-public-copy" class="swal2-textarea" style="width:100%;height:75px">'+esc(publicKey)+'</textarea>'+
+        '<label style="font-weight:600">VAPID_PRIVATE_JWK</label><textarea id="vapid-private-copy" class="swal2-textarea" style="width:100%;height:145px">'+esc(privateJwk)+'</textarea>'+
+        '<label style="font-weight:600">VAPID_SUBJECT</label><textarea class="swal2-textarea" style="width:100%;height:60px">https://rsd-clean.pages.dev</textarea>'+
+        '<div class="warn mt-3"><b>สำคัญ:</b> VAPID_PRIVATE_JWK เป็น Secret ห้ามใส่ลง GitHub หรือส่งต่อสาธารณะ หลังตั้งค่าให้ Deploy ใหม่แล้วกลับมากด “การแจ้งเตือนมือถือ” อีกครั้ง</div></div>',
+      confirmButtonText:"ปิด"
+    });
+  }catch(e){error(e);}
+}
+
 function base64UrlToUint8Array(base64String){
   const padding="=".repeat((4-base64String.length%4)%4),base64=(base64String+padding).replace(/-/g,"+").replace(/_/g,"/");
   const raw=atob(base64),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;
@@ -340,11 +363,12 @@ async function pushNotificationModal(){
         '<div><h3>แจ้งเตือนแม้ไม่ได้เปิดหน้าเว็บ</h3><p class="muted">เมื่อเปิดใช้งาน อุปกรณ์จะลงทะเบียนรับ Web Push จาก RSD Clean</p></div>'+
       '</div>'+
       (!supported?'<div class="warn mt-4">เบราว์เซอร์/โหมดนี้ไม่รองรับ Web Push กรุณาติดตั้ง PWA หรือใช้เบราว์เซอร์ที่รองรับ</div>':
-        !r.configured?'<div class="warn mt-4"><b>ยังไม่ได้ตั้ง VAPID Public Key ที่ Cloudflare</b><br>โค้ดรองรับ Push แล้ว แต่ Admin ต้องตั้งค่า VAPID ก่อนจึงเปิดรับแจ้งเตือนได้</div>':
+        !r.configured?'<div class="warn mt-4"><b>ยังไม่ได้ตั้ง VAPID ที่ Cloudflare</b><br>โค้ดรองรับ Web Push แล้ว แต่ต้องเพิ่ม Environment Variables ก่อน</div>'+(S.user?.Role==="Admin"?'<button class="btn secondary mt-3" id="push-generate-vapid"><i data-lucide="key-round"></i> สร้าง VAPID Key สำหรับตั้งค่า</button>':''):
         '<div class="card mt-4"><p>สถานะอุปกรณ์นี้: <b>'+(localSub?"เปิดรับ Push แล้ว":"ยังไม่ได้เปิด")+'</b></p>'+
           '<div class="flex flex-wrap gap-2"><button class="btn '+(localSub?"danger":"")+'" id="push-toggle">'+(localSub?"ปิดการแจ้งเตือนบนอุปกรณ์นี้":"เปิดการแจ้งเตือน")+'</button>'+
           (localSub?'<button class="btn secondary" id="push-test"><i data-lucide="send"></i> ทดสอบ Push</button>':'')+'</div></div>')+
       '<p class="muted mt-4">Subscription ในบัญชีนี้: '+Number(r.subscriptions?.length||0)+' อุปกรณ์</p>';
+    if($("push-generate-vapid"))$("push-generate-vapid").onclick=generateVapidSetup;
     if($("push-test"))$("push-test").onclick=async()=>{
       try{
         const result=await rpc("sendPushTest",{},true);
