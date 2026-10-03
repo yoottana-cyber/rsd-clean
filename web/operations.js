@@ -937,42 +937,66 @@ async function certificateTemplateModal(){
       box.querySelectorAll("[data-cert-field]").forEach(el=>{if(el.dataset.certProp==="visible")el.checked=false;});
       renderCustomControls();renderPreview();
     };
-    $("cert-template-file").onchange=()=>{
+    $("cert-template-file").onchange=async()=>{
       const file=$("cert-template-file").files?.[0];if(!file)return;
       if(!["image/png","image/jpeg"].includes(file.type))return error(Error("รองรับเฉพาะ PNG หรือ JPG"));
       if(file.size>8*1024*1024)return error(Error("ไฟล์แม่แบบต้องไม่เกิน 8 MB"));
-      if(localUrl)URL.revokeObjectURL(localUrl);
-      selectedFile=file;uploadTicket="";localUrl=URL.createObjectURL(file);
-      $("cert-template-image").src=localUrl;$("cert-template-image").classList.remove("hidden");$("cert-template-empty").classList.add("hidden");renderPreview();
+      const info=$("cert-template-optimize-info");
+      try{
+        if(info)info.textContent="กำลังสร้าง Working Copy ที่เหมาะกับเกียรติบัตร…";
+        const optimized=await certificateOptimizeTemplateFile(file);
+        if(localUrl)URL.revokeObjectURL(localUrl);
+        selectedOriginalFile=file;selectedFile=optimized;uploadTicket="";originalUploadTicket="";
+        localUrl=URL.createObjectURL(optimized);
+        $("cert-template-image").src=localUrl;
+        $("cert-template-image").classList.remove("hidden");
+        $("cert-template-empty").classList.add("hidden");
+        if(info)info.textContent="ต้นฉบับ "+certificateFileSizeText(file.size)+" → Working Copy "+certificateFileSizeText(optimized.size)+" · JPEG 2244×1588";
+        renderPreview();
+      }catch(e){
+        if(info)info.textContent="";
+        error(e);
+      }
     };
     if(image)$("cert-template-empty").classList.add("hidden");
     await ensureCertificateTemplateFonts(state);
     renderCustomControls();renderPreview();
 
     $("cert-template-save").onclick=async()=>{
-      busy(true,selectedFile?"กำลังอัปโหลดแม่แบบ…":"กำลังบันทึกแม่แบบ…");
+      busy(true,selectedFile?"กำลังบันทึกต้นฉบับและ Working Copy…":"กำลังบันทึกแม่แบบ…");
       try{
-        if(selectedFile&&!uploadTicket){
-          const up=await rpc("certificateTemplateUploadStart",{mime:selectedFile.type,size:selectedFile.size,origin:location.origin},true);
-          const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
-          let res;
-          try{
-            res=await fetch(up.url,{method:"PUT",headers:{"Content-Type":selectedFile.type,"Content-Range":"bytes 0-"+(selectedFile.size-1)+"/"+selectedFile.size},body:selectedFile,signal:controller.signal});
-          }finally{clearTimeout(timer);}
-          if(!(res.status===200||res.status===201))throw Error("อัปโหลดแม่แบบไม่สำเร็จ (HTTP "+res.status+")");
-          uploadTicket=up.ticket;
+        if(selectedFile&&selectedOriginalFile&&(!uploadTicket||!originalUploadTicket)){
+          const jobs=[];
+          if(!uploadTicket)jobs.push(certificateUploadTemplateFile(selectedFile,"working").then(t=>{uploadTicket=t;}));
+          if(!originalUploadTicket)jobs.push(certificateUploadTemplateFile(selectedOriginalFile,"original").then(t=>{originalUploadTicket=t;}));
+          await Promise.all(jobs);
         }
         state.enabled=$("cert-template-enabled").checked;
-        await rpc("saveCertificateTemplate",{uploadTicket,config:state},true);
-        opCertificateTemplateImage="";
-        toast("บันทึกแม่แบบเกียรติบัตรแล้ว");closeModal();
+        const saved=await rpc("saveCertificateTemplate",{workingUploadTicket:uploadTicket,originalUploadTicket,config:state},true);
+        certificateResetTemplateMemory();
+        if(selectedFile&&saved?.fileId){
+          const dataUrl=await certificateFileDataUrl(selectedFile);
+          await certificateTemplateCachePut(saved.fileId,dataUrl);
+          opCertificateTemplateImage=dataUrl;
+          opCertificateTemplateKey=String(saved.fileId);
+        }
+        toast("บันทึกแม่แบบเกียรติบัตรแล้ว");
+        closeModal();
+        if(localUrl)URL.revokeObjectURL(localUrl);
         if(S.route==="certificates")await loadCertificates(S.seq);
       }catch(e){error(e);}finally{busy(false);}
     };
     if($("cert-template-delete"))$("cert-template-delete").onclick=async()=>{
       const ok=await Swal.fire({icon:"warning",title:"ลบแม่แบบเกียรติบัตร?",text:"ระบบจะกลับไปใช้รูปแบบมาตรฐาน",showCancelButton:true,confirmButtonText:"ลบแม่แบบ",cancelButtonText:"ยกเลิก"});
       if(!ok.isConfirmed)return;
-      try{await rpc("deleteCertificateTemplate",{},true);opCertificateTemplateImage="";toast("ลบแม่แบบแล้ว");closeModal();if(S.route==="certificates")await loadCertificates(S.seq);}catch(e){error(e);}
+      try{
+        await rpc("deleteCertificateTemplate",{},true);
+        certificateResetTemplateMemory();
+        await certificateTemplateCacheClear();
+        toast("ลบแม่แบบแล้ว");
+        closeModal();
+        if(S.route==="certificates")await loadCertificates(S.seq);
+      }catch(e){error(e);}
     };
     icons();
   }catch(e){box.innerHTML='<div class="warn">'+esc(e.message||String(e))+'</div>';}
