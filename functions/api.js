@@ -300,6 +300,8 @@ async function dispatch(env, action, p, token, request) {
     qrAdmin: async () => qrAdmin(env,u,p),
     master: async () => master(env,u),
     areaMapLayout: async () => areaMapLayout(env,u),
+    areaMapDecorations: async () => areaMapDecorations(env,u),
+    saveAreaMapDecorations: async () => saveAreaMapDecorations(env,u,p),
     mapStatus: async () => mapStatus(env,u,p),
     saveAreaMapLayout: async () => saveAreaMapLayout(env,u,p),
     report: async () => report(env,u,validateDate(p.start),validateDate(p.end)),
@@ -427,7 +429,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","saveAreaMapDecorations"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -461,6 +463,7 @@ function auditMeta(action,p,result){
   if(action==="removeDutyAssignments")return{entityType:"Assignments",entityId:"bulk",details:{mode:String(p.mode||""),day:Number(p.day||0),userId:String(p.userId||""),areaIds:(p.areaIds||[]).map(String).slice(0,100),changed:Number(result?.changed||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,5),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="saveAreaMapLayout")return{entityType:"AreaMap",entityId:"layout",details:{shapeCount:Number(result?.saved||0)}};
+  if(action==="saveAreaMapDecorations")return{entityType:"AreaMap",entityId:"decorations",details:{decorationCount:Number(result?.saved||0)}};
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
   if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
   if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
@@ -1826,6 +1829,29 @@ async function ensureAreaMapTable(db){
 function areaMapShapeRow(r){
   return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),AreaName:String(r.area_name||""),ClassName:String(r.class_name||""),ResponsibleClassroomID:String(r.responsible_classroom_id||""),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
 }
+function normalizeMapDecoration(raw,index=0){
+  raw=raw&&typeof raw==="object"?raw:{};
+  const type=["rect","polygon"].includes(String(raw.ShapeType||""))?String(raw.ShapeType):"rect";
+  const kind=["building","road","field","label","landmark","other"].includes(String(raw.Kind||""))?String(raw.Kind):"building";
+  const fill=/^#[0-9a-f]{6}$/i.test(String(raw.FillColor||""))?String(raw.FillColor):"#dbeafe";
+  const stroke=/^#[0-9a-f]{6}$/i.test(String(raw.StrokeColor||""))?String(raw.StrokeColor):"#64748b";
+  const n=(v,min,max,def)=>{const x=Number(v);return Number.isFinite(x)?Math.max(min,Math.min(max,x)):def;};
+  const points=Array.isArray(raw.Points)?raw.Points.slice(0,80).map(p=>({x:n(p?.x,0,1600,0),y:n(p?.y,0,1000,0)})):[];
+  return{DecorationID:text(raw.DecorationID||"",120)||("decor-"+(index+1)),Kind:kind,Label:text(raw.Label||"",200),ShapeType:type,X:n(raw.X,0,1590,0),Y:n(raw.Y,0,990,0),Width:n(raw.Width,10,1600,120),Height:n(raw.Height,10,1000,80),Points:points,FillColor:fill,StrokeColor:stroke,Opacity:n(raw.Opacity,.05,1,.45),Locked:raw.Locked===true,SortOrder:Number.isFinite(Number(raw.SortOrder))?Math.trunc(Number(raw.SortOrder)):index};
+}
+async function getAreaMapDecorations(db){
+  const r=await db.prepare("SELECT value FROM settings WHERE key=?").bind("area_map_decorations_json").first(),arr=parseJson(r?.value,[]);
+  return Array.isArray(arr)?arr.slice(0,200).map((x,i)=>normalizeMapDecoration(x,i)):[];
+}
+async function areaMapDecorations(env,u){role(u,["Admin","Supervisor","Inspector","Teacher"]);return getAreaMapDecorations(env.DB);}
+async function saveAreaMapDecorations(env,u,p){
+  role(u,["Admin"]);
+  const arr=Array.isArray(p.decorations)?p.decorations:[];assert(arr.length<=200,"สิ่งประกอบผังมากเกินไป");
+  const rows=arr.map((x,i)=>normalizeMapDecoration(x,i));
+  for(const d of rows){assert(d.ShapeType==="rect"||(d.Points.length>=3&&d.Points.length<=80),"รูปหลายเหลี่ยมต้องมี 3–80 จุด");}
+  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_decorations_json",JSON.stringify(rows)).run();
+  return{saved:rows.length};
+}
 const MAP_STATUS_META={
   holiday:{label:"วันหยุด",color:"#cbd5e1"},
   no_assignment:{label:"ไม่มีเวร",color:"#94a3b8"},
@@ -1856,7 +1882,8 @@ function mapStatusFromInspection(i,teamCount=0){
 async function areaMapLayout(env,u){
   role(u,["Admin","Supervisor","Inspector","Teacher"]);
   await ensureAreaMapTable(env.DB);
-  return {canvas:{width:1600,height:1000},shapes:(await all(env.DB,"SELECT s.*,a.area_name,a.responsible_classroom_id,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id")).map(areaMapShapeRow)};
+  const [shapeRows,decorations]=await Promise.all([all(env.DB,"SELECT s.*,a.area_name,a.responsible_classroom_id,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id"),getAreaMapDecorations(env.DB)]);
+  return {canvas:{width:1600,height:1000},shapes:shapeRows.map(areaMapShapeRow),decorations};
 }async function mapStatus(env,u,p){
   role(u,["Admin","Supervisor","Inspector","Teacher"]);
   const db=env.DB,date=validateDate(p.date||thaiDay()),today=thaiDay();
@@ -1885,7 +1912,7 @@ async function areaMapLayout(env,u){
   const visible=items.filter(x=>x.InScope),summary={total:visible.length};
   ["holiday","no_assignment","no_inspector","pending","excellent","medium","improve","skipped","done"].forEach(k=>summary[k]=visible.filter(x=>x.StatusKey===k).length);
   summary.completed=summary.excellent+summary.medium+summary.improve+summary.done;
-  return{date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,items,summary,updatedAt:nowIso()};
+  return{date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,decorations:layout.decorations||[],items,summary,updatedAt:nowIso()};
 }
 
 async function saveAreaMapLayout(env,u,p){
