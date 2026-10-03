@@ -54,6 +54,7 @@ const checks=[
   [api.includes("function currentInspectionLabels")&&api.includes("async function currentInspectionNameMaps")&&api.includes("AreaName:label.AreaName")&&api.includes("พื้นที่:label.AreaName"),"historical views resolve current master names"],
   [api.includes("async function deleteInspection")&&api.includes('"Inspections",id,recycleLabel("Inspections",snapshot)')&&api.includes('type==="Inspections"'),"recoverable inspection deletion exists"],
   [api.includes('assert(String(row.inspection_date)<thaiDay()')&&api.includes('["ตรวจแล้ว","งดตรวจ"].includes'),"inspection deletion is limited to completed historical records"],
+  [coverage.includes("รายงาน อันดับ และเกียรติบัตรของเดือนนั้นเปลี่ยนแปลง"),"inspection delete warning mentions award recalculation"],
   [editor.includes("async function areaMapExportImage"),"base PNG export exists"],
   [enh.includes("function rsdMapUndo")&&enh.includes("function rsdMapRedo"),"map undo/redo exists"],
   [enh.includes("map-vertex-handle")&&enh.includes("map-vertex-add")&&enh.includes("map-vertex-delete"),"polygon vertex editing exists"],
