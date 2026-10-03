@@ -14,7 +14,8 @@ function areaMapReferencePrefs(){
     gridVisible:areaMapLocalGet(AREA_MAP_GRID_KEY,"0")==="1"
   };
 }
-let areaMapState={shapes:[],selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null,...areaMapReferencePrefs()};
+let areaMapState={shapes:[],selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null,statusMode:true,statusDate:thaiDay(),daily:{items:[],summary:{},updatedAt:""},...areaMapReferencePrefs()};
+let areaMapStatusTimer=0;
 
 function areaMapUid(){try{return crypto.randomUUID();}catch(e){return "map_"+Date.now()+"_"+Math.random().toString(36).slice(2);}}
 function areaMapArea(id){return S.master.Areas.find(a=>a.AreaID===id);}
@@ -22,17 +23,89 @@ function areaMapClass(area){return area?masterLabel("ResponsibleClassroomID",are
 function areaMapShape(areaId){return areaMapState.shapes.find(s=>s.AreaID===areaId);}
 function areaMapMarkDirty(){areaMapState.dirty=true;const badge=$("area-map-dirty"),save=$("area-map-save");if(badge){badge.textContent="มีการแก้ไขที่ยังไม่บันทึก";badge.classList.add("show");}if(save)save.disabled=false;}
 
+
+function areaMapStatusInfo(areaId){
+  const item=(areaMapState.daily?.items||[]).find(x=>String(x.AreaID)===String(areaId));
+  if(!item)return{key:"none",label:"ไม่มีเวร",color:"#94a3b8",item:null};
+  if(item.Status==="งดตรวจ")return{key:"skipped",label:"งดตรวจ",color:"#64748b",item};
+  if(item.Status==="รอตรวจ")return{key:"pending",label:"รอตรวจ",color:"#facc15",item};
+  if(item.Status==="ตรวจแล้ว"){
+    const score=Number(item.Score||0);
+    if(score===3)return{key:"excellent",label:"ยอดเยี่ยม",color:"#22c55e",item};
+    if(score===2)return{key:"medium",label:"ปานกลาง",color:"#f59e0b",item};
+    if(score===1)return{key:"improve",label:"ปรับปรุง",color:"#ef4444",item};
+    return{key:"done",label:item.Rating||"ตรวจแล้ว",color:"#14b8a6",item};
+  }
+  return{key:"other",label:item.Status||"มีงานตรวจ",color:"#38bdf8",item};
+}
+function areaMapStatusCounts(){
+  const counts={none:0,pending:0,excellent:0,medium:0,improve:0,skipped:0,done:0,other:0};
+  for(const area of S.master.Areas){
+    const s=areaMapStatusInfo(area.AreaID);
+    counts[s.key]=(counts[s.key]||0)+1;
+  }
+  return counts;
+}
+function areaMapStatusLegend(){
+  const c=areaMapStatusCounts();
+  const items=[
+    ["#94a3b8","ไม่มีเวร",c.none],
+    ["#facc15","รอตรวจ",c.pending],
+    ["#22c55e","ยอดเยี่ยม",c.excellent],
+    ["#f59e0b","ปานกลาง",c.medium],
+    ["#ef4444","ปรับปรุง",c.improve],
+    ["#64748b","งดตรวจ",c.skipped]
+  ];
+  return items.map(x=>'<span class="area-map-legend-item"><i style="background:'+x[0]+'"></i>'+x[1]+' <b>'+Number(x[2]||0)+'</b></span>').join("");
+}
+function areaMapStatusDateText(date){
+  try{return new Date(date+"T12:00:00+07:00").toLocaleDateString("th-TH",{weekday:"short",day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Bangkok"});}
+  catch(e){return date;}
+}
+function areaMapScheduleStatusRefresh(){
+  clearTimeout(areaMapStatusTimer);
+  if(adminTab!=="AreaMap"||!areaMapState.statusMode||areaMapState.statusDate!==thaiDay())return;
+  areaMapStatusTimer=setTimeout(()=>areaMapRefreshStatus(true),60000);
+}
+async function areaMapRefreshStatus(silent=false){
+  const date=areaMapState.statusDate||thaiDay();
+  try{
+    const daily=await rpc("dailyControl",{date},true);
+    if(adminTab!=="AreaMap")return;
+    areaMapState.daily=daily||{items:[],summary:{},updatedAt:""};
+    areaMapRenderEditor();
+    if(!silent)toast("อัปเดตสถานะผังแล้ว");
+  }catch(e){
+    if(!silent)error(e);
+  }finally{
+    areaMapScheduleStatusRefresh();
+  }
+}
+function areaMapStatusTimeText(){
+  const raw=String(areaMapState.daily?.updatedAt||"");
+  if(!raw)return"";
+  try{return new Date(raw).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"})+" น.";}
+  catch(e){return"";}
+}
+
 async function areaMapContent(){
+  clearTimeout(areaMapStatusTimer);
   $("admin-content").innerHTML='<div class="map-editor-loading"><div class="spinner"></div><b>กำลังเปิดผังพื้นที่…</b></div>';
   try{
-    const data=await rpc("areaMapLayout");
+    const date=areaMapState.statusDate||thaiDay();
+    const [data,daily]=await Promise.all([
+      rpc("areaMapLayout"),
+      rpc("dailyControl",{date},true).catch(()=>({date,items:[],summary:{},updatedAt:""}))
+    ]);
     if(adminTab!=="AreaMap")return;
     areaMapState={
       shapes:(data.shapes||[]).map(s=>({...s,Points:Array.isArray(s.Points)?s.Points:[]})),
       selectedAreaId:"",selectedShapeId:"",mode:"select",zoom:.7,dirty:false,viewOnly:false,draftPoints:[],gesture:null,
+      statusMode:areaMapState.statusMode!==false,statusDate:date,daily:daily||{items:[],summary:{},updatedAt:""},
       ...areaMapReferencePrefs()
     };
     areaMapRenderEditor();
+    areaMapScheduleStatusRefresh();
   }catch(e){
     error(e);
     $("admin-content").innerHTML='<div class="empty">เปิดผังพื้นที่ไม่สำเร็จ</div>';
@@ -52,7 +125,7 @@ function areaMapRenderEditor(){
     '<div class="area-map-shell">'+
       '<div class="area-map-head"><div><h2 class="text-lg">ผังเขตพื้นที่โรงเรียน</h2><p class="muted mt-1">วาดผังแบบ Vector และเชื่อมกับพื้นที่ตรวจจริงในระบบ</p></div>'+
       '<div class="area-map-head-actions"><span id="area-map-dirty" class="area-map-dirty '+(areaMapState.dirty?"show":"")+'">'+(areaMapState.dirty?"มีการแก้ไขที่ยังไม่บันทึก":"")+'</span><button class="btn secondary" id="area-map-reload">↺ ย้อนการแก้ไข</button><button class="btn" id="area-map-save" '+(areaMapState.dirty?"":"disabled")+'>บันทึกผัง</button></div></div>'+
-      '<div class="area-map-stats"><span>พื้นที่ทั้งหมด <b>'+areas.length+'</b></span><span>วางบนผังแล้ว <b>'+mapped.size+'</b></span><span>ยังไม่วาง <b>'+(areas.length-mapped.size)+'</b></span></div>'+
+      '<div class="area-map-stats"><span>พื้นที่ทั้งหมด <b>'+areas.length+'</b></span><span>วางบนผังแล้ว <b>'+mapped.size+'</b></span><span>ยังไม่วาง <b>'+(areas.length-mapped.size)+'</b></span></div>'+      '<div class="area-map-livebar '+(areaMapState.statusMode?"active":"")+'"><div class="area-map-live-title"><div><b>สถานะการตรวจบนผัง</b><small>'+esc(areaMapStatusDateText(areaMapState.statusDate))+(areaMapStatusTimeText()?' · อัปเดต '+esc(areaMapStatusTimeText()):'')+'</small></div><label class="area-map-live-switch"><input id="area-map-status-mode" type="checkbox" '+(areaMapState.statusMode?"checked":"")+'> แสดงสีสถานะ</label></div><div class="area-map-live-controls"><input id="area-map-status-date" type="date" value="'+esc(areaMapState.statusDate)+'" max="'+thaiDay()+'"><button class="btn small secondary" id="area-map-status-refresh">↻ รีเฟรชสถานะ</button><div class="area-map-legend">'+areaMapStatusLegend()+'</div></div></div>'+
       '<div class="area-map-toolbar">'+
         '<div class="area-map-area-picker"><label>พื้นที่ที่จะวาด</label><select id="area-map-area"><option value="">— เลือกพื้นที่ —</option>'+options+'</select></div>'+
         '<div class="area-map-tools"><button class="btn small secondary map-tool" data-mode="select">↖ เลือก/ย้าย</button><button class="btn small secondary map-tool" data-mode="rect">▭ สี่เหลี่ยม</button><button class="btn small secondary map-tool" data-mode="polygon">⬠ หลายเหลี่ยม</button><button class="btn small secondary" id="area-map-finish-poly">จบรูป</button><button class="btn small secondary" id="area-map-cancel-poly">ยกเลิกจุด</button></div>'+
@@ -77,6 +150,18 @@ function areaMapRenderEditor(){
   areaMapUpdateToolbar();
 }
 function areaMapBindEditor(){
+  $("area-map-status-mode").onchange=e=>{
+    areaMapState.statusMode=!!e.target.checked;
+    areaMapRenderSvg();
+    areaMapRenderSide();
+    areaMapScheduleStatusRefresh();
+  };
+  $("area-map-status-date").onchange=e=>{
+    areaMapState.statusDate=String(e.target.value||thaiDay());
+    areaMapRefreshStatus(false);
+  };
+  $("area-map-status-refresh").onclick=()=>areaMapRefreshStatus(false);
+
   $("area-map-area").onchange=e=>{
     areaMapState.selectedAreaId=String(e.target.value||"");
     const s=areaMapShape(areaMapState.selectedAreaId);
@@ -198,14 +283,16 @@ function areaMapRenderSvg(){
     .map(s=>{
       const area=areaMapArea(s.AreaID),center=areaMapCenter(s),
         selected=s.ShapeID===areaMapState.selectedShapeId,
-        color=/^#[0-9a-f]{6}$/i.test(s.FillColor||"")?s.FillColor:"#38bdf8",
+        savedColor=/^#[0-9a-f]{6}$/i.test(s.FillColor||"")?s.FillColor:"#38bdf8",
+        statusInfo=areaMapStatusInfo(s.AreaID),
+        color=areaMapState.statusMode?statusInfo.color:savedColor,
         geo=s.ShapeType==="polygon"
           ? '<polygon class="map-shape-geometry" points="'+s.Points.map(p=>p.x+","+p.y).join(" ")+'" fill="'+color+'"/>'
           : '<rect class="map-shape-geometry" x="'+s.X+'" y="'+s.Y+'" width="'+s.Width+'" height="'+s.Height+'" rx="10" fill="'+color+'"/>',
         handle=selected&&!areaMapState.viewOnly&&!s.Locked&&s.ShapeType==="rect"
           ? '<rect class="map-resize-handle" data-resize="1" x="'+(Number(s.X)+Number(s.Width)-9)+'" y="'+(Number(s.Y)+Number(s.Height)-9)+'" width="18" height="18" rx="4"/>'
           : "";
-      return '<g class="map-shape-group '+(selected?"selected ":"")+(s.Locked?"locked":"")+'" data-shape="'+esc(s.ShapeID)+'">'+
+      return '<g class="map-shape-group '+(selected?"selected ":"")+(s.Locked?"locked ":"")+(areaMapState.statusMode?"status-"+statusInfo.key:"")+'" data-shape="'+esc(s.ShapeID)+'">'+
         geo+
         '<text class="map-shape-label" x="'+center.x+'" y="'+(center.y-4)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(area?.AreaName||"พื้นที่")+'</tspan><tspan class="map-shape-sub" x="'+center.x+'" dy="18">'+esc(areaMapClass(area))+'</tspan></text>'+
         handle+
@@ -249,9 +336,60 @@ function areaMapRecalcPolygon(s){const xs=s.Points.map(p=>p.x),ys=s.Points.map(p
 function areaMapUpsert(part){const id=areaMapState.selectedAreaId;if(!id)return;let s=areaMapShape(id);if(!s){s={ShapeID:areaMapUid(),AreaID:id,ShapeType:"rect",X:100,Y:120,Width:180,Height:110,Points:[],FillColor:"#38bdf8",Locked:false,SortOrder:areaMapState.shapes.length};areaMapState.shapes.push(s);}Object.assign(s,part);if(s.ShapeType==="polygon")areaMapRecalcPolygon(s);areaMapState.selectedShapeId=s.ShapeID;areaMapState.draftPoints=[];areaMapState.dirty=true;areaMapRenderEditor();}
 function areaMapFinishPolygon(){if(areaMapState.draftPoints.length<3)return;areaMapUpsert({ShapeType:"polygon",Points:areaMapState.draftPoints.map(p=>({x:p.x,y:p.y}))});}
 function areaMapRenderSide(){
-  const side=$("area-map-side");if(!side)return;const s=areaMapState.shapes.find(x=>x.ShapeID===areaMapState.selectedShapeId);
-  if(!s){const unplaced=[...S.master.Areas].sort(assignmentAreaSort).filter(a=>!areaMapShape(a.AreaID));side.innerHTML='<div class="area-map-side-title"><b>ข้อมูลพื้นที่</b><small>คลิกพื้นที่บนผังเพื่อจัดการ</small></div><div class="area-map-empty-panel"><span>ยังไม่วางบนผัง</span><b>'+unplaced.length+' พื้นที่</b></div><div class="area-map-unplaced">'+unplaced.slice(0,14).map(a=>'<button type="button" data-area="'+esc(a.AreaID)+'">'+esc(a.AreaName)+'</button>').join("")+(unplaced.length>14?'<small>และอีก '+(unplaced.length-14)+' พื้นที่</small>':"")+'</div>';side.querySelectorAll("[data-area]").forEach(b=>b.onclick=()=>{areaMapState.selectedAreaId=b.dataset.area;$("area-map-area").value=b.dataset.area;});return;}
-  const area=areaMapArea(s.AreaID);side.innerHTML='<div class="area-map-side-title"><b>'+esc(area?.AreaName||"พื้นที่")+'</b><small>'+esc(areaMapClass(area))+'</small></div><div class="area-map-props"><div><span>ชนิด</span><b>'+(s.ShapeType==="polygon"?"หลายเหลี่ยม":"สี่เหลี่ยม")+'</b></div><div><span>ขนาด</span><b>'+Math.round(s.Width)+' × '+Math.round(s.Height)+'</b></div></div><label class="field"><span>สีพื้นที่</span><input id="area-map-color" type="color" value="'+esc(s.FillColor||"#38bdf8")+'" '+(areaMapState.viewOnly?"disabled":"")+'></label><label class="area-map-lock"><input id="area-map-lock" type="checkbox" '+(s.Locked?"checked":"")+' '+(areaMapState.viewOnly?"disabled":"")+'> ล็อกตำแหน่ง</label>'+(areaMapState.viewOnly?"":'<div class="area-map-side-actions"><button class="btn danger w-full" id="area-map-delete-shape">ลบออกจากผัง</button></div>')+'<div class="area-map-tip">การลบจากผังจะไม่ลบพื้นที่ตรวจ QR เวร หรือประวัติผลตรวจ</div>';
-  const color=$("area-map-color");if(color)color.oninput=()=>{s.FillColor=color.value;areaMapMarkDirty();areaMapRenderSvg();};const lock=$("area-map-lock");if(lock)lock.onchange=()=>{s.Locked=lock.checked;areaMapMarkDirty();areaMapRenderSvg();};const del=$("area-map-delete-shape");if(del)del.onclick=async()=>{const ok=await Swal.fire({icon:"warning",title:"ลบออกจากผัง?",text:(area?.AreaName||"พื้นที่")+" จะยังคงอยู่ในระบบตรวจ",showCancelButton:true,confirmButtonText:"ลบจากผัง",cancelButtonText:"ยกเลิก"});if(!ok.isConfirmed)return;areaMapState.shapes=areaMapState.shapes.filter(x=>x.ShapeID!==s.ShapeID);areaMapState.selectedShapeId="";areaMapState.dirty=true;areaMapRenderEditor();};
+  const side=$("area-map-side");if(!side)return;
+  const s=areaMapState.shapes.find(x=>x.ShapeID===areaMapState.selectedShapeId);
+  if(!s){
+    const unplaced=[...S.master.Areas].sort(assignmentAreaSort).filter(a=>!areaMapShape(a.AreaID));
+    const daySummary=areaMapState.daily?.summary||{};
+    side.innerHTML=
+      '<div class="area-map-side-title"><b>ภาพรวมผัง</b><small>'+esc(areaMapStatusDateText(areaMapState.statusDate))+'</small></div>'+
+      (areaMapState.statusMode
+        ? '<div class="area-map-daily-summary"><div><span>งานตรวจ</span><b>'+Number(daySummary.total||0)+'</b></div><div><span>ตรวจแล้ว</span><b>'+Number(daySummary.done||0)+'</b></div><div><span>รอตรวจ</span><b>'+Number(daySummary.pending||0)+'</b></div><div><span>งดตรวจ</span><b>'+Number(daySummary.skipped||0)+'</b></div></div>'
+        : '')+
+      '<div class="area-map-empty-panel"><span>ยังไม่วางบนผัง</span><b>'+unplaced.length+' พื้นที่</b></div>'+
+      '<div class="area-map-unplaced">'+unplaced.slice(0,14).map(a=>'<button type="button" data-area="'+esc(a.AreaID)+'">'+esc(a.AreaName)+'</button>').join("")+(unplaced.length>14?'<small>และอีก '+(unplaced.length-14)+' พื้นที่</small>':"")+'</div>';
+    side.querySelectorAll("[data-area]").forEach(b=>b.onclick=()=>{areaMapState.selectedAreaId=b.dataset.area;$("area-map-area").value=b.dataset.area;});
+    return;
+  }
+
+  const area=areaMapArea(s.AreaID),status=areaMapStatusInfo(s.AreaID),item=status.item,
+    inspectors=item?.Inspectors?.map(x=>x.Name).filter(Boolean)||[],
+    completed=item?.CompletedAt?(()=>{try{return new Date(item.CompletedAt).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"})+" น.";}catch(e){return item.CompletedAt;}})():"",
+    approval=item?.ApprovalStatus||"",
+    liveHtml=areaMapState.statusMode
+      ? '<div class="area-map-live-detail"><div class="area-map-live-detail-head"><span class="area-map-status-dot" style="background:'+status.color+'"></span><div><b>'+esc(status.label)+'</b><small>'+esc(areaMapStatusDateText(areaMapState.statusDate))+'</small></div></div>'+
+        (item
+          ? '<div class="area-map-detail-list">'+
+              '<div><span>ผู้ตรวจ</span><b>'+esc(inspectors.join(", ")||"—")+'</b></div>'+
+              '<div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div>'+
+              (approval?'<div><span>การรับรอง</span><b>'+esc(approval)+'</b></div>':"")+
+              (completed?'<div><span>เสร็จเมื่อ</span><b>'+esc(completed)+'</b></div>':"")+
+              (item.Notes?'<div><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+
+              (item.HasSubstitute?'<div><span>เวรทดแทน</span><b>มี</b></div>':"")+
+            '</div>'
+          : '<div class="area-map-no-duty">พื้นที่นี้ไม่มีงานตรวจในวันที่เลือก</div>')+
+        '<a class="btn small secondary w-full mt-3" href="#control">เปิดศูนย์ควบคุมงาน</a></div>'
+      : '';
+
+  side.innerHTML=
+    '<div class="area-map-side-title"><b>'+esc(area?.AreaName||"พื้นที่")+'</b><small>'+esc(areaMapClass(area))+'</small></div>'+
+    liveHtml+
+    '<div class="area-map-props"><div><span>ชนิด</span><b>'+(s.ShapeType==="polygon"?"หลายเหลี่ยม":"สี่เหลี่ยม")+'</b></div><div><span>ขนาด</span><b>'+Math.round(s.Width)+' × '+Math.round(s.Height)+'</b></div></div>'+
+    '<label class="field"><span>สีพื้นที่เดิม</span><input id="area-map-color" type="color" value="'+esc(s.FillColor||"#38bdf8")+'" '+(areaMapState.viewOnly?"disabled":"")+'></label>'+
+    (areaMapState.statusMode?'<div class="area-map-tip">ขณะนี้ผังใช้สีสถานะการตรวจ สีพื้นที่เดิมจะเห็นเมื่อปิด “แสดงสีสถานะ”</div>':"")+
+    '<label class="area-map-lock"><input id="area-map-lock" type="checkbox" '+(s.Locked?"checked":"")+' '+(areaMapState.viewOnly?"disabled":"")+'> ล็อกตำแหน่ง</label>'+
+    (areaMapState.viewOnly?"":'<div class="area-map-side-actions"><button class="btn danger w-full" id="area-map-delete-shape">ลบออกจากผัง</button></div>')+
+    '<div class="area-map-tip">การลบจากผังจะไม่ลบพื้นที่ตรวจ QR เวร หรือประวัติผลตรวจ</div>';
+
+  const color=$("area-map-color");if(color)color.oninput=()=>{s.FillColor=color.value;areaMapMarkDirty();areaMapRenderSvg();};
+  const lock=$("area-map-lock");if(lock)lock.onchange=()=>{s.Locked=lock.checked;areaMapMarkDirty();areaMapRenderSvg();};
+  const del=$("area-map-delete-shape");if(del)del.onclick=async()=>{
+    const ok=await Swal.fire({icon:"warning",title:"ลบออกจากผัง?",text:(area?.AreaName||"พื้นที่")+" จะยังคงอยู่ในระบบตรวจ",showCancelButton:true,confirmButtonText:"ลบจากผัง",cancelButtonText:"ยกเลิก"});
+    if(!ok.isConfirmed)return;
+    areaMapState.shapes=areaMapState.shapes.filter(x=>x.ShapeID!==s.ShapeID);
+    areaMapState.selectedShapeId="";
+    areaMapState.dirty=true;
+    areaMapRenderEditor();
+  };
 }
 async function areaMapSave(){busy(true,"กำลังบันทึกผังพื้นที่…");try{const shapes=areaMapState.shapes.map((s,i)=>({ShapeID:s.ShapeID,AreaID:s.AreaID,ShapeType:s.ShapeType,X:Number(s.X||0),Y:Number(s.Y||0),Width:Number(s.Width||0),Height:Number(s.Height||0),Points:(s.Points||[]).map(p=>({x:Number(p.x),y:Number(p.y)})),FillColor:s.FillColor||"#38bdf8",Locked:!!s.Locked,SortOrder:i}));const r=await rpc("saveAreaMapLayout",{shapes});areaMapState.dirty=false;toast("บันทึกผังแล้ว "+Number(r.saved||0)+" พื้นที่");areaMapRenderEditor();}catch(e){error(e);}finally{busy(false);}}
