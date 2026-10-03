@@ -1888,33 +1888,58 @@ async function areaMapLayout(env,u){
   role(u,["Admin","Supervisor","Inspector","Teacher"]);
   const db=env.DB,date=validateDate(p.date||thaiDay()),today=thaiDay();
   if(date===today)await ensureToday(env);
-  const [layout,areas,rows,teams,calendarSchoolDay]=await Promise.all([
+  await ensureDutyOverridesTable(db);
+  const [layout,areas,rows,teams,overrides,calendarSchoolDay,cfg,period]=await Promise.all([
     areaMapLayout(env,u),
     all(db,"SELECT a.area_id,a.area_name,a.responsible_classroom_id,c.class_name FROM areas a LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY a.area_name"),
     all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
     all(db,"SELECT ii.inspection_id,ii.user_id,ii.user_name FROM inspection_inspectors ii JOIN inspections i ON i.inspection_id=ii.inspection_id WHERE i.inspection_date=? ORDER BY ii.inspection_id,ii.user_name",date),
-    schoolDay(env,date)
+    all(db,"SELECT d.*,su.full_name substitute_name,ru.full_name replace_name FROM duty_overrides d JOIN users su ON su.user_id=d.substitute_user_id LEFT JOIN users ru ON ru.user_id=d.replace_user_id WHERE d.override_date=? ORDER BY d.area_id",date),
+    schoolDay(env,date),
+    getAppSettings(db),
+    academicPeriodForDate(db,date)
   ]);
-  const teamMap=new Map();
+  const teamMap=new Map(),overrideMap=new Map();
   teams.forEach(x=>{const id=String(x.inspection_id);if(!teamMap.has(id))teamMap.set(id,[]);teamMap.get(id).push(x);});
+  overrides.forEach(x=>{const id=String(x.area_id);if(!overrideMap.has(id))overrideMap.set(id,[]);overrideMap.get(id).push(x);});
   const rowMap=new Map(rows.map(x=>[String(x.area_id),x]));
   const resolved=rows.filter(x=>x.status==="ตรวจแล้ว"||x.status==="งดตรวจ").length;
   const noActualInspectionHoliday=date<today&&resolved===0;
   const isHoliday=!calendarSchoolDay||noActualInspectionHoliday;
   const holidayReason=!calendarSchoolDay?"วันหยุดตามปฏิทิน":noActualInspectionHoliday?"ไม่มีการตรวจในวันดังกล่าว":"";
   const items=areas.map(a=>{
-    const i=rowMap.get(String(a.area_id)),team=i?(teamMap.get(String(i.inspection_id))||[]):[];
+    const i=rowMap.get(String(a.area_id)),team=i?(teamMap.get(String(i.inspection_id))||[]):[],ovs=overrideMap.get(String(a.area_id))||[];
     const inScope=u.role==="Teacher"?String(a.responsible_classroom_id)===String(u.linked_classroom_id||""):u.role==="Inspector"?team.some(x=>String(x.user_id)===String(u.user_id)):true;
     const st=!inScope?mapStatusMeta("other_area"):isHoliday?mapStatusMeta("holiday"):mapStatusFromInspection(i,team.length);
+    if(!inScope)return{AreaID:String(a.area_id),AreaName:String(a.area_name||"—"),ResponsibleClassroomID:String(a.responsible_classroom_id||""),ClassName:String(a.class_name||"—"),InScope:false,StatusKey:st.key,StatusLabel:st.label,StatusColor:st.color,InspectionID:"",Status:"",Score:0,Rating:"",Notes:"",SkipReason:"",ApprovalStatus:"",CompletedBy:"",CompletedAt:"",Inspectors:[],HasSubstitute:false,Substitutes:[],PhotoLinks:[]};
     const m=i?metaOf(i):{};
-    return{AreaID:String(a.area_id),AreaName:String(a.area_name||"—"),ResponsibleClassroomID:String(a.responsible_classroom_id||""),ClassName:String(a.class_name||"—"),InScope:inScope,StatusKey:st.key,StatusLabel:st.label,StatusColor:st.color,InspectionID:String(i?.inspection_id||""),Status:String(i?.status||""),Score:Number(i?.score||0),Rating:String(i?.rating||""),Notes:String(i?.note||""),SkipReason:String(m.skipReason||""),ApprovalStatus:String(m.approvalStatus||""),CompletedBy:String(m.completedByName||i?.completed_by_name||""),CompletedAt:String(m.completedAt||i?.completed_at||""),Inspectors:team.map(x=>({UserID:String(x.user_id),Name:String(x.user_name||"")}))};
+    return{
+      AreaID:String(a.area_id),AreaName:String(a.area_name||"—"),ResponsibleClassroomID:String(a.responsible_classroom_id||""),ClassName:String(a.class_name||"—"),
+      InScope:true,StatusKey:st.key,StatusLabel:st.label,StatusColor:st.color,
+      InspectionID:String(i?.inspection_id||""),Date:date,Status:String(i?.status||""),Score:Number(i?.score||0),Rating:String(i?.rating||""),
+      Notes:String(i?.note||""),SkipReason:String(m.skipReason||""),ApprovalStatus:String(m.approvalStatus||""),
+      CompletedBy:String(m.completedByName||i?.completed_by_name||""),CompletedAt:String(m.completedAt||i?.completed_at||""),Version:Number(i?.version||0),
+      AdminEditedBy:String(m.adminEditedByName||""),AdminEditedAt:String(m.adminEditedAt||""),AdminEditReason:String(m.adminEditReason||""),
+      Inspectors:team.map(x=>({UserID:String(x.user_id),Name:String(x.user_name||"")})),
+      HasSubstitute:ovs.length>0,
+      Substitutes:ovs.map(x=>({ReplaceName:String(x.replace_name||""),SubstituteName:String(x.substitute_name||""),Reason:String(x.reason||"")})),
+      PhotoLinks:i?parseJson(i.photo_links_json,[]).map(id=>({id})):[]
+    };
   });
-  const visible=items.filter(x=>x.InScope),summary={total:visible.length};
+  const visible=items.filter(x=>x.InScope),scheduled=visible.filter(x=>x.InspectionID),summary={total:scheduled.length,totalAreas:visible.length};
   ["holiday","no_assignment","no_inspector","pending","excellent","medium","improve","skipped","done"].forEach(k=>summary[k]=visible.filter(x=>x.StatusKey===k).length);
   summary.completed=summary.excellent+summary.medium+summary.improve+summary.done;
-  return{date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,decorations:layout.decorations||[],items,summary,updatedAt:nowIso()};
+  summary.done=scheduled.filter(x=>x.Status==="ตรวจแล้ว").length;
+  summary.skipped=scheduled.filter(x=>x.Status==="งดตรวจ").length;
+  summary.resolved=summary.done+summary.skipped;
+  summary.pending=scheduled.filter(x=>x.Status==="รอตรวจ").length;
+  summary.approvalPending=scheduled.filter(x=>x.ApprovalStatus==="รอรับรอง").length;
+  summary.substitute=scheduled.filter(x=>x.HasSubstitute).length;
+  return{
+    date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,decorations:layout.decorations||[],items,summary,settings:cfg,
+    period:period?{PeriodID:period.period_id,Label:period.label,StartDate:period.start_date,EndDate:period.end_date}:null,updatedAt:nowIso()
+  };
 }
-
 async function saveAreaMapLayout(env,u,p){
   role(u,["Admin"]);
   const db=env.DB; await ensureAreaMapTable(db);
