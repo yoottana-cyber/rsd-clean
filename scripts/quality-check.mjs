@@ -2,6 +2,11 @@ import fs from "node:fs";
 
 const files=[
   "functions/api.js",
+  "functions/migrate-api.js",
+  "functions/health.js",
+  "functions/school-logo.js",
+  "drive-gateway/Code.gs",
+  "migration-export/Export.gs",
   "web/core.js",
   "web/admin.js",
   "web/map-editor.js",
@@ -19,7 +24,7 @@ const ok=msg=>console.log("✓",msg);
 for(const path of files){
   try{
     let src=read(path);
-    if(path==="functions/api.js")src=src.replace(/^\s*export\s+/gm,"");
+    if(path.startsWith("functions/"))src=src.replace(/^\s*export\s+/gm,"");
     new Function(src);
     ok("syntax "+path);
   }catch(e){fail("syntax "+path+" — "+e.message);}
@@ -35,6 +40,9 @@ const coverage=read("web/coverage.js");
 const ops=read("web/operations.js");
 const index=read("web/index.html");
 const sw=read("web/sw.js");
+const migrate=read("functions/migrate-api.js");
+const driveGateway=read("drive-gateway/Code.gs");
+const migrationExport=read("migration-export/Export.gs");
 
 const checks=[
   [api.includes("async function mapStatus(env,u,p)"),"central mapStatus API exists"],
@@ -52,6 +60,9 @@ const checks=[
   [api.includes("CERT_TEMPLATE_ORIGINAL")&&api.includes("CERT_TEMPLATE_WORKING")&&api.includes("originalFileId"),"certificate original and working copies are preserved"],
   [sw.includes('k!=="rsd-certificate-template-v1"'),"certificate template cache survives service-worker upgrades"],
   [api.includes("function currentInspectionLabels")&&api.includes("async function currentInspectionNameMaps")&&api.includes("AreaName:label.AreaName")&&api.includes("พื้นที่:label.AreaName"),"historical views resolve current master names"],
+  [api.includes("async function applyCurrentInspectionNames")&&api.includes("await applyCurrentInspectionNames(db,ins)")&&api.includes("await applyCurrentInspectionNames(env.DB,ins)"),"leaderboards and certificates use current master names"],
+  [api.includes('"deleteInspection"].includes(action)')&&api.includes('action === "restoreTrash" && data?.entityType === "Inspections"'),"inspection delete/restore rebuilds rewards"],
+  [api.includes("async function fakeCredentialSalt")&&api.includes('/^[a-f0-9]{32}$/.test(String(c.salt||""))'),"unknown usernames receive indistinguishable PBKDF2 salt shape"],
   [api.includes("async function deleteInspection")&&api.includes('"Inspections",id,recycleLabel("Inspections",snapshot)')&&api.includes('type==="Inspections"'),"recoverable inspection deletion exists"],
   [api.includes('assert(String(row.inspection_date)<thaiDay()')&&api.includes('["ตรวจแล้ว","งดตรวจ"].includes'),"inspection deletion is limited to completed historical records"],
   [coverage.includes("รายงาน อันดับ และเกียรติบัตรของเดือนนั้นเปลี่ยนแปลง"),"inspection delete warning mentions award recalculation"],
@@ -70,8 +81,12 @@ const checks=[
   [core.includes('rpc("mapStatus"'),"admin dashboard uses centralized map status"],
   [inspector.includes('rpc("mapStatus"'),"inspector/teacher maps use centralized map status"],
   [admin.includes('rpc("mapStatus"'),"executive dashboard uses centralized map status"],
-  [index.includes('<script src="/map-enhancements.js"></script>'),"map enhancement script is loaded"],
-  [sw.includes('"/map-enhancements.js"'),"map enhancement script is cached by service worker"],
+  [core.includes("async function ensureRouteModules(route)")&&core.includes('["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]'),"feature modules are lazy-loaded by route"],
+  [index.includes('<script src="/core.js"></script>')&&!index.includes('<script src="/admin.js"></script>')&&!index.includes('<script src="/operations.js"></script>'),"startup HTML loads only the core app bundle"],
+  [sw.includes("TRUSTED_RUNTIME_ORIGINS")&&sw.includes("staleWhileRevalidate(RUNTIME,req)"),"trusted CDN and font dependencies have runtime offline cache"],
+  [sw.includes('const CERT_CACHE="rsd-certificate-template-v1"')&&sw.includes("k!==CERT_CACHE"),"certificate template cache survives service-worker upgrades"],
+  [migrate.includes("ปิดการแทนที่ข้อมูลผ่านหน้า Migration แล้ว")&&migrate.includes("async function clearImported"),"migration cannot erase a populated D1 and rolls back partial imports"],
+  [!driveGateway.includes("DRIVE_GATEWAY_KEY='+p.getProperty")&&!migrationExport.includes("RSD_PEPPER='+pepper"),"setup scripts do not print secrets to logs"],
   [/const CACHE="rsd-clean-v2-shell-\d+"/.test(sw),"service worker cache version is valid"]
 ];
 
