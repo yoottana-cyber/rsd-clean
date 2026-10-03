@@ -284,6 +284,8 @@ function rsdMapRenderVertices(){
 }
 function rsdMapWireEditorGestures(){
   const svg=$("area-map-svg"),scroll=svg?.closest(".area-map-scroll");if(!svg||!scroll)return;
+  if(svg.dataset.rsdGestures==="1")return;
+  svg.dataset.rsdGestures="1";
   svg.addEventListener("pointerdown",e=>{
     if(rsdMapEnh.pan){
       e.preventDefault();e.stopImmediatePropagation();
@@ -453,6 +455,25 @@ function rsdMapDrawDecorationsToCanvas(ctx){
     ctx.restore();
   }
 }
+function rsdMapRedrawAreaShapes(ctx){
+  for(const s of areaMapState.shapes||[]){
+    const area=areaMapArea(s.AreaID),st=areaMapStatusInfo(s.AreaID),
+      saved=/^#[0-9a-f]{6}$/i.test(String(s.FillColor||""))?s.FillColor:"#38bdf8",
+      fill=areaMapState.statusMode?st.color:saved,c=areaMapExportShapeCenter(s);
+    ctx.save();
+    ctx.fillStyle=fill;
+    ctx.globalAlpha=areaMapState.statusMode&&st.key==="no_assignment"?.33:areaMapState.statusMode&&st.key==="holiday"?.3:areaMapState.statusMode&&st.key==="pending"?.52:.58;
+    ctx.strokeStyle=areaMapState.statusMode&&st.key==="improve"?"#991b1b":areaMapState.statusMode&&st.key==="excellent"?"#166534":"#315c69";
+    ctx.lineWidth=2.4;if(s.Locked)ctx.setLineDash([8,5]);ctx.beginPath();
+    if(s.ShapeType==="polygon"&&s.Points?.length>=3){ctx.moveTo(Number(s.Points[0].x),Number(s.Points[0].y));for(let i=1;i<s.Points.length;i++)ctx.lineTo(Number(s.Points[i].x),Number(s.Points[i].y));ctx.closePath();}
+    else{const x=Number(s.X||0),y=Number(s.Y||0),w=Number(s.Width||0),h=Number(s.Height||0),r=Math.min(10,w/2,h/2);ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+    ctx.fill();ctx.globalAlpha=1;ctx.stroke();ctx.restore();
+    ctx.save();ctx.textAlign="center";ctx.textBaseline="middle";ctx.lineJoin="round";ctx.strokeStyle="#fff";ctx.lineWidth=4;ctx.fillStyle="#173943";ctx.font='700 15px "Kanit"';
+    const name=String(area?.AreaName||s.AreaName||"พื้นที่");ctx.strokeText(name,c.x,c.y-5);ctx.fillText(name,c.x,c.y-5);
+    ctx.lineWidth=3;ctx.fillStyle="#415f68";ctx.font='500 11px "Kanit"';const cls=String(areaMapClass(area)||s.ClassName||"");ctx.strokeText(cls,c.x,c.y+14);ctx.fillText(cls,c.x,c.y+14);ctx.restore();
+  }
+}
+
 async function rsdMapBuildReportCanvas(kind="169"){
   const includeReference=!!$("area-map-export-reference")?.checked&&!!areaMapState.referenceDataUrl,layout=kind==="a4"?{w:1754,h:1240,p:46}:{w:1920,h:1080,p:44};
   await areaMapEnsureKanitFont();
@@ -467,7 +488,7 @@ async function rsdMapBuildReportCanvas(kind="169"){
   summary.forEach((v,i)=>areaMapExportSummaryCard(ctx,layout.p+i*(cardW+gap),cardY,cardW,cardH,v[0],v[1],v[2]));
   const mapTop=194,legendH=58,mapBottom=layout.h-layout.p-legendH,boxW=layout.w-layout.p*2,boxH=mapBottom-mapTop,scale=Math.min(boxW/AREA_MAP_W,boxH/AREA_MAP_H),drawW=AREA_MAP_W*scale,drawH=AREA_MAP_H*scale,drawX=layout.p+(boxW-drawW)/2,drawY=mapTop+(boxH-drawH)/2;
   ctx.save();ctx.fillStyle="#fff";ctx.strokeStyle="#d7e4e8";ctx.lineWidth=1.2;areaMapExportRoundRect(ctx,drawX-8,drawY-8,drawW+16,drawH+16,16);ctx.fill();ctx.stroke();ctx.restore();
-  const mapCanvas=await areaMapExportMapCanvas(includeReference);rsdMapDrawDecorationsToCanvas(mapCanvas.getContext("2d"));ctx.drawImage(mapCanvas,drawX,drawY,drawW,drawH);
+  const mapCanvas=await areaMapExportMapCanvas(includeReference),mapCtx=mapCanvas.getContext("2d");rsdMapDrawDecorationsToCanvas(mapCtx);rsdMapRedrawAreaShapes(mapCtx);ctx.drawImage(mapCanvas,drawX,drawY,drawW,drawH);
   const ly=layout.h-layout.p-20;let lx=layout.p;summary.forEach(v=>{areaMapExportLegend(ctx,lx,ly,v[2],v[0],v[1]);lx+=kind==="a4"?128:150;});
   return canvas;
 }
