@@ -823,11 +823,11 @@ const adminTables = {
     return '<span class="exec-delta '+cls+'">'+sign+d.toLocaleString("th-TH",{maximumFractionDigits:digits})+suffix+'</span>';
   }
   function execSummaryText(d){
-    const t=d.todayStats||{},l=d.last30||{};
-    if(!t.scheduled)return "วันนี้ไม่มีงานตรวจตามตาราง หรือเป็นวันหยุด";
+    const t=d.todayStats||{},l=d.last30||{},ref=d.referenceDate===d.today?"วันนี้":"วันที่อ้างอิง",labels=d.settings?.scoreLabels||S.config?.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
+    if(!t.scheduled)return ref+"ไม่มีงานตรวจตามตาราง หรือเป็นวันหยุด";
     const parts=[
-      "วันนี้ตรวจแล้ว "+t.done+"/"+t.scheduled+" พื้นที่ ("+execPct(t.completionRate)+")",
-      "ยอดเยี่ยม "+t.excellent+" · ปานกลาง "+t.medium+" · ปรับปรุง "+t.improve
+      ref+"ตรวจแล้ว "+t.done+"/"+t.scheduled+" พื้นที่ ("+execPct(t.completionRate)+")",
+      labels["3"]+" "+t.excellent+" · "+labels["2"]+" "+t.medium+" · "+labels["1"]+" "+t.improve
     ];
     if(t.pending)parts.push("ยังเหลือ "+t.pending+" พื้นที่รอตรวจ");
     if(l.done)parts.push("30 วันล่าสุดคะแนนเฉลี่ย "+execScore(l.averageScore)+" จาก 3");
