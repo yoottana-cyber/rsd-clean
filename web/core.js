@@ -830,11 +830,13 @@
     S.charts.forEach((c) => c.destroy());
     S.charts = [];
     if (!S.scanToken) S.scanToken = getPendingQr();
-    let p = (location.hash.slice(1).split("?")[0] || "home");
+    const requestedRoute=(location.hash.slice(1).split("?")[0] || "home");
+    let p=requestedRoute;
     if(p==="home") p=homeRouteForUser();
     if (S.user && p === "login") p = homeRouteForUser();
     if (S.user && p === "dashboard" && S.user.Role === "Teacher") p = "teacher";
-    if (S.user && S.scanToken && S.user.Role === "Inspector") p = "tasks";
+    // Pending QR may redirect only during app entry/login. Explicit menu navigation must always win.
+    if (S.user && S.scanToken && S.user.Role === "Inspector" && (requestedRoute==="home" || requestedRoute==="login")) p = "tasks";
     if (!S.user && p !== "dashboard") p = "login";
     if (S.user && pages[p] && !pages[p].roles.includes(S.user.Role))
       p = homeRouteForUser();
