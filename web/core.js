@@ -993,19 +993,13 @@
     return{x:Number(shape.X||0)+Number(shape.Width||0)/2,y:Number(shape.Y||0)+Number(shape.Height||0)/2};
   }
   function dashboardAdminMapHtml(pack,date){
-    const shapes=pack?.shapes||[],items=pack?.items||[],decorations=pack?.decorations||[];
+    const shapes=pack?.shapes||[],items=pack?.items||[];
     if(!shapes.length)return '<section class="card dashboard-map-card mb-6"><div class="dashboard-map-head"><div><span class="muted">ผังสถานะ</span><h2>ภาพรวมพื้นที่</h2></div><a class="btn small secondary" href="#admin">ตั้งค่าผัง</a></div><div class="dashboard-map-empty">ยังไม่มีพื้นที่บนผัง · เข้า “จัดการข้อมูลระบบ → ผังพื้นที่” เพื่อเริ่มวางพื้นที่</div></section>';
     const byArea=new Map(items.map(x=>[String(x.AreaID),x])),counts={holiday:0,no_assignment:0,no_inspector:0,pending:0,excellent:0,medium:0,improve:0,skipped:0,done:0};
     items.filter(x=>x.InScope!==false).forEach(x=>{const k=dashboardMapStatus(x).key;counts[k]=(counts[k]||0)+1;});
     let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
     let opacity=.65;try{opacity=Math.max(.1,Math.min(1,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||65)/100));}catch(e){}
     const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
-    const decor=decorations.map(d=>{
-      const fill=esc(d.FillColor||"#dbeafe"),stroke=esc(d.StrokeColor||"#64748b"),op=Number(d.Opacity??.45);
-      const geo=d.ShapeType==="polygon"?'<polygon points="'+(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+fill+'" stroke="'+stroke+'" fill-opacity="'+op+'"/>':'<rect x="'+Number(d.X||0)+'" y="'+Number(d.Y||0)+'" width="'+Number(d.Width||0)+'" height="'+Number(d.Height||0)+'" rx="7" fill="'+fill+'" stroke="'+stroke+'" fill-opacity="'+op+'"/>';
-      const c=dashboardMapCenter(d);
-      return '<g class="dashboard-map-decor">'+geo+(d.Label?'<text x="'+c.x+'" y="'+c.y+'" text-anchor="middle">'+esc(d.Label)+'</text>':"")+'</g>';
-    }).join("");
     const body=shapes.map(s=>{
       const item=byArea.get(String(s.AreaID)),status=dashboardMapStatus(item),center=dashboardMapCenter(s),geo=s.ShapeType==="polygon"?'<polygon points="'+(s.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+status.color+'"/>':'<rect x="'+Number(s.X||0)+'" y="'+Number(s.Y||0)+'" width="'+Number(s.Width||0)+'" height="'+Number(s.Height||0)+'" rx="10" fill="'+status.color+'"/>';
       return '<g class="dashboard-map-shape" data-area="'+esc(s.AreaID)+'">'+geo+'<text x="'+center.x+'" y="'+(center.y-4)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(s.AreaName||item?.AreaName||"พื้นที่")+'</tspan>'+(item?.ClassName||s.ClassName?'<tspan class="sub" x="'+center.x+'" dy="17">'+esc(item?.ClassName||s.ClassName||"")+'</tspan>':"")+'</text></g>';
@@ -1013,7 +1007,7 @@
     const legend=[
       ["#cbd5e1","วันหยุด",counts.holiday],["#94a3b8","ไม่มีเวร",counts.no_assignment],["#a78bfa","ไม่มีผู้ตรวจ",counts.no_inspector],["#facc15","รอตรวจ",counts.pending],["#22c55e","ยอดเยี่ยม",counts.excellent],["#f59e0b","ปานกลาง",counts.medium],["#ef4444","ปรับปรุง",counts.improve],["#64748b","งดตรวจ",counts.skipped]
     ].filter(x=>x[2]>0).map(x=>'<span><i style="background:'+x[0]+'"></i>'+x[1]+' <b>'+Number(x[2]||0)+'</b></span>').join("");
-    return '<section class="card dashboard-map-card mb-6"><div class="dashboard-map-head"><div><span class="muted">สถานะ '+esc(typeof opDateText==="function"?opDateText(date):date)+'</span><h2>ผังภาพรวมพื้นที่วันนี้</h2></div><a class="btn small" href="#control" id="dashboard-open-control-map"><i data-lucide="maximize-2"></i> เปิดผังเต็ม</a></div><div class="dashboard-map-legend">'+legend+'</div><div class="dashboard-map-frame"><svg viewBox="0 0 1600 1000" role="img" aria-label="ผังสถานะพื้นที่"><rect width="1600" height="1000" fill="#fff"/>'+reference+decor+body+'</svg></div></section>';
+    return '<section class="card dashboard-map-card mb-6"><div class="dashboard-map-head"><div><span class="muted">สถานะ '+esc(typeof opDateText==="function"?opDateText(date):date)+'</span><h2>ผังภาพรวมพื้นที่วันนี้</h2></div><a class="btn small" href="#control" id="dashboard-open-control-map"><i data-lucide="maximize-2"></i> เปิดผังเต็ม</a></div><div class="dashboard-map-legend">'+legend+'</div><div class="dashboard-map-frame"><svg viewBox="0 0 1600 1000" role="img" aria-label="ผังสถานะพื้นที่"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div></section>';
   }
   async function renderDashboard(seq) {
     $("app").innerHTML =
@@ -1034,6 +1028,7 @@
     if(S.user?.Role==="Admin"){
       const result=await Promise.all([rpc("dashboard",{date},silent),rpc("mapStatus",{date},true).catch(()=>null)]);
       d=result[0];adminMapPack=result[1];
+      if(adminMapPack&&window.rsdEnsureMapReference)await window.rsdEnsureMapReference(adminMapPack);
     }else{
       d=await rpc(S.user ? "dashboard" : "publicDashboard",{date},silent);
     }
