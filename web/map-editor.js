@@ -360,7 +360,7 @@ function areaMapRenderSide(){
     approval=item?.ApprovalStatus||"",
     liveHtml=areaMapState.statusMode
       ? '<div class="area-map-live-detail"><div class="area-map-live-detail-head"><span class="area-map-status-dot" style="background:'+status.color+'"></span><div><b>'+esc(status.label)+'</b><small>'+esc(areaMapStatusDateText(areaMapState.statusDate))+'</small></div></div>'+
-        (item
+        (item?.InspectionID
           ? '<div class="area-map-detail-list">'+
               '<div><span>ผู้ตรวจ</span><b>'+esc(inspectors.join(", ")||"—")+'</b></div>'+
               '<div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div>'+
