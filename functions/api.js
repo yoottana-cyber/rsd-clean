@@ -1074,6 +1074,8 @@ async function saveAcademicPeriod(env,u,p){
   const id=text(p.id||"",100)||uuid(),year=text(p.academicYear,20),semester=text(p.semester,30),label=text(p.label,120),start=validateDate(p.startDate),end=validateDate(p.endDate),active=p.isActive===true,now=nowIso();
   assert(year&&semester&&label,"กรอกข้อมูลปีการศึกษา/ภาคเรียนให้ครบ");
   assert(start<=end,"วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด");
+  const overlap=await db.prepare("SELECT period_id,label FROM academic_periods WHERE period_id<>? AND start_date<=? AND end_date>=? LIMIT 1").bind(id,end,start).first();
+  assert(!overlap,"ช่วงวันที่ซ้อนกับ "+String(overlap?.label||"ภาคเรียนอื่น"));
   if(active)await db.prepare("UPDATE academic_periods SET is_active=0,updated_at=? WHERE is_active=1").bind(now).run();
   await db.prepare(`INSERT INTO academic_periods(period_id,academic_year,semester,label,start_date,end_date,is_active,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?)
