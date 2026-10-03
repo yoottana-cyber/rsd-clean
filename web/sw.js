@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-48";
+const CACHE="rsd-clean-v2-shell-49";
 const SHELL=[
   "/",
   "/index.html",
