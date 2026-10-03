@@ -286,21 +286,30 @@ function coverageBar(label,n,total,cls){
    ========================= */
 let coverageExportData=null;
 async function renderExportCenter(seq){
-  const opts=await rpc("historyOptions",{},true);if(seq!==S.seq)return;
-  const teacher=S.user?.Role==="Teacher";
+  const [opts,periods]=await Promise.all([rpc("historyOptions",{},true),rpc("academicPeriods",{},true)]);if(seq!==S.seq)return;
+  const teacher=S.user?.Role==="Teacher",active=periods.find(x=>x.IsActive);
   const classOptions=opts.classes.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join("");
   const areaOptions=opts.areas.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join("");
   $("app").innerHTML=
     heading("ส่งออกรายงาน 📤","สร้างไฟล์ Excel และ PDF สำหรับรายงาน/หลักฐาน")+
     '<form id="export-filter" class="card coverage-export-filter">'+
-      '<div class="field"><label>เริ่ม</label><input id="export-start" type="date" value="'+coverageShiftDay(thaiDay(),-29)+'"></div>'+
-      '<div class="field"><label>ถึง</label><input id="export-end" type="date" value="'+thaiDay()+'" max="'+thaiDay()+'"></div>'+
+      '<div class="field"><label>ปีการศึกษา / ภาคเรียน</label><select id="export-period"><option value="">กำหนดช่วงเอง</option>'+periods.map(x=>'<option value="'+esc(x.PeriodID)+'" data-start="'+esc(x.StartDate)+'" data-end="'+esc(x.EndDate)+'" '+(x.IsActive?"selected":"")+'>'+esc(x.Label)+'</option>').join("")+'</select></div>'+
+      '<div class="field"><label>เริ่ม</label><input id="export-start" type="date" value="'+esc(active?.StartDate||coverageShiftDay(thaiDay(),-29))+'"></div>'+
+      '<div class="field"><label>ถึง</label><input id="export-end" type="date" value="'+esc(active?((active.EndDate<thaiDay())?active.EndDate:thaiDay()):thaiDay())+'" max="'+thaiDay()+'"></div>'+
       '<div class="field"><label>ห้องเรียน</label><select id="export-class"><option value="">ทุกห้อง</option>'+classOptions+'</select></div>'+
       '<div class="field"><label>พื้นที่</label><select id="export-area"><option value="">ทุกพื้นที่</option>'+areaOptions+'</select></div>'+
       '<button class="btn" type="submit"><i data-lucide="search"></i> เตรียมข้อมูล</button>'+
     '</form>'+
     '<div id="export-content" class="mt-4"><div class="card empty">เลือกช่วงวันที่แล้วกด “เตรียมข้อมูล”</div></div>';
   if(teacher&&opts.classes[0]){$("export-class").value=opts.classes[0].id;$("export-class").disabled=true;}
+  $("export-period").onchange=()=>{
+    const o=$("export-period").selectedOptions[0];
+    if(o?.value){
+      $("export-start").value=o.dataset.start;
+      $("export-end").value=o.dataset.end<thaiDay()?o.dataset.end:thaiDay();
+      loadExportPreview().catch(error);
+    }
+  };
   try{
     const pref=JSON.parse(sessionStorage.getItem("rsd-export-prefill")||"null");
     if(pref){
