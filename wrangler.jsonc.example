@@ -3,6 +3,12 @@
   "name": "rsd-clean",
   "pages_build_output_dir": "./web",
   "compatibility_date": "2026-10-01",
+  // VAPID_PUBLIC_KEY is safe to expose; generate it from Admin → Push in RSD Clean.
+  // Keep VAPID_PRIVATE_JWK as a Cloudflare Secret — never commit it here.
+  "vars": {
+    "VAPID_PUBLIC_KEY": "PUT_YOUR_VAPID_PUBLIC_KEY_HERE",
+    "VAPID_SUBJECT": "https://rsd-clean.pages.dev"
+  },
   "d1_databases": [
     {
       "binding": "DB",
