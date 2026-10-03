@@ -1770,6 +1770,15 @@ async function ensureToday(env) {
     existing=await all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date);
   }
   const current=new Map(existing.map(i=>[i.area_id,i])),sync=[];
+  // Remove only untouched pending work whose area no longer has any current duty.
+  // Completed/skipped records are historical evidence and are never removed here.
+  for(const i of existing){
+    if(i.status==="รอตรวจ"&&!byArea.has(i.area_id)){
+      sync.push(db.prepare("DELETE FROM inspection_inspectors WHERE inspection_id=?").bind(i.inspection_id));
+      sync.push(db.prepare("DELETE FROM inspections WHERE inspection_id=? AND status='รอตรวจ'").bind(i.inspection_id));
+      current.delete(i.area_id);
+    }
+  }
   for(const [areaId,team] of byArea){
     const i=current.get(areaId); if(!i||i.status!=="รอตรวจ")continue;
     sync.push(db.prepare("DELETE FROM inspection_inspectors WHERE inspection_id=?").bind(i.inspection_id));
