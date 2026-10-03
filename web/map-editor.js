@@ -395,6 +395,138 @@ function areaMapRenderSide(){
   };
 }
 
+
+async function areaMapEnsureKanitFont(){
+  if(!document.fonts)return;
+  await Promise.all([
+    document.fonts.load('300 16px "Kanit"'),
+    document.fonts.load('400 16px "Kanit"'),
+    document.fonts.load('500 16px "Kanit"'),
+    document.fonts.load('600 16px "Kanit"'),
+    document.fonts.load('700 16px "Kanit"')
+  ]);
+  await document.fonts.ready;
+}
+function areaMapExportLoadImageSource(src){
+  return new Promise((resolve,reject)=>{
+    if(!src)return resolve(null);
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=()=>reject(new Error("โหลดภาพอ้างอิงไม่สำเร็จ"));
+    img.src=src;
+  });
+}
+function areaMapExportShapeCenter(s){
+  if(s.ShapeType==="polygon"&&Array.isArray(s.Points)&&s.Points.length){
+    const sum=s.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
+    return{x:sum.x/s.Points.length,y:sum.y/s.Points.length};
+  }
+  return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
+}
+async function areaMapExportMapCanvas(includeReference){
+  const canvas=document.createElement("canvas"),ctx=canvas.getContext("2d");
+  canvas.width=AREA_MAP_W;
+  canvas.height=AREA_MAP_H;
+  ctx.fillStyle="#ffffff";
+  ctx.fillRect(0,0,AREA_MAP_W,AREA_MAP_H);
+
+  if(includeReference&&areaMapState.referenceDataUrl){
+    const img=await areaMapExportLoadImageSource(areaMapState.referenceDataUrl);
+    if(img){
+      ctx.save();
+      ctx.globalAlpha=Math.max(.1,Math.min(1,Number(areaMapState.referenceOpacity||.65)));
+      ctx.drawImage(img,0,0,AREA_MAP_W,AREA_MAP_H);
+      ctx.restore();
+    }
+  }
+
+  if(areaMapState.gridVisible){
+    ctx.save();
+    ctx.globalAlpha=.45;
+    for(let x=20;x<AREA_MAP_W;x+=20){
+      ctx.beginPath();
+      ctx.strokeStyle=x%100===0?"#b9cfd5":"#dbe8eb";
+      ctx.lineWidth=x%100===0?1.6:1;
+      ctx.moveTo(x,0);ctx.lineTo(x,AREA_MAP_H);ctx.stroke();
+    }
+    for(let y=20;y<AREA_MAP_H;y+=20){
+      ctx.beginPath();
+      ctx.strokeStyle=y%100===0?"#b9cfd5":"#dbe8eb";
+      ctx.lineWidth=y%100===0?1.6:1;
+      ctx.moveTo(0,y);ctx.lineTo(AREA_MAP_W,y);ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if(!(includeReference&&areaMapState.referenceDataUrl)){
+    ctx.textAlign="center";
+    ctx.fillStyle="#173e4b";
+    ctx.font='700 26px "Kanit"';
+    ctx.fillText("แผนผังแสดงเขตพื้นที่รับผิดชอบของนักเรียน",800,52);
+    ctx.fillStyle="#78909a";
+    ctx.font='400 15px "Kanit"';
+    ctx.fillText("โรงเรียนรัษฎา · RSD Clean Interactive Map",800,82);
+  }
+
+  const shapes=[...areaMapState.shapes].sort((a,b)=>Number(a.SortOrder||0)-Number(b.SortOrder||0));
+  for(const s of shapes){
+    const area=areaMapArea(s.AreaID),
+      center=areaMapExportShapeCenter(s),
+      status=areaMapStatusInfo(s.AreaID),
+      savedColor=/^#[0-9a-f]{6}$/i.test(String(s.FillColor||""))?s.FillColor:"#38bdf8",
+      fill=areaMapState.statusMode?status.color:savedColor;
+
+    ctx.save();
+    ctx.fillStyle=fill;
+    ctx.globalAlpha=areaMapState.statusMode&&status.key==="none"?.33:areaMapState.statusMode&&status.key==="pending"?.52:.58;
+    ctx.strokeStyle=areaMapState.statusMode&&status.key==="improve"?"#991b1b":areaMapState.statusMode&&status.key==="excellent"?"#166534":"#315c69";
+    ctx.lineWidth=2.4;
+    if(s.Locked)ctx.setLineDash([8,5]);
+
+    ctx.beginPath();
+    if(s.ShapeType==="polygon"&&Array.isArray(s.Points)&&s.Points.length>=3){
+      ctx.moveTo(Number(s.Points[0].x),Number(s.Points[0].y));
+      for(let i=1;i<s.Points.length;i++)ctx.lineTo(Number(s.Points[i].x),Number(s.Points[i].y));
+      ctx.closePath();
+    }else{
+      const x=Number(s.X||0),y=Number(s.Y||0),w=Number(s.Width||0),h=Number(s.Height||0),r=Math.min(10,w/2,h/2);
+      ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,x+w,y+h,r);
+      ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r);
+      ctx.arcTo(x,y,x+w,y,r);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.globalAlpha=1;
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw all map labels directly on Canvas with Kanit.
+    ctx.save();
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.lineJoin="round";
+    ctx.strokeStyle="#ffffff";
+    ctx.lineWidth=4;
+    ctx.fillStyle="#173943";
+    ctx.font='700 15px "Kanit"';
+    const name=String(area?.AreaName||"พื้นที่");
+    ctx.strokeText(name,center.x,center.y-5);
+    ctx.fillText(name,center.x,center.y-5);
+
+    ctx.strokeStyle="#ffffff";
+    ctx.lineWidth=3;
+    ctx.fillStyle="#415f68";
+    ctx.font='500 11px "Kanit"';
+    const classroom=String(areaMapClass(area)||"");
+    ctx.strokeText(classroom,center.x,center.y+14);
+    ctx.fillText(classroom,center.x,center.y+14);
+    ctx.restore();
+  }
+  return canvas;
+}
+
 function areaMapExportFilename(kind){
   const d=String(areaMapState.statusDate||thaiDay()).replace(/-/g,"");
   return kind==="a4"?"RSD-Clean-Area-Map-A4-"+d+".png":"RSD-Clean-Area-Map-16x9-"+d+".png";
@@ -480,14 +612,14 @@ function areaMapExportSummaryCard(ctx,x,y,w,h,label,value,color){
   ctx.fillStyle="#ffffff";ctx.strokeStyle="#dbe7ea";ctx.lineWidth=1;
   areaMapExportRoundRect(ctx,x,y,w,h,13);ctx.fill();ctx.stroke();
   ctx.fillStyle=color;ctx.beginPath();ctx.arc(x+16,y+18,6,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle="#6d8189";ctx.font='12px "Kanit","Noto Sans Thai",Tahoma,sans-serif';ctx.fillText(label,x+29,y+22);
-  ctx.fillStyle="#193d49";ctx.font='700 25px "Kanit","Noto Sans Thai",Tahoma,sans-serif';ctx.fillText(String(value),x+14,y+53);
+  ctx.fillStyle="#6d8189";ctx.font='12px "Kanit"';ctx.fillText(label,x+29,y+22);
+  ctx.fillStyle="#193d49";ctx.font='700 25px "Kanit"';ctx.fillText(String(value),x+14,y+53);
   ctx.restore();
 }
 function areaMapExportLegend(ctx,x,y,color,label,value){
   ctx.save();
   ctx.fillStyle=color;ctx.beginPath();ctx.arc(x+5,y-4,5,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle="#526d76";ctx.font='11px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+  ctx.fillStyle="#526d76";ctx.font='11px "Kanit"';
   ctx.fillText(label+" "+String(value),x+16,y);
   ctx.restore();
 }
@@ -508,16 +640,16 @@ async function areaMapExportImage(kind="169"){
 
   busy(true,"กำลังสร้างภาพรายงาน…");
   try{
-    if(document.fonts?.ready)await document.fonts.ready;
+    await areaMapEnsureKanitFont();
     const canvas=document.createElement("canvas"),ctx=canvas.getContext("2d");
     canvas.width=layout.w;canvas.height=layout.h;
     ctx.fillStyle="#f3f8f9";ctx.fillRect(0,0,layout.w,layout.h);
 
-    ctx.fillStyle="#143b47";ctx.font='700 30px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+    ctx.fillStyle="#143b47";ctx.font='700 30px "Kanit"';
     ctx.fillText("รายงานสถานะการตรวจความสะอาดตามพื้นที่",layout.p,48);
-    ctx.fillStyle="#607983";ctx.font='14px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+    ctx.fillStyle="#607983";ctx.font='14px "Kanit"';
     ctx.fillText("โรงเรียนรัษฎา · "+areaMapExportDateText(),layout.p,76);
-    ctx.font='11px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+    ctx.font='11px "Kanit"';
     ctx.fillText("สร้างรายงานเมื่อ "+areaMapExportGeneratedText(),layout.p,96);
 
     const s=areaMapExportSummary(),
@@ -543,8 +675,8 @@ async function areaMapExportImage(kind="169"){
     ctx.fillStyle="#fff";ctx.strokeStyle="#d7e4e8";ctx.lineWidth=1.2;
     areaMapExportRoundRect(ctx,drawX-8,drawY-8,drawW+16,drawH+16,16);ctx.fill();ctx.stroke();ctx.restore();
 
-    const svg=areaMapExportSvg(includeReference),img=await areaMapExportSvgImage(svg);
-    ctx.drawImage(img,drawX,drawY,drawW,drawH);
+    const mapCanvas=await areaMapExportMapCanvas(includeReference);
+    ctx.drawImage(mapCanvas,drawX,drawY,drawW,drawH);
 
     const ly=layout.h-layout.p-20;
     let lx=layout.p;
@@ -553,7 +685,7 @@ async function areaMapExportImage(kind="169"){
       lx+=kind==="a4"?128:140;
     });
 
-    ctx.fillStyle="#81939a";ctx.font='10px "Kanit","Noto Sans Thai",Tahoma,sans-serif';ctx.textAlign="right";
+    ctx.fillStyle="#81939a";ctx.font='10px "Kanit"';ctx.textAlign="right";
     ctx.fillText(includeReference?"รวมภาพอ้างอิงพื้นหลัง":"ไม่รวมภาพอ้างอิงพื้นหลัง",layout.w-layout.p,ly);
     ctx.textAlign="left";
 
