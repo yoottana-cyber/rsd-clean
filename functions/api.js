@@ -512,10 +512,12 @@ async function buildBackupBundle(env){
   await ensureDutyOverridesTable(env.DB);
   await ensureAcademicPeriodsTable(env.DB);
   await ensurePushSubscriptionsTable(env.DB);
+  await ensureAreaMapTable(env.DB);
   const specs=[
     ["users","SELECT * FROM users ORDER BY user_id"],
     ["classrooms","SELECT * FROM classrooms ORDER BY classroom_id"],
     ["areas","SELECT * FROM areas ORDER BY area_id"],
+    ["area_map_shapes","SELECT * FROM area_map_shapes ORDER BY sort_order,shape_id"],
     ["assignments","SELECT * FROM assignments ORDER BY assignment_id"],
     ["inspections","SELECT * FROM inspections ORDER BY inspection_date,inspection_id"],
     ["inspection_inspectors","SELECT * FROM inspection_inspectors ORDER BY inspection_id,user_id"],
@@ -555,6 +557,7 @@ function backupArrays(b){
   t.duty_overrides=Array.isArray(b.tables.duty_overrides)?b.tables.duty_overrides:[];
   t.academic_periods=Array.isArray(b.tables.academic_periods)?b.tables.academic_periods:[];
   t.push_subscriptions=Array.isArray(b.tables.push_subscriptions)?b.tables.push_subscriptions:[];
+  t.area_map_shapes=Array.isArray(b.tables.area_map_shapes)?b.tables.area_map_shapes:[];
   return t;
 }
 function uniqueBackup(rows,key,label,transform=v=>String(v??"")){
@@ -613,6 +616,13 @@ function validateBackupBundle(b){
     if(String(r.replace_user_id||""))assert(userIds.has(String(r.replace_user_id)),"เวรทดแทนอ้างอิงผู้ตรวจเดิมที่ไม่มีอยู่");
   }
   for(const r of t.push_subscriptions)assert(userIds.has(String(r.user_id)),"Push subscription อ้างอิงผู้ใช้ที่ไม่มีอยู่");
+  const mapShapeIds=new Set(),mapAreaIds=new Set();
+  for(const r of t.area_map_shapes){
+    const sid=String(r.shape_id||""),aid=String(r.area_id||"");
+    assert(sid&&!mapShapeIds.has(sid),"ผังพื้นที่มี ShapeID ซ้ำ"); mapShapeIds.add(sid);
+    assert(areaIds.has(aid),"ผังพื้นที่อ้างอิงพื้นที่ที่ไม่มีอยู่");
+    assert(!mapAreaIds.has(aid),"ผังพื้นที่มีพื้นที่ซ้ำ"); mapAreaIds.add(aid);
+  }
   return{tables:t,counts:Object.fromEntries(Object.entries(t).map(([k,v])=>[k,v.length]))};
 }
 async function runDbBatches(db,stmts,size=50){
@@ -626,6 +636,7 @@ async function restoreBackup(env,u,p){
   await ensureDutyOverridesTable(db);
   await ensureAcademicPeriodsTable(db);
   await ensurePushSubscriptionsTable(db);
+  await ensureAreaMapTable(db);
 
   // Safety snapshot: restoration is blocked if the current state cannot be backed up first.
   const before=await buildBackupBundle(env),beforeContent=JSON.stringify(before);
@@ -641,6 +652,7 @@ async function restoreBackup(env,u,p){
     db.prepare("DELETE FROM rewards_log"),
     db.prepare("DELETE FROM sessions"),
     db.prepare("DELETE FROM upload_tickets"),
+    db.prepare("DELETE FROM area_map_shapes"),
     db.prepare("DELETE FROM areas"),
     db.prepare("DELETE FROM users"),
     db.prepare("DELETE FROM classrooms"),
@@ -660,6 +672,9 @@ async function restoreBackup(env,u,p){
     .bind(String(r.user_id),String(r.username).toLowerCase(),String(r.password),String(r.full_name),String(r.role),String(r.linked_classroom_id||""),String(r.created_at||now),String(r.updated_at||now))));
   await runDbBatches(db,t.areas.map(r=>db.prepare("INSERT INTO areas(area_id,area_name,responsible_classroom_id,created_at,updated_at) VALUES(?,?,?,?,?)")
     .bind(String(r.area_id),String(r.area_name),String(r.responsible_classroom_id),String(r.created_at||now),String(r.updated_at||now))));
+  await ensureAreaMapTable(db);
+  await runDbBatches(db,t.area_map_shapes.map(r=>db.prepare("INSERT INTO area_map_shapes(shape_id,area_id,shape_type,x,y,width,height,points_json,fill_color,locked,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(String(r.shape_id),String(r.area_id),String(r.shape_type||"rect"),Number(r.x||0),Number(r.y||0),Number(r.width||0),Number(r.height||0),String(r.points_json||"[]"),String(r.fill_color||"#38bdf8"),Number(r.locked||0),Number(r.sort_order||0),String(r.created_at||now),String(r.updated_at||now))));
   await runDbBatches(db,t.assignments.map(r=>db.prepare("INSERT INTO assignments(assignment_id,user_id,area_id,days,created_at,updated_at) VALUES(?,?,?,?,?,?)")
     .bind(String(r.assignment_id),String(r.user_id),String(r.area_id),String(r.days||"1,2,3,4,5"),String(r.created_at||now),String(r.updated_at||now))));
   await runDbBatches(db,t.inspections.map(r=>db.prepare(`INSERT INTO inspections(inspection_id,area_id,inspection_date,status,rating,score,note,meta_json,photo_links_json,version,completed_at,completed_by_id,completed_by_name,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
