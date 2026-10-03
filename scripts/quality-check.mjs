@@ -40,6 +40,7 @@ const checks=[
   [api.includes('role(u,["Admin","Supervisor","Inspector","Teacher"])'),"map read roles include all required viewers"],
   [api.includes("async function saveAreaMapReferenceChunk")&&api.includes("async function finalizeAreaMapReferenceUpload")&&api.includes("async function areaMapReference"),"chunked shared map reference API exists"],
   [api.includes("i.status===\"รอตรวจ\"&&!byArea.has(i.area_id)"),"stale pending duty cleanup exists"],
+  [api.includes("function currentInspectionLabels")&&api.includes("async function currentInspectionNameMaps")&&api.includes("AreaName:label.AreaName")&&api.includes("พื้นที่:label.AreaName"),"historical views resolve current master names"],
   [editor.includes("async function areaMapExportImage"),"base PNG export exists"],
   [enh.includes("function rsdMapUndo")&&enh.includes("function rsdMapRedo"),"map undo/redo exists"],
   [enh.includes("map-vertex-handle")&&enh.includes("map-vertex-add")&&enh.includes("map-vertex-delete"),"polygon vertex editing exists"],
