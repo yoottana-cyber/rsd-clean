@@ -971,6 +971,66 @@
       }
     };
   }
+
+  function dashboardMapStatus(item){
+    if(!item)return{key:"none",label:"ไม่มีเวร",color:"#94a3b8"};
+    if(item.Status==="งดตรวจ")return{key:"skipped",label:"งดตรวจ",color:"#64748b"};
+    if(item.Status==="รอตรวจ")return{key:"pending",label:"รอตรวจ",color:"#facc15"};
+    if(item.Status==="ตรวจแล้ว"){
+      if(Number(item.Score)===3)return{key:"excellent",label:"ยอดเยี่ยม",color:"#22c55e"};
+      if(Number(item.Score)===2)return{key:"medium",label:"ปานกลาง",color:"#f59e0b"};
+      if(Number(item.Score)===1)return{key:"improve",label:"ปรับปรุง",color:"#ef4444"};
+      return{key:"done",label:item.Rating||"ตรวจแล้ว",color:"#14b8a6"};
+    }
+    return{key:"other",label:item.Status||"มีงานตรวจ",color:"#38bdf8"};
+  }
+  function dashboardMapCenter(shape){
+    if(shape.ShapeType==="polygon"&&Array.isArray(shape.Points)&&shape.Points.length){
+      const sum=shape.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
+      return{x:sum.x/shape.Points.length,y:sum.y/shape.Points.length};
+    }
+    return{x:Number(shape.X||0)+Number(shape.Width||0)/2,y:Number(shape.Y||0)+Number(shape.Height||0)/2};
+  }
+  function dashboardAdminMapHtml(pack,date){
+    const layout=pack?.layout||{},daily=pack?.daily||{},master=pack?.master||{},
+      shapes=layout.shapes||[],items=daily.items||[];
+    if(!shapes.length)return '<section class="card dashboard-map-card mb-6"><div class="dashboard-map-head"><div><span class="muted">ผังสถานะ</span><h2>ภาพรวมพื้นที่</h2></div><a class="btn small secondary" href="#admin">ตั้งค่าผัง</a></div><div class="dashboard-map-empty">ยังไม่มีพื้นที่บนผัง · เข้า “จัดการข้อมูลระบบ → ผังพื้นที่” เพื่อเริ่มวางพื้นที่</div></section>';
+
+    const byArea=new Map(items.map(x=>[String(x.AreaID),x])),
+      areaMap=new Map((master.Areas||[]).map(x=>[String(x.AreaID),x])),
+      classMap=new Map((master.Classrooms||[]).map(x=>[String(x.ClassroomID),x.ClassName])),
+      counts={none:0,pending:0,excellent:0,medium:0,improve:0,skipped:0,done:0,other:0};
+    (master.Areas||[]).forEach(a=>{const st=dashboardMapStatus(byArea.get(String(a.AreaID)));counts[st.key]=(counts[st.key]||0)+1;});
+
+    let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
+    let opacity=.65;try{opacity=Math.max(.1,Math.min(1,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||65)/100));}catch(e){}
+    const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
+
+    const body=shapes.map(s=>{
+      const item=byArea.get(String(s.AreaID)),status=dashboardMapStatus(item),area=areaMap.get(String(s.AreaID)),center=dashboardMapCenter(s),
+        className=item?.ClassName||classMap.get(String(area?.ResponsibleClassroomID||""))||"",
+        geo=s.ShapeType==="polygon"
+          ? '<polygon points="'+(s.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+status.color+'"/>'
+          : '<rect x="'+Number(s.X||0)+'" y="'+Number(s.Y||0)+'" width="'+Number(s.Width||0)+'" height="'+Number(s.Height||0)+'" rx="10" fill="'+status.color+'"/>';
+      return '<g class="dashboard-map-shape" data-area="'+esc(s.AreaID)+'">'+geo+
+        '<text x="'+center.x+'" y="'+(center.y-4)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(area?.AreaName||item?.AreaName||"พื้นที่")+'</tspan>'+
+        (className?'<tspan class="sub" x="'+center.x+'" dy="17">'+esc(className)+'</tspan>':"")+'</text></g>';
+    }).join("");
+
+    const legend=[
+      ["#94a3b8","ไม่มีเวร",counts.none],["#facc15","รอตรวจ",counts.pending],["#22c55e","ยอดเยี่ยม",counts.excellent],
+      ["#f59e0b","ปานกลาง",counts.medium],["#ef4444","ปรับปรุง",counts.improve],["#64748b","งดตรวจ",counts.skipped]
+    ].map(x=>'<span><i style="background:'+x[0]+'"></i>'+x[1]+' <b>'+Number(x[2]||0)+'</b></span>').join("");
+
+    return '<section class="card dashboard-map-card mb-6">'+
+      '<div class="dashboard-map-head"><div><span class="muted">สถานะ '+esc(opDateText?opDateText(date):date)+'</span><h2>ผังภาพรวมพื้นที่วันนี้</h2></div><a class="btn small" href="#control" id="dashboard-open-control-map"><i data-lucide="maximize-2"></i> เปิดผังเต็ม</a></div>'+
+      '<div class="dashboard-map-legend">'+legend+'</div>'+
+      '<div class="dashboard-map-frame"><svg viewBox="0 0 1600 1000" role="img" aria-label="ผังสถานะพื้นที่">'+
+        '<rect width="1600" height="1000" fill="#fff"/>'+reference+body+
+      '</svg></div>'+
+    '</section>';
+  }
+
   async function renderDashboard(seq) {
     $("app").innerHTML =
       heading(
@@ -986,7 +1046,21 @@
   async function loadDashboard(silent = false, seq = S.seq) {
     const date = $("dashboard-date")?.value;
     if (!date) return;
-    const d = await rpc(S.user ? "dashboard" : "publicDashboard", { date }, silent);
+    let d,adminMapPack=null;
+    if(S.user?.Role==="Admin"){
+      const result=await Promise.all([
+        rpc("dashboard",{date},silent),
+        Promise.all([
+          rpc("dailyControl",{date},true),
+          rpc("areaMapLayout",{},true),
+          rpc("master",{},true)
+        ]).then(([daily,layout,master])=>({daily,layout,master})).catch(()=>null)
+      ]);
+      d=result[0];adminMapPack=result[1];
+      if(adminMapPack?.master)S.master=adminMapPack.master;
+    }else{
+      d=await rpc(S.user ? "dashboard" : "publicDashboard",{date},silent);
+    }
     if (seq !== S.seq || $("dashboard-date")?.value !== date) return;
     S.charts.forEach((c) => c.destroy());
     S.charts = [];
@@ -1008,7 +1082,9 @@
             "</div></div>",
         )
         .join("") +
-      '</div><div class="grid lg:grid-cols-2 gap-6 mb-6"><section class="card"><h2 class="font-medium mb-5">ผลประเมินประจำวันที่เลือก</h2><div class="chart-box"><canvas id="donut"></canvas></div></section><section class="card"><h2 class="font-medium mb-5">🏆 Top 5 ห้องเรียน · 30 วันถึงวันที่เลือก</h2><div class="chart-box"><canvas id="leader-chart"></canvas></div></section></div><section class="card"><h2 class="font-medium mb-4">ผลตรวจล่าสุด</h2>' +
+      '</div>'+
+      (S.user?.Role==="Admin"&&adminMapPack?dashboardAdminMapHtml(adminMapPack,date):"")+
+      '<div class="grid lg:grid-cols-2 gap-6 mb-6"><section class="card"><h2 class="font-medium mb-5">ผลประเมินประจำวันที่เลือก</h2><div class="chart-box"><canvas id="donut"></canvas></div></section><section class="card"><h2 class="font-medium mb-5">🏆 Top 5 ห้องเรียน · 30 วันถึงวันที่เลือก</h2><div class="chart-box"><canvas id="leader-chart"></canvas></div></section></div><section class="card"><h2 class="font-medium mb-4">ผลตรวจล่าสุด</h2>' +
       (S.user
         ? table(
             ["พื้นที่", "ห้องเรียน", "ผลประเมิน"],
@@ -1018,6 +1094,10 @@
       '</section><p class="muted text-right mt-3" id="poll-status">อัปเดต ' +
       new Date(d.updatedAt).toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok" }) +
       " · รีเฟรชอัตโนมัติทุก 60 วินาที</p>";
+    if($("dashboard-open-control-map"))$("dashboard-open-control-map").onclick=()=>{
+      try{opControlView="map";}catch(e){}
+    };
+    icons();
     if (d.approvalPending) {
       const approval = document.createElement("p");
       approval.className = "card mb-5";
