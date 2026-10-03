@@ -64,7 +64,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary" id="override-btn">ผู้ตรวจทดแทน</button><button class="btn secondary" id="settings-btn">ตั้งค่าระบบ</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><a class="btn secondary" href="#control">ศูนย์งานวันนี้</a><a class="btn secondary" href="#periods">ปีการศึกษา</a><button class="btn secondary" id="excel-import-btn">นำเข้า Excel</button><a class="btn secondary" href="#certificates">เกียรติบัตร</a><button class="btn secondary" id="override-btn">ผู้ตรวจทดแทน</button><button class="btn secondary" id="settings-btn">ตั้งค่าระบบ</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -72,6 +72,7 @@ const adminTables = {
           adminContent();
         }),
     );
+    $("excel-import-btn").onclick = importExcelModal;
     $("override-btn").onclick = dutyOverrideModal;
     $("settings-btn").onclick = appSettingsModal;
     $("holiday-btn").onclick = holidayModal;
@@ -846,7 +847,7 @@ const adminTables = {
       heading(
         "Dashboard ผู้บริหาร",
         "สรุปสถานะวันนี้และแนวโน้มโรงเรียนแบบกระชับ",
-        '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#review"><i data-lucide="badge-check"></i> รับรองผล</a><a class="btn secondary" href="#history"><i data-lucide="history"></i> ประวัติ</a><a class="btn secondary" href="#exports"><i data-lucide="file-down"></i> ส่งออก</a><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานรายวัน</a><a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานละเอียด</a><button class="btn" id="exec-refresh" type="button"><i data-lucide="refresh-cw"></i> รีเฟรช</button></div>'
+        '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#control"><i data-lucide="panel-top"></i> ศูนย์งานวันนี้</a><a class="btn secondary" href="#certificates"><i data-lucide="award"></i> เกียรติบัตร</a><a class="btn secondary" href="#review"><i data-lucide="badge-check"></i> รับรองผล</a><a class="btn secondary" href="#history"><i data-lucide="history"></i> ประวัติ</a><a class="btn secondary" href="#exports"><i data-lucide="file-down"></i> ส่งออก</a><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานรายวัน</a><a class="btn secondary" href="#reports"><i data-lucide="chart-no-axes-column-increasing"></i> รายงานละเอียด</a><button class="btn" id="exec-refresh" type="button"><i data-lucide="refresh-cw"></i> รีเฟรช</button></div>'
       )+
       '<div id="executive-content"><div class="card empty">กำลังสรุปข้อมูลสำหรับผู้บริหาร…</div></div>';
     $("exec-refresh").onclick=()=>loadExecutiveDashboard(S.seq).catch(error);
@@ -948,16 +949,24 @@ const adminTables = {
   }
 
   async function renderReports(seq) {
-    const today = thaiDay();
+    const today = thaiDay(),periods=await rpc("academicPeriods",{},true);
+    if(seq!==S.seq)return;
+    const active=periods.find(x=>x.IsActive),startDefault=active?.StartDate||today.slice(0,8)+"01",endDefault=active?((active.EndDate<today)?active.EndDate:today):today;
     $("app").innerHTML =
-      heading("รายงานและเกียรติบัตร", "วิเคราะห์ผลการดูแลพื้นที่และติดตามประสิทธิภาพการตรวจ", '<a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานผลรายวัน</a>') +
-      '<form id="report-filter" class="card flex flex-wrap items-end gap-4 mb-6"><div class="field m-0"><label>ตั้งแต่วันที่</label><input type="date" name="start" value="' +
-      today.slice(0, 8) +
-      '01" required></div><div class="field m-0"><label>ถึงวันที่</label><input type="date" name="end" value="' +
-      today +
-      '" max="' +
-      today +
-      '" required></div><button class="btn">แสดงรายงาน</button></form><div id="report-content"></div>';
+      heading("รายงานและเกียรติบัตร", "วิเคราะห์ผลการดูแลพื้นที่และติดตามประสิทธิภาพการตรวจ", '<div class="flex flex-wrap gap-2"><a class="btn secondary" href="#daily"><i data-lucide="send"></i> รายงานผลรายวัน</a><a class="btn secondary" href="#certificates"><i data-lucide="award"></i> เกียรติบัตรอัตโนมัติ</a></div>') +
+      '<form id="report-filter" class="card flex flex-wrap items-end gap-4 mb-6">'+
+        '<div class="field m-0"><label>ปีการศึกษา / ภาคเรียน</label><select id="report-period"><option value="">กำหนดช่วงเอง</option>'+periods.map(x=>'<option value="'+esc(x.PeriodID)+'" data-start="'+esc(x.StartDate)+'" data-end="'+esc(x.EndDate)+'" '+(x.IsActive?"selected":"")+'>'+esc(x.Label)+'</option>').join("")+'</select></div>'+
+        '<div class="field m-0"><label>ตั้งแต่วันที่</label><input type="date" name="start" value="'+esc(startDefault)+'" required></div>'+
+        '<div class="field m-0"><label>ถึงวันที่</label><input type="date" name="end" value="'+esc(endDefault)+'" max="'+today+'" required></div>'+
+        '<button class="btn">แสดงรายงาน</button></form><div id="report-content"></div>';
+    $("report-period").onchange=()=>{
+      const o=$("report-period").selectedOptions[0];
+      if(o?.value){
+        $("report-filter").elements.start.value=o.dataset.start;
+        $("report-filter").elements.end.value=o.dataset.end<today?o.dataset.end:today;
+        loadReport().catch(error);
+      }
+    };
     $("report-filter").onsubmit = (e) => {
       e.preventDefault();
       loadReport().catch(error);
