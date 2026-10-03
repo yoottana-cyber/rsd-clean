@@ -2,7 +2,7 @@ const TZ = "Asia/Bangkok";
 const SESSION_MS = 8 * 3600000;
 const REMEMBER_SESSION_MS = 90 * 24 * 3600000;
 const MAX_IMAGE = 100 * 1024 * 1024;
-const MAX_CERT_TEMPLATE = 15 * 1024 * 1024;
+const MAX_CERT_TEMPLATE = 8 * 1024 * 1024;
 const ITERATIONS = 600000;
 const ROLES = ["Admin", "Supervisor", "Inspector", "Teacher"];
 const enc = new TextEncoder();
@@ -1331,7 +1331,7 @@ async function certificateTemplateUploadStart(env,u,p,request){
   role(u,["Admin"]);
   const mime=String(p.mime||""),size=Number(p.size),origin=String(p.origin||new URL(request.url).origin);
   assert(["image/jpeg","image/png"].includes(mime),"แม่แบบรองรับ JPG หรือ PNG");
-  assert(Number.isInteger(size)&&size>0&&size<=MAX_CERT_TEMPLATE,"ไฟล์แม่แบบต้องไม่เกิน 15 MB");
+  assert(Number.isInteger(size)&&size>0&&size<=MAX_CERT_TEMPLATE,"ไฟล์แม่แบบต้องไม่เกิน 8 MB");
   assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ยังไม่ได้ตั้งค่า Google Drive gateway");
   const r=await gasDrive(env,"templateUploadStart",{userId:u.user_id,mime,size,origin});
   await env.DB.prepare("INSERT OR REPLACE INTO upload_tickets(ticket,user_id,inspection_id,file_id,size,mime,expires_at) VALUES(?,?,?,?,?,?,?)")
