@@ -1763,7 +1763,7 @@ tbody tr:hover td{background:#fbfefe}
 
 /* assignment-ui: area-first-v2 */
 .assignment-shell{max-width:1180px;margin:0 auto}
-.assignment-day-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:16px 0 18px}
+.assignment-day-tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin:16px 0 18px}
 .assignment-day-tab{appearance:none;border:1px solid #cbdfe5;background:#f8fcfd;color:#48636f;border-radius:14px;padding:10px 8px;cursor:pointer;font:inherit;transition:.18s ease;display:flex;flex-direction:column;align-items:center;gap:2px}
 .assignment-day-tab span{font-weight:800;font-size:16px}.assignment-day-tab small{font-size:11px;color:inherit;opacity:.78}
 .assignment-day-tab:hover{border-color:#73c5d2;transform:translateY(-1px)}
