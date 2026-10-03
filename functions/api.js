@@ -581,6 +581,8 @@ async function restoreBackup(env,u,p){
   assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ต้องตั้งค่า Google Drive gateway ก่อนกู้คืน");
   const checked=validateBackupBundle(p.bundle),t=checked.tables,db=env.DB;
   await ensureDutyOverridesTable(db);
+  await ensureAcademicPeriodsTable(db);
+  await ensurePushSubscriptionsTable(db);
 
   // Safety snapshot: restoration is blocked if the current state cannot be backed up first.
   const before=await buildBackupBundle(env),beforeContent=JSON.stringify(before);
@@ -786,7 +788,9 @@ async function systemStatus(env,u){
     ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"],
     ["recycleBin","SELECT COUNT(*) n FROM recycle_bin"],
     ["systemEvents","SELECT COUNT(*) n FROM system_events"],
-    ["dutyOverrides","SELECT COUNT(*) n FROM duty_overrides WHERE override_date>=?"]
+    ["dutyOverrides","SELECT COUNT(*) n FROM duty_overrides WHERE override_date>=?"],
+    ["academicPeriods","SELECT COUNT(*) n FROM academic_periods"],
+    ["pushSubscriptions","SELECT COUNT(*) n FROM push_subscriptions WHERE enabled=1"]
   ];
   const counts={};
   for(const [key,sql] of countSql){
@@ -838,6 +842,8 @@ async function systemStatus(env,u){
   }
   if(counts.users===0) warnings.push("ไม่พบผู้ใช้งานในฐานข้อมูล");
   if(counts.areas>0&&counts.assignments===0) warnings.push("มีพื้นที่แล้วแต่ยังไม่มีการมอบหมายเวร");
+  if(counts.academicPeriods===0) warnings.push("ยังไม่ได้กำหนดปีการศึกษา/ภาคเรียน");
+  if(counts.pushSubscriptions>0&&!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK)) warnings.push("มี Push Subscription แต่ยังตั้งค่า VAPID ไม่ครบ");
   const since24=new Date(Date.now()-24*3600000).toISOString();
   const monitor=await db.prepare(`SELECT
     SUM(CASE WHEN event_type='error' THEN 1 ELSE 0 END) errors,
@@ -851,6 +857,7 @@ async function systemStatus(env,u){
     serverTime:nowIso(),
     today:thaiDay(),
     d1:{ok:true,message:"เชื่อมต่อ D1 ได้"},
+    push:{configured:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK),subscriptions:counts.pushSubscriptions||0},
     drive,
     backup:{
       lastAt:lastBackup,
