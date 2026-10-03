@@ -1982,30 +1982,12 @@ tbody tr:hover td{background:#fbfefe}
 
 
 /* map-enhancements-v1 */
-.area-map-layer-tools{display:flex;flex-direction:column;gap:5px;padding:6px 8px;border:1px solid #dce9ed;border-radius:11px;background:#f8fbfc}.area-map-layer-tools>b{font-size:9px;color:#55717b}
 .area-map-poly-tools{margin-top:12px;padding:10px;border:1px solid #dbe8eb;border-radius:10px;background:#f7fbfc;display:flex;flex-direction:column}.area-map-poly-tools>b{font-size:11px;color:#315661}.area-map-poly-tools>small{font-size:9px;color:#7e929a;margin-top:2px}
 .map-vertex-handle{fill:#fff;stroke:#0891b2;stroke-width:4;cursor:move;vector-effect:non-scaling-stroke}.map-vertex-handle.selected{fill:#0891b2;stroke:#fff;stroke-width:4}
-.map-decoration{cursor:pointer}.map-decoration-geometry{stroke-width:2.2;vector-effect:non-scaling-stroke}.map-decoration.selected .map-decoration-geometry{stroke:#075985!important;stroke-width:4.5}.map-decoration-label{font:600 14px "Kanit",sans-serif;fill:#334155;paint-order:stroke;stroke:#fff;stroke-width:3px;pointer-events:none}.map-decoration-resize{fill:#fff;stroke:#075985;stroke-width:3;cursor:nwse-resize}
-.area-map-decor-colors{display:grid;grid-template-columns:1fr 1fr;gap:8px}.area-map-holiday-banner{margin:-3px 0 12px;padding:8px 11px;border:1px solid #d8e0e4;border-radius:10px;background:#f5f7f8;color:#61757d;font-size:10px}
+.area-map-holiday-banner{margin:-3px 0 12px;padding:8px 11px;border:1px solid #d8e0e4;border-radius:10px;background:#f5f7f8;color:#61757d;font-size:10px}
 #area-map-pan.active,.area-map-zoom .active{background:#0c8ca5!important;color:#fff!important}.map-pan-mode{cursor:grab!important}.map-pan-mode:active{cursor:grabbing!important}
 .rsd-map-view-controls{display:flex;justify-content:flex-end;gap:4px;margin:0 0 6px}.rsd-map-view-controls button{border:1px solid #d8e5e8;border-radius:8px;background:#fff;color:#496771;min-width:34px;padding:4px 8px;font:500 10px "Kanit",sans-serif;cursor:pointer}.rsd-map-view-controls button:hover{border-color:#9ecbd4;background:#f2fbfc}
-@media(max-width:1200px){.area-map-layer-tools{grid-column:1/-1}}
-@media(max-width:700px){.area-map-layer-tools{grid-column:auto}.area-map-decor-colors{grid-template-columns:1fr}.rsd-map-view-controls{justify-content:center}.rsd-map-view-controls button{min-width:52px;padding:6px 10px}}
-
-
-/* map-context-viewers-v1 */
-.dashboard-map-decor polygon,.dashboard-map-decor rect,
-.ops-control-map-decor polygon,.ops-control-map-decor rect,
-.inspector-map-decor polygon,.inspector-map-decor rect,
-.exec-map-decor polygon,.exec-map-decor rect,
-.teacher-map-decor polygon,.teacher-map-decor rect{
-  stroke-width:2;vector-effect:non-scaling-stroke;
-}
-.dashboard-map-decor text,.ops-control-map-decor text,
-.inspector-map-decor text,.exec-map-decor text,.teacher-map-decor text{
-  font:600 13px "Kanit",sans-serif;fill:#475569;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none;
-}
-.inspector-map-decor,.teacher-map-decor{pointer-events:none}
+@media(max-width:700px){.rsd-map-view-controls{justify-content:center}.rsd-map-view-controls button{min-width:52px;padding:6px 10px}}
 
 
 /* desktop-map-preserve-v1 */
@@ -2013,10 +1995,3 @@ tbody tr:hover td{background:#fbfefe}
   .rsd-map-view-controls{display:none!important}
   #area-map-fit,#area-map-pan{display:none!important}
 }
-
-
-/* map-decoration-drag-fix-v1 */
-.map-decoration,.map-decoration-geometry,.map-decoration-resize{touch-action:none}
-.map-decoration-geometry{pointer-events:all}
-.map-decoration.selected{cursor:move}
-.map-decoration-resize{pointer-events:all}
