@@ -140,7 +140,7 @@ export async function onRequest(context) {
     if(["saveDutyOverride","reviewInspection","saveInspection"].includes(action)){
       background(context,pushAfterAction(env,action,payload,data));
     }
-    if(duration>=1200 && action!=="systemEvents"){
+    if(duration>=1200 && !["systemEvents","driveStatus"].includes(action)){
       background(context,writeSystemEvent(env,{
         eventType:"slow",
         action,
