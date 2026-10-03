@@ -188,6 +188,28 @@ function rsdMapRecalcDecoration(d){
   const xs=d.Points.map(p=>Number(p.x)),ys=d.Points.map(p=>Number(p.y));
   d.X=Math.min(...xs);d.Y=Math.min(...ys);d.Width=Math.max(...xs)-d.X;d.Height=Math.max(...ys)-d.Y;
 }
+function rsdMapUpdateDecorationDom(d){
+  const el=[...document.querySelectorAll(".map-decoration")].find(x=>String(x.dataset.decor)===String(d.DecorationID));
+  if(!el)return;
+  const geo=el.querySelector(".map-decoration-geometry"),label=el.querySelector(".map-decoration-label");
+  if(geo){
+    if(d.ShapeType==="polygon"){
+      geo.setAttribute("points",(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" "));
+    }else{
+      geo.setAttribute("x",Number(d.X||0));
+      geo.setAttribute("y",Number(d.Y||0));
+      geo.setAttribute("width",Number(d.Width||0));
+      geo.setAttribute("height",Number(d.Height||0));
+    }
+  }
+  const c=rsdMapDecorationCenter(d);
+  if(label){label.setAttribute("x",c.x);label.setAttribute("y",c.y);}
+  const h=el.querySelector(".map-decoration-resize");
+  if(h){
+    h.setAttribute("x",Number(d.X||0)+Number(d.Width||0)-9);
+    h.setAttribute("y",Number(d.Y||0)+Number(d.Height||0)-9);
+  }
+}
 function rsdMapRenderDecorations(){
   const svg=$("area-map-svg");
   if(!svg)return;
@@ -230,21 +252,35 @@ function rsdMapRenderDecorations(){
   });
 }
 function rsdMapDecorationPointerDown(e,el){
+  e.preventDefault();
   e.stopPropagation();
   const d=(areaMapState.decorations||[]).find(x=>String(x.DecorationID)===String(el.dataset.decor));
   if(!d)return;
+
   rsdMapEnh.selectedDecorationId=String(d.DecorationID);
   areaMapState.selectedShapeId="";
   areaMapState.selectedAreaId="";
   rsdMapEnh.selectedVertex=-1;
+
+  document.querySelectorAll(".map-decoration").forEach(x=>x.classList.toggle("selected",x===el));
   areaMapRenderSide();
-  if(areaMapState.viewOnly||d.Locked||areaMapState.mode!=="select"){areaMapRenderSvg();return;}
+
+  if(areaMapState.viewOnly||d.Locked||areaMapState.mode!=="select")return;
+
   rsdMapRecordBefore();
-  const svg=$("area-map-svg"),start=areaMapPoint(e);
-  const gesture={resize:!!e.target.dataset.resize,last:start,decor:d};
+  const startPoint=areaMapPoint(e);
+  const gesture={resize:!!e.target.dataset.resize,last:startPoint,decor:d,pointerId:e.pointerId,moved:false};
+
   try{el.setPointerCapture(e.pointerId);}catch(x){}
+
   const move=ev=>{
-    const p=areaMapPoint(ev),dx=p.x-gesture.last.x,dy=p.y-gesture.last.y;gesture.last=p;
+    if(ev.pointerId!==gesture.pointerId)return;
+    ev.preventDefault();
+    const p=areaMapPoint(ev),dx=p.x-gesture.last.x,dy=p.y-gesture.last.y;
+    if(Math.abs(dx)<0.01&&Math.abs(dy)<0.01)return;
+    gesture.last=p;
+    gesture.moved=true;
+
     if(gesture.resize&&d.ShapeType==="rect"){
       d.Width=Math.max(20,Math.min(AREA_MAP_W-Number(d.X),p.x-Number(d.X)));
       d.Height=Math.max(20,Math.min(AREA_MAP_H-Number(d.Y),p.y-Number(d.Y)));
@@ -252,18 +288,32 @@ function rsdMapDecorationPointerDown(e,el){
       const xs=d.Points.map(v=>Number(v.x)),ys=d.Points.map(v=>Number(v.y));
       const mx=Math.max(-Math.min(...xs),Math.min(AREA_MAP_W-Math.max(...xs),dx));
       const my=Math.max(-Math.min(...ys),Math.min(AREA_MAP_H-Math.max(...ys),dy));
-      d.Points=d.Points.map(v=>({x:Number(v.x)+mx,y:Number(v.y)+my}));rsdMapRecalcDecoration(d);
+      d.Points=d.Points.map(v=>({x:Number(v.x)+mx,y:Number(v.y)+my}));
+      rsdMapRecalcDecoration(d);
     }else{
       d.X=Math.max(0,Math.min(AREA_MAP_W-Number(d.Width),Number(d.X)+dx));
       d.Y=Math.max(0,Math.min(AREA_MAP_H-Number(d.Height),Number(d.Y)+dy));
     }
+
+    // Important: update the existing SVG node in-place.
+    // Re-rendering the whole SVG here would destroy pointer capture mid-drag.
+    rsdMapUpdateDecorationDom(d);
+  };
+
+  const finish=ev=>{
+    if(ev&&ev.pointerId!==gesture.pointerId)return;
+    el.removeEventListener("pointermove",move);
+    el.removeEventListener("pointerup",finish);
+    el.removeEventListener("pointercancel",finish);
+    try{if(el.hasPointerCapture?.(gesture.pointerId))el.releasePointerCapture(gesture.pointerId);}catch(x){}
+    if(gesture.moved)areaMapMarkDirty();
     areaMapRenderSvg();
+    areaMapRenderSide();
   };
-  const up=()=>{
-    el.removeEventListener("pointermove",move);el.removeEventListener("pointerup",up);el.removeEventListener("pointercancel",up);
-    areaMapMarkDirty();areaMapRenderSide();
-  };
-  el.addEventListener("pointermove",move);el.addEventListener("pointerup",up);el.addEventListener("pointercancel",up);
+
+  el.addEventListener("pointermove",move);
+  el.addEventListener("pointerup",finish);
+  el.addEventListener("pointercancel",finish);
 }
 function rsdMapRenderVertices(){
   const svg=$("area-map-svg");if(!svg)return;
