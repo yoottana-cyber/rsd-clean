@@ -462,10 +462,11 @@ const adminTables = {
               '<div class="assignment-area-team area-first-team">' +
               teamHtml +
               "</div>" +
-              '<button type="button" class="btn secondary area-first-add assignment-add-inspector" data-area="' +
+              '<div class="area-first-actions"><button type="button" class="btn secondary area-first-add assignment-add-inspector" data-area="' +
               esc(a.AreaID) +
               '"><span aria-hidden="true">＋</span> เพิ่มผู้ตรวจ</button>' +
-              "</article>"
+              (team.length ? '<button type="button" class="btn secondary area-first-clear assignment-clear-area" data-area="' + esc(a.AreaID) + '">ล้างผู้ตรวจ</button>' : "") +
+              "</div></article>"
             );
           })
           .join("")
@@ -491,7 +492,7 @@ const adminTables = {
       "</b></div></div>" +
       '<div class="assignment-toolbar area-first-toolbar"><div class="search-box assignment-search"><i data-lucide="search"></i><input id="assignment-area-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / ผู้ตรวจ…"></div>' +
       '<label class="assignment-filter-check"><input id="assignment-only-unassigned" type="checkbox"> เฉพาะพื้นที่ยังว่าง</label>' +
-      '<label class="assignment-filter-check"><input id="assignment-only-assigned" type="checkbox"> เฉพาะพื้นที่มีเวร</label></div>' +
+      '<label class="assignment-filter-check"><input id="assignment-only-assigned" type="checkbox"> เฉพาะพื้นที่มีเวร</label><button type="button" class="btn secondary assignment-delete-tools" id="assignment-delete-tools">🗑 ลบเวรเร็ว</button></div>' +
       '<div class="assignment-area-meta"><span>วัน<b>' +
       esc(dayMeta[1]) +
       '</b></span><span>กำลังแสดง <b id="assignment-visible-count">' +
@@ -550,6 +551,10 @@ const adminTables = {
     document.querySelectorAll(".assignment-add-inspector").forEach((b) => {
       b.onclick = () => assignmentAreaInspectorModal(b.dataset.area, selectedDay);
     });
+    document.querySelectorAll(".assignment-clear-area").forEach((b) => {
+      b.onclick = () => clearAreaDuty(b.dataset.area, selectedDay);
+    });
+    $("assignment-delete-tools").onclick = () => assignmentDeleteToolsModal(selectedDay);
     document.querySelectorAll(".assignment-remove-day").forEach((b) => {
       b.onclick = (e) => {
         e.preventDefault();
@@ -667,6 +672,156 @@ const adminTables = {
       }
     };
     sync();
+  }
+
+
+  async function refreshAssignmentsAfterRemoval(message) {
+    S.master = await rpc("master", {}, true);
+    closeModal();
+    if (message) toast(message);
+    assignmentContent();
+  }
+
+  async function clearAreaDuty(areaId, day) {
+    const m=S.master,
+      area=m.Areas.find(a=>a.AreaID===areaId);
+    if(!area)return error(new Error("ไม่พบพื้นที่"));
+    const n=Number(day),
+      dayName=dutyDayOptions.find(d=>d[0]===n)?.[1]||String(n),
+      team=m.Assignments.filter(a=>a.AreaID===areaId&&dutyDaysArray(a.Days).includes(n));
+    if(!team.length)return toast("พื้นที่นี้ยังไม่มีผู้ตรวจในวัน"+dayName);
+    const names=team.map(a=>m.Users.find(u=>u.UserID===a.UserID)?.FullName||"—");
+    const ok=await Swal.fire({
+      icon:"warning",
+      title:"ล้างผู้ตรวจพื้นที่นี้?",
+      html:"<b>"+esc(area.AreaName)+"</b><br>วัน"+esc(dayName)+" · "+team.length+" คน<br><span class='muted'>"+names.map(esc).join(" · ")+"</span>",
+      showCancelButton:true,
+      confirmButtonText:"ล้างผู้ตรวจ",
+      cancelButtonText:"ยกเลิก",
+      confirmButtonColor:"#be123c"
+    });
+    if(!ok.isConfirmed)return;
+    busy(true,"กำลังล้างผู้ตรวจ…");
+    try{
+      const r=await rpc("removeDutyAssignments",{mode:"areas",day:n,areaIds:[String(areaId)]});
+      await refreshAssignmentsAfterRemoval("ล้างผู้ตรวจแล้ว "+Number(r.changed||0)+" รายการ");
+    }catch(e){error(e);}finally{busy(false);}
+  }
+
+  function assignmentDeleteToolsModal(day) {
+    const m=S.master,n=Number(day),
+      dayName=dutyDayOptions.find(d=>d[0]===n)?.[1]||String(n),
+      dayRows=m.Assignments.filter(a=>dutyDaysArray(a.Days).includes(n)),
+      activeUserIds=[...new Set(dayRows.map(a=>a.UserID))],
+      activeAreaIds=[...new Set(dayRows.map(a=>a.AreaID))],
+      inspectors=m.Users
+        .filter(u=>u.Role==="Inspector"&&activeUserIds.includes(u.UserID))
+        .sort((a,b)=>String(a.FullName||"").localeCompare(String(b.FullName||""),"th")),
+      areas=[...m.Areas]
+        .filter(a=>activeAreaIds.includes(a.AreaID))
+        .sort(assignmentAreaSort);
+
+    const inspectorOptions=inspectors.length
+      ? '<option value="">— เลือกผู้ตรวจ —</option>'+inspectors.map(u=>{
+          const count=dayRows.filter(a=>a.UserID===u.UserID).length;
+          return '<option value="'+esc(u.UserID)+'">'+esc(u.FullName)+' ('+count+' พื้นที่)</option>';
+        }).join("")
+      : '<option value="">ยังไม่มีผู้ตรวจในวันนี้</option>';
+
+    const areaRows=areas.length
+      ? areas.map(a=>{
+          const count=dayRows.filter(x=>x.AreaID===a.AreaID).length,
+            className=masterLabel("ResponsibleClassroomID",a.ResponsibleClassroomID);
+          return '<label class="quick-delete-area-row"><input type="checkbox" name="area" value="'+esc(a.AreaID)+'"><span><b>'+esc(a.AreaName)+'</b><small>'+esc(className)+' · '+count+' คน</small></span></label>';
+        }).join("")
+      : '<div class="muted">ยังไม่มีพื้นที่ที่มีเวรในวันนี้</div>';
+
+    openModal(
+      "ลบเวรเร็ว · วัน"+dayName,
+      '<div class="quick-delete-wrap">'+
+        '<section class="quick-delete-card"><div class="quick-delete-head"><span>1</span><div><b>ลบผู้ตรวจคนหนึ่งออกจากทั้งวัน</b><small>เหมาะกรณีลา หรือเปลี่ยนเวรทั้งวัน</small></div></div>'+
+          '<select id="quick-delete-inspector">'+inspectorOptions+'</select>'+
+          '<button type="button" class="btn secondary danger-soft w-full mt-2" id="quick-delete-inspector-btn" '+(!inspectors.length?'disabled':'')+'>นำผู้ตรวจออกจากเวรวันนี้ทั้งหมด</button>'+
+        '</section>'+
+        '<section class="quick-delete-card"><div class="quick-delete-head"><span>2</span><div><b>ล้างผู้ตรวจหลายพื้นที่</b><small>เลือกหลายพื้นที่แล้วล้างพร้อมกันครั้งเดียว</small></div></div>'+
+          '<div class="flex flex-wrap gap-2 mb-2"><button type="button" class="btn small secondary" id="quick-delete-select-all">เลือกทั้งหมด</button><button type="button" class="btn small secondary" id="quick-delete-clear-select">ล้างที่เลือก</button><span class="muted">เลือกแล้ว <b id="quick-delete-area-count">0</b> พื้นที่</span></div>'+
+          '<div class="quick-delete-area-list">'+areaRows+'</div>'+
+          '<button type="button" class="btn secondary danger-soft w-full mt-3" id="quick-delete-areas-btn" disabled>ล้างผู้ตรวจจากพื้นที่ที่เลือก</button>'+
+        '</section>'+
+        '<section class="quick-delete-card danger-zone"><div class="quick-delete-head"><span>3</span><div><b>ล้างเวรทั้งวัน</b><small>นำผู้ตรวจทั้งหมดออกจากทุกพื้นที่เฉพาะวัน'+esc(dayName)+'</small></div></div>'+
+          '<button type="button" class="btn danger w-full" id="quick-delete-day-btn" '+(!dayRows.length?'disabled':'')+'>ล้างเวรวัน'+esc(dayName)+'ทั้งหมด ('+dayRows.length+' รายการ)</button>'+
+        '</section>'+
+      '</div>'
+    );
+
+    const inspectorSel=$("quick-delete-inspector"),
+      inspectorBtn=$("quick-delete-inspector-btn"),
+      areaBtn=$("quick-delete-areas-btn"),
+      checks=[...document.querySelectorAll('.quick-delete-area-row input[name="area"]')];
+
+    const syncAreas=()=>{
+      const count=checks.filter(x=>x.checked).length;
+      $("quick-delete-area-count").textContent=String(count);
+      areaBtn.disabled=!count;
+      areaBtn.textContent=count?"ล้างผู้ตรวจ "+count+" พื้นที่":"ล้างผู้ตรวจจากพื้นที่ที่เลือก";
+    };
+    checks.forEach(x=>x.onchange=syncAreas);
+    $("quick-delete-select-all").onclick=()=>{checks.forEach(x=>x.checked=true);syncAreas();};
+    $("quick-delete-clear-select").onclick=()=>{checks.forEach(x=>x.checked=false);syncAreas();};
+
+    inspectorBtn.onclick=async()=>{
+      const userId=String(inspectorSel.value||"");
+      if(!userId)return error(new Error("เลือกผู้ตรวจก่อน"));
+      const user=m.Users.find(u=>u.UserID===userId),
+        count=dayRows.filter(a=>a.UserID===userId).length;
+      const ok=await Swal.fire({
+        icon:"warning",
+        title:"นำผู้ตรวจออกจากทั้งวัน?",
+        html:"<b>"+esc(user?.FullName||"—")+"</b><br>วัน"+esc(dayName)+" · "+count+" พื้นที่<br><span class='muted'>เวรวันอื่นจะไม่ถูกกระทบ</span>",
+        showCancelButton:true,confirmButtonText:"นำออกจากทั้งวัน",cancelButtonText:"ยกเลิก",confirmButtonColor:"#be123c"
+      });
+      if(!ok.isConfirmed)return;
+      busy(true,"กำลังลบเวรผู้ตรวจ…");
+      try{
+        const r=await rpc("removeDutyAssignments",{mode:"inspector",day:n,userId});
+        await refreshAssignmentsAfterRemoval("นำผู้ตรวจออกแล้ว "+Number(r.changed||0)+" พื้นที่");
+      }catch(e){error(e);}finally{busy(false);}
+    };
+
+    areaBtn.onclick=async()=>{
+      const areaIds=checks.filter(x=>x.checked).map(x=>x.value);
+      if(!areaIds.length)return;
+      const affected=dayRows.filter(a=>areaIds.includes(a.AreaID)).length;
+      const ok=await Swal.fire({
+        icon:"warning",
+        title:"ล้างผู้ตรวจจาก "+areaIds.length+" พื้นที่?",
+        html:"จะนำเวรวัน"+esc(dayName)+"ออก "+affected+" รายการ<br><span class='muted'>เวรวันอื่นจะยังคงเดิม</span>",
+        showCancelButton:true,confirmButtonText:"ล้างพื้นที่ที่เลือก",cancelButtonText:"ยกเลิก",confirmButtonColor:"#be123c"
+      });
+      if(!ok.isConfirmed)return;
+      busy(true,"กำลังล้างหลายพื้นที่…");
+      try{
+        const r=await rpc("removeDutyAssignments",{mode:"areas",day:n,areaIds});
+        await refreshAssignmentsAfterRemoval("ล้างผู้ตรวจแล้ว "+Number(r.changed||0)+" รายการ");
+      }catch(e){error(e);}finally{busy(false);}
+    };
+
+    $("quick-delete-day-btn").onclick=async()=>{
+      if(!dayRows.length)return;
+      const ok=await Swal.fire({
+        icon:"warning",
+        title:"ล้างเวรวัน"+dayName+"ทั้งหมด?",
+        html:"ผู้ตรวจทั้ง "+activeUserIds.length+" คน จาก "+activeAreaIds.length+" พื้นที่<br><b>"+dayRows.length+" รายการเวรจะถูกนำออกเฉพาะวันนี้</b><br><span class='muted'>วันอื่นไม่ถูกกระทบ และรายการที่ไม่มีวันอื่นเหลือจะเข้าถังขยะ</span>",
+        showCancelButton:true,confirmButtonText:"ล้างเวรทั้งวัน",cancelButtonText:"ยกเลิก",confirmButtonColor:"#be123c"
+      });
+      if(!ok.isConfirmed)return;
+      busy(true,"กำลังล้างเวรทั้งวัน…");
+      try{
+        const r=await rpc("removeDutyAssignments",{mode:"day",day:n});
+        await refreshAssignmentsAfterRemoval("ล้างเวรวัน"+dayName+"แล้ว "+Number(r.changed||0)+" รายการ");
+      }catch(e){error(e);}finally{busy(false);}
+    };
+    syncAreas();
   }
 
   async function removeAssignmentDutyDay(assignmentId, day) {

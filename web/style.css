@@ -1814,3 +1814,33 @@ tbody tr:hover td{background:#fbfefe}
   .area-inspector-footer{align-items:stretch;flex-direction:column}
   .area-inspector-footer .btn{width:100%}
 }
+
+
+/* assignment-quick-delete-v1 */
+.area-first-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;margin-top:auto}
+.area-first-actions .area-first-add{margin-top:0}
+.area-first-clear{font-size:11px;padding-left:10px;padding-right:10px;border-color:#fecdd3!important;color:#be123c!important;background:#fff7f8!important}
+.area-first-clear:hover{background:#fff1f2!important}
+.assignment-delete-tools{margin-left:auto}
+.danger-soft{border-color:#fecdd3!important;color:#be123c!important;background:#fff7f8!important}
+.danger-soft:hover{background:#fff1f2!important}
+.quick-delete-wrap{display:grid;gap:12px}
+.quick-delete-card{border:1px solid #dce9ed;border-radius:15px;padding:14px;background:#fff}
+.quick-delete-card.danger-zone{border-color:#fecdd3;background:#fffafb}
+.quick-delete-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:11px}
+.quick-delete-head>span{width:28px;height:28px;border-radius:9px;background:#eef7f9;color:#087e96;display:grid;place-items:center;font-weight:800;flex:0 0 auto}
+.quick-delete-head>div{display:flex;flex-direction:column;min-width:0}
+.quick-delete-head b{font-size:13px;color:#244956}
+.quick-delete-head small{font-size:10px;color:#7b8e97;margin-top:2px}
+.quick-delete-area-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:300px;overflow:auto;padding:2px}
+.quick-delete-area-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:center;border:1px solid #e0eaed;border-radius:11px;padding:9px 10px;background:#fbfdfd;cursor:pointer}
+.quick-delete-area-row:hover{border-color:#afd4db;background:#f7fcfd}
+.quick-delete-area-row input{width:16px;height:16px;accent-color:#be123c}
+.quick-delete-area-row>span{display:flex;flex-direction:column;min-width:0}
+.quick-delete-area-row b{font-size:11px;color:#31515d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quick-delete-area-row small{font-size:9px;color:#80929a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:700px){
+  .area-first-actions{grid-template-columns:1fr 1fr}
+  .assignment-delete-tools{margin-left:0;width:100%}
+  .quick-delete-area-list{grid-template-columns:1fr}
+}
