@@ -2013,3 +2013,10 @@ tbody tr:hover td{background:#fbfefe}
   .rsd-map-view-controls{display:none!important}
   #area-map-fit,#area-map-pan{display:none!important}
 }
+
+
+/* map-decoration-drag-fix-v1 */
+.map-decoration,.map-decoration-geometry,.map-decoration-resize{touch-action:none}
+.map-decoration-geometry{pointer-events:all}
+.map-decoration.selected{cursor:move}
+.map-decoration-resize{pointer-events:all}
