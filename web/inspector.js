@@ -795,7 +795,7 @@ let taskRows = [];
     const legend=[
       ["#facc15","รอตรวจ",counts.pending],["#22c55e",S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",counts.excellent],
       ["#f59e0b",S.config?.scoreLabels?.["2"]||"ปานกลาง",counts.medium],["#ef4444",S.config?.scoreLabels?.["1"]||"ปรับปรุง",counts.improve],
-      ["#64748b","งดตรวจ",counts.skipped],["#94a3b8","ยังไม่มีผลวันนี้",counts.none]
+      ["#64748b","งดตรวจ",counts.skipped],["#cbd5e1","วันหยุด",counts.holiday],["#94a3b8","ไม่มีเวร",counts.no_assignment],["#a78bfa","ไม่มีผู้ตรวจ",counts.no_inspector]
     ].filter(x=>x[2]>0).map(x=>'<span><i style="background:'+x[0]+'"></i>'+esc(x[1])+' <b>'+x[2]+'</b></span>').join("");
 
     return '<section class="card teacher-map-card mb-7">'+
@@ -820,7 +820,7 @@ let taskRows = [];
         dateLabel=today?.InspectionID?"วันนี้":latest?latest.InspectionDate:"ยังไม่มีผลตรวจ";
       document.querySelectorAll(".teacher-map-shape.mine").forEach(el=>el.classList.toggle("selected",String(el.dataset.area)===String(areaId)));
       box.innerHTML='<div class="teacher-map-detail-head"><span style="background:'+status.color+'"></span><div><b>'+esc(shape.AreaName||item?.AreaName||item?.meta?.areaName||"พื้นที่")+'</b><small>'+esc(shape.ClassName||item?.ClassName||item?.meta?.className||"")+'</small></div></div>'+
-        '<div class="teacher-map-detail-status"><b>'+esc(today?status.label:(latest?"ผลล่าสุด":"ยังไม่มีผลตรวจ"))+'</b><span>'+esc(dateLabel)+'</span></div>'+
+        '<div class="teacher-map-detail-status"><b>'+esc(today?.InspectionID?status.label:(today?.StatusKey==="holiday"?"วันหยุด":latest?"ผลล่าสุด":status.label||"ยังไม่มีผลตรวจ"))+'</b><span>'+esc(dateLabel)+'</span></div>'+
         (item?'<div class="teacher-map-detail-grid"><div><span>ผลประเมิน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(item.Rating||teacherMapStatus(item).label):esc(item.Status||"—"))+'</b></div><div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—")):"—")+'</b></div><div><span>ผู้ตรวจ</span><b>'+esc((item.Inspectors||[]).map(v=>v.Name).filter(Boolean).join(", ")||((item.meta?.inspectorNames||[]).filter(Boolean).join(", "))||"—")+'</b></div>'+(item.Notes?'<div class="wide"><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+'</div>':'<div class="teacher-map-no-result">ยังไม่มีผลตรวจของพื้นที่นี้</div>')+
         '<div class="teacher-map-detail-actions"><a class="btn small secondary" href="#history" data-history-type="area" data-history-id="'+esc(areaId)+'">ดูประวัติพื้นที่</a></div>';
       icons();
