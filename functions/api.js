@@ -1290,11 +1290,11 @@ function defaultCertificateTemplate(){
   return {
     enabled:false,fileId:"",mime:"",updatedAt:"",
     fields:{
-      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700},
-      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700},
-      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500},
-      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400},
-      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400}
+      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700,font:"Sarabun"},
+      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700,font:"Sarabun"},
+      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500,font:"Sarabun"},
+      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400,font:"Sarabun"},
+      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400,font:"Sarabun"}
     },
     textBlocks:[]
   };
@@ -1302,13 +1302,15 @@ function defaultCertificateTemplate(){
 function certField(raw,def){
   raw=raw&&typeof raw==="object"?raw:{};
   const color=/^#[0-9a-f]{6}$/i.test(String(raw.color||""))?String(raw.color):def.color;
+  const font=["Sarabun","Kanit"].includes(String(raw.font||""))?String(raw.font):String(def.font||"Sarabun");
   return{
     visible:raw.visible!==false,
     x:Math.min(100,Math.max(0,Number(raw.x??def.x))),
     y:Math.min(100,Math.max(0,Number(raw.y??def.y))),
     size:Math.min(96,Math.max(10,Number(raw.size??def.size))),
     color,
-    weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):def.weight
+    weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):def.weight,
+    font
   };
 }
 function certTextBlock(raw,index=0){
@@ -1323,7 +1325,8 @@ function certTextBlock(raw,index=0){
     y:Math.min(100,Math.max(0,Number(raw.y??50))),
     size:Math.min(96,Math.max(10,Number(raw.size??22))),
     color,
-    weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):400
+    weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):400,
+    font:["Sarabun","Kanit"].includes(String(raw.font||""))?String(raw.font):"Sarabun"
   };
 }
 async function getCertificateTemplate(db){
