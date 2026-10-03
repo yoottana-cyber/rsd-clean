@@ -48,7 +48,8 @@ async function renderDailyControl(seq){
 }
 async function loadDailyControl(seq=S.seq){
   const date=$("control-date")?.value||thaiDay(),d=await rpc("mapStatus",{date},true);
-  opControlMapLayout={shapes:d.shapes||[],decorations:d.decorations||[]};
+  if(window.rsdEnsureMapReference)await window.rsdEnsureMapReference(d);
+  opControlMapLayout={shapes:d.shapes||[]};
   if(seq!==S.seq)return;
   opControlData=d;
   const s=d.summary||{},cfg=d.settings||S.config||{},period=d.period?.Label||"ยังไม่ได้กำหนดภาคเรียน";
@@ -208,7 +209,6 @@ function opControlMapRender(){
     ref=(()=>{try{return localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){return"";}})(),
     refOpacity=(()=>{try{return Math.max(.1,Math.min(1,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||65)/100));}catch(e){return.65;}})(),
     refSvg=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+refOpacity+'" pointer-events="none"/>':'',
-    decorSvg=(opControlMapLayout?.decorations||[]).map(d=>{const c=opControlMapCenter(d),geo=d.ShapeType==="polygon"?'<polygon points="'+(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>':'<rect x="'+Number(d.X||0)+'" y="'+Number(d.Y||0)+'" width="'+Number(d.Width||0)+'" height="'+Number(d.Height||0)+'" rx="7" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>';return '<g class="ops-control-map-decor">'+geo+(d.Label?'<text x="'+c.x+'" y="'+c.y+'" text-anchor="middle">'+esc(d.Label)+'</text>':"")+'</g>';}).join(""),
     selected=opControlMapSelected,
     body=shapes.map(s=>{
       const item=byArea.get(String(s.AreaID)),status=opControlMapStatus(item),area=opControlMapArea(s.AreaID),center=opControlMapCenter(s),
@@ -222,7 +222,7 @@ function opControlMapRender(){
   box.innerHTML=
     '<div class="ops-control-map-toolbar"><div class="ops-control-map-legend">'+opControlMapLegend()+'</div><span>สีอัปเดตตามวันที่ที่เลือก</span></div>'+
     '<div class="ops-control-map-layout"><div class="ops-control-map-scroll"><svg id="control-map-svg" viewBox="0 0 1600 1000" role="img" aria-label="ผังสถานะพื้นที่ตรวจ">'+
-      '<rect width="1600" height="1000" fill="#fff"/>'+refSvg+decorSvg+body+
+      '<rect width="1600" height="1000" fill="#fff"/>'+refSvg+body+
     '</svg></div><aside id="control-map-detail" class="ops-control-map-detail"></aside></div>';
   box.querySelectorAll(".ops-control-map-shape").forEach(el=>el.onclick=()=>{
     opControlMapSelected=String(el.dataset.area||"");
