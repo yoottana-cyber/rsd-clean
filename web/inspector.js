@@ -54,7 +54,7 @@ let taskRows = [];
     return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
   }
   function inspectorTaskMapHtml(todayRows){
-    const shapes=inspectorMapLayout?.shapes||[],decorations=inspectorMapLayout?.decorations||[];
+    const shapes=inspectorMapLayout?.shapes||[];
     if(!shapes.length)return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
     if(!todayRows.length)return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">วันนี้ไม่มีพื้นที่ที่ได้รับมอบหมาย</div></section>';
 
@@ -65,13 +65,6 @@ let taskRows = [];
     let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
     let opacity=.55;try{opacity=Math.max(.1,Math.min(.8,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||55)/100));}catch(e){}
     const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
-    const decor=decorations.map(d=>{
-      const c=inspectorMapCenter(d),geo=d.ShapeType==="polygon"
-        ? '<polygon points="'+(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>'
-        : '<rect x="'+Number(d.X||0)+'" y="'+Number(d.Y||0)+'" width="'+Number(d.Width||0)+'" height="'+Number(d.Height||0)+'" rx="7" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>';
-      return '<g class="inspector-map-decor">'+geo+(d.Label?'<text x="'+c.x+'" y="'+c.y+'" text-anchor="middle">'+esc(d.Label)+'</text>':"")+'</g>';
-    }).join("");
-
     const body=shapes.map(s=>{
       const item=byArea.get(String(s.AreaID)),status=inspectorMapStatus(item),center=inspectorMapCenter(s),mine=!!item,
         geo=s.ShapeType==="polygon"
@@ -90,7 +83,7 @@ let taskRows = [];
 
     return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">แตะพื้นที่เพื่อไปยังงาน</span><h2>พื้นที่ของฉันบนผัง</h2></div><button class="btn small secondary" id="inspector-map-toggle" type="button">ซ่อนผัง</button></div>'+
       '<div class="inspector-map-legend">'+legend+'</div>'+
-      '<div class="inspector-map-scroll" id="inspector-map-body"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่งานตรวจของฉัน"><rect width="1600" height="1000" fill="#fff"/>'+reference+decor+body+'</svg></div></section>';
+      '<div class="inspector-map-scroll" id="inspector-map-body"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่งานตรวจของฉัน"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div></section>';
   }
   function wireInspectorTaskMap(){
     const body=$("inspector-map-body"),toggle=$("inspector-map-toggle");
@@ -127,7 +120,8 @@ let taskRows = [];
           rpc("inspectorHome"),
           rpc("mapStatus",{date:thaiDay()},true).catch(()=>loadInspectorMapCache())
         ]);
-        inspectorMapLayout=mapLayout||{shapes:[],decorations:[],items:[]};
+        inspectorMapLayout=mapLayout||{shapes:[],items:[]};
+        if(window.rsdEnsureMapReference)await window.rsdEnsureMapReference(inspectorMapLayout);
         if(inspectorMapLayout?.shapes?.length)saveInspectorMapCache(inspectorMapLayout);
         rows=home.tasks||[];
         rewards=home.rewards||[];
@@ -759,7 +753,7 @@ let taskRows = [];
       || null;
   }
   function teacherAreaMapHtml(layout,recent){
-    const shapes=layout?.shapes||[],decorations=layout?.decorations||[],classroomId=String(S.user?.LinkedClassroomID||""),
+    const shapes=layout?.shapes||[],classroomId=String(S.user?.LinkedClassroomID||""),
       ownShapes=shapes.filter(s=>String(s.ResponsibleClassroomID||"")===classroomId),
       todayRows=(layout?.items||[]).filter(i=>i.InScope!==false),
       todayByArea=new Map(todayRows.map(i=>[String(i.AreaID||""),i]));
@@ -769,13 +763,6 @@ let taskRows = [];
     let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
     let opacity=.5;try{opacity=Math.max(.1,Math.min(.75,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||50)/100));}catch(e){}
     const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
-    const decor=decorations.map(d=>{
-      const c=teacherMapCenter(d),geo=d.ShapeType==="polygon"
-        ? '<polygon points="'+(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>'
-        : '<rect x="'+Number(d.X||0)+'" y="'+Number(d.Y||0)+'" width="'+Number(d.Width||0)+'" height="'+Number(d.Height||0)+'" rx="7" fill="'+esc(d.FillColor||"#dbeafe")+'" stroke="'+esc(d.StrokeColor||"#64748b")+'" fill-opacity="'+Number(d.Opacity??.45)+'"/>';
-      return '<g class="teacher-map-decor">'+geo+(d.Label?'<text x="'+c.x+'" y="'+c.y+'" text-anchor="middle">'+esc(d.Label)+'</text>':"")+'</g>';
-    }).join("");
-
     const counts={pending:0,excellent:0,medium:0,improve:0,skipped:0,none:0,no_assignment:0,no_inspector:0,holiday:0,done:0,other:0};
     ownShapes.forEach(s=>{const st=teacherMapStatus(todayByArea.get(String(s.AreaID)));counts[st.key]=(counts[st.key]||0)+1;});
 
@@ -801,7 +788,7 @@ let taskRows = [];
     return '<section class="card teacher-map-card mb-7">'+
       '<div class="teacher-map-head"><div><span class="muted">วันนี้ · '+ownShapes.length+' พื้นที่</span><h2>ผังพื้นที่ของห้องฉัน</h2></div><button class="btn small secondary" id="teacher-map-toggle" type="button">ซ่อนผัง</button></div>'+
       '<div class="teacher-map-legend">'+legend+'</div>'+
-      '<div class="teacher-map-layout" id="teacher-map-body"><div class="teacher-map-scroll"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่รับผิดชอบของห้องเรียน"><rect width="1600" height="1000" fill="#fff"/>'+reference+decor+body+'</svg></div><aside id="teacher-map-detail" class="teacher-map-detail"></aside></div>'+
+      '<div class="teacher-map-layout" id="teacher-map-body"><div class="teacher-map-scroll"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่รับผิดชอบของห้องเรียน"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div><aside id="teacher-map-detail" class="teacher-map-detail"></aside></div>'+
     '</section>';
   }
   function wireTeacherAreaMap(layout,recent){
@@ -836,7 +823,8 @@ let taskRows = [];
   }
 
   async function renderTeacher(seq) {
-    const [r,mapLayout] = await Promise.all([rpc("teacher"),rpc("mapStatus",{date:thaiDay()},true).catch(()=>({shapes:[],decorations:[],items:[]}))]);
+    const [r,mapLayout] = await Promise.all([rpc("teacher"),rpc("mapStatus",{date:thaiDay()},true).catch(()=>({shapes:[],items:[]}))]);
+    if(window.rsdEnsureMapReference)await window.rsdEnsureMapReference(mapLayout);
     if (seq !== S.seq) return;
     const recent = r.inspections,
       done = recent.filter((i) => i.Status === "ตรวจแล้ว");
