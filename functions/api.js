@@ -2571,7 +2571,7 @@ async function dailyReport(env,u,date){
   });
   const done=items.filter(x=>x.Status==="ตรวจแล้ว"),resolved=items.filter(x=>x.Status==="ตรวจแล้ว"||x.Status==="งดตรวจ");
   const noInspectionHoliday=date<thaiDay()&&resolved.length===0;
-  const isHoliday=!isSchoolDay||noInspectionHoliday;
+  const isHoliday=resolved.length>0?false:(!isSchoolDay||noInspectionHoliday);
   const counts={
     excellent:done.filter(x=>x.Score===3).length,
     medium:done.filter(x=>x.Score===2).length,
@@ -2580,7 +2580,7 @@ async function dailyReport(env,u,date){
   return{
     date,
     isHoliday,
-    holidayReason:!isSchoolDay?"วันหยุดตามปฏิทิน":noInspectionHoliday?"ไม่มีการตรวจในวันดังกล่าว":"",
+    holidayReason:isHoliday?(!isSchoolDay?"วันหยุดตามปฏิทิน":noInspectionHoliday?"ไม่มีการตรวจในวันดังกล่าว":""):"",
     scheduled:items.length,
     done:done.length,
     pending:isHoliday?0:items.filter(x=>x.Status==="รอตรวจ").length,
