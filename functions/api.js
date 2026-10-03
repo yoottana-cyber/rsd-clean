@@ -255,7 +255,7 @@ async function dispatch(env, action, p, token, request) {
     bootstrap: async () => ({ user:publicUser(u), today:thaiDay(), holidays:(await all(db,"SELECT holiday_date FROM holidays ORDER BY holiday_date")).map(x=>x.holiday_date), settings:await getAppSettings(db) }),
     myRewards: async () => { role(u,["Inspector"]); return (await all(db,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.user_id)).map(rewardRow); },
     dashboard: async () => dashboard(env,u,validateDate(p.date || thaiDay())),
-    executiveDashboard: async () => executiveDashboard(env,u),
+    executiveDashboard: async () => executiveDashboard(env,u,p),
     dailyControl: async () => dailyControl(env,u,p),
     academicPeriods: async () => academicPeriods(env,u),
     saveAcademicPeriod: async () => saveAcademicPeriod(env,u,p),
@@ -1750,39 +1750,47 @@ function executiveStats(ins,start,end,cfg=null){
     improveRate:doneCount?improve*100/doneCount:0
   };
 }
-async function executiveDashboard(env,u){
+async function executiveDashboard(env,u,p={}){
   role(u,["Admin","Supervisor"]);
   await ensureToday(env);
-  const db=env.DB,today=thaiDay(),thisMonth=today.slice(0,7),cfg=await getAppSettings(db);
-  const currentWeekStart=mondayOf(today);
-  const firstMonth=monthShift(thisMonth,-5)+"-01";
-  const firstWeek=shiftDate(currentWeekStart,-49);
-  const start=firstMonth<firstWeek?firstMonth:firstWeek;
+  const db=env.DB,today=thaiDay(),cfg=await getAppSettings(db);
+  await ensureAcademicPeriodsTable(db);
+  const periods=await all(db,"SELECT * FROM academic_periods ORDER BY start_date DESC,academic_year DESC,semester DESC");
+  let selected=null;
+  const requested=String(p.periodId||"");
+  if(requested)selected=periods.find(x=>String(x.period_id)===requested)||null;
+  if(!selected)selected=periods.find(x=>Number(x.is_active||0)===1)||null;
+  const refDate=selected?(selected.end_date<today?selected.end_date:today):today;
+  const contextStart=selected?.start_date||shiftDate(refDate,-180);
+  const thisMonth=refDate.slice(0,7),currentWeekStart=mondayOf(refDate);
+  const clipStart=d=>d<contextStart?contextStart:d;
+  const firstMonth=clipStart(monthShift(thisMonth,-5)+"-01"),firstWeek=clipStart(shiftDate(currentWeekStart,-49));
+  const queryStart=firstMonth<firstWeek?firstMonth:firstWeek;
   const [ins,areaRow]=await Promise.all([
-    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,today),
+    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",queryStart,refDate),
     db.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
 
-  const todayStats=executiveStats(ins,today,today,cfg);
+  const todayStats=executiveStats(ins,refDate,refDate,cfg);
   const weekSeries=[];
   for(let n=7;n>=0;n--){
-    const ws=shiftDate(currentWeekStart,-7*n);
-    const we=n===0?today:shiftDate(ws,6);
-    const x=executiveStats(ins,ws,we,cfg);
-    weekSeries.push({...x,label:ws});
+    const rawStart=shiftDate(currentWeekStart,-7*n),rawEnd=n===0?refDate:shiftDate(rawStart,6);
+    const ws=clipStart(rawStart),we=rawEnd>refDate?refDate:rawEnd;
+    const x=we<ws?executiveStats([],ws,we,cfg):executiveStats(ins,ws,we,cfg);
+    weekSeries.push({...x,label:rawStart});
   }
 
   const monthSeries=[];
   for(let n=5;n>=0;n--){
-    const month=monthShift(thisMonth,-n),ms=month+"-01";
-    const me=n===0?today:monthLastDay(month);
-    const x=executiveStats(ins,ms,me,cfg);
+    const month=monthShift(thisMonth,-n),rawStart=month+"-01",rawEnd=n===0?refDate:monthLastDay(month);
+    const ms=clipStart(rawStart),me=rawEnd>refDate?refDate:rawEnd;
+    const x=me<ms?executiveStats([],ms,me,cfg):executiveStats(ins,ms,me,cfg);
     monthSeries.push({...x,month});
   }
 
-  const last30Start=shiftDate(today,-29);
-  const last30=ins.filter(i=>i.inspection_date>=last30Start&&i.inspection_date<=today);
-  const last30Stats=executiveStats(ins,last30Start,today,cfg);
+  const last30Start=clipStart(shiftDate(refDate,-29));
+  const last30=ins.filter(i=>i.inspection_date>=last30Start&&i.inspection_date<=refDate);
+  const last30Stats=executiveStats(ins,last30Start,refDate,cfg);
   const areaMap={},classMap={};
   for(const i of last30){
     if(!approvedForScoring(i,cfg))continue;
@@ -1792,36 +1800,24 @@ async function executiveDashboard(env,u){
     const c=classMap[m.classId]||(classMap[m.classId]={id:m.classId,name:m.className||"—",done:0,improve:0,totalScore:0});
     c.done++;c.totalScore+=score;if(score===1)c.improve++;
   }
-  const watchAreas=Object.values(areaMap)
-    .map(x=>({...x,avg:x.done?x.totalScore/x.done:0}))
-    .filter(x=>x.improve>0)
-    .sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th"))
-    .slice(0,8);
-  const watchClasses=Object.values(classMap)
-    .map(x=>({...x,avg:x.done?x.totalScore/x.done:0}))
-    .filter(x=>x.improve>0)
-    .sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th"))
-    .slice(0,8);
+  const watchAreas=Object.values(areaMap).map(x=>({...x,avg:x.done?x.totalScore/x.done:0})).filter(x=>x.improve>0).sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th")).slice(0,8);
+  const watchClasses=Object.values(classMap).map(x=>({...x,avg:x.done?x.totalScore/x.done:0})).filter(x=>x.improve>0).sort((a,b)=>b.improve-a.improve||a.avg-b.avg||a.name.localeCompare(b.name,"th")).slice(0,8);
 
-  const currentWeek=weekSeries[weekSeries.length-1]||executiveStats([],today,today,cfg);
-  const previousWeek=weekSeries[weekSeries.length-2]||executiveStats([],today,today,cfg);
-  const currentMonth=monthSeries[monthSeries.length-1]||executiveStats([],today,today,cfg);
-  const previousMonth=monthSeries[monthSeries.length-2]||executiveStats([],today,today,cfg);
+  const currentWeek=weekSeries[weekSeries.length-1]||executiveStats([],refDate,refDate,cfg);
+  const previousWeek=weekSeries[weekSeries.length-2]||executiveStats([],refDate,refDate,cfg);
+  const currentMonth=monthSeries[monthSeries.length-1]||executiveStats([],refDate,refDate,cfg);
+  const previousMonth=monthSeries[monthSeries.length-2]||executiveStats([],refDate,refDate,cfg);
 
   return{
     today,
+    referenceDate:refDate,
+    period:selected?{PeriodID:selected.period_id,Label:selected.label,StartDate:selected.start_date,EndDate:selected.end_date,AcademicYear:selected.academic_year,Semester:selected.semester}:null,
+    periods:periods.map(x=>({PeriodID:x.period_id,Label:x.label,StartDate:x.start_date,EndDate:x.end_date,IsActive:Number(x.is_active||0)===1})),
     areas:Number(areaRow?.n||0),
-    todayStats,
-    last30:last30Stats,
-    currentWeek,previousWeek,currentMonth,previousMonth,
-    weekSeries,monthSeries,
-    leaders:leaderboard(last30,cfg).slice(0,5),
-    watchAreas,watchClasses,
-    settings:cfg,
-    updatedAt:nowIso()
+    todayStats,last30:last30Stats,currentWeek,previousWeek,currentMonth,previousMonth,
+    weekSeries,monthSeries,leaders:leaderboard(last30,cfg).slice(0,5),watchAreas,watchClasses,settings:cfg,updatedAt:nowIso()
   };
 }
-
 async function teacher(env,u){ role(u,["Teacher"]); await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins); const filtered=ins.filter(i=>metaOf(i).classId===u.linked_classroom_id&&(i.inspection_date===thaiDay()||ad.has(i.inspection_date))).sort((a,b)=>b.inspection_date.localeCompare(a.inspection_date)).slice(0,200); return{inspections:await Promise.all(filtered.map(i=>displayOne(env.DB,i))),rewards:(await all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=?",u.linked_classroom_id)).map(rewardRow),monthly:(await monthly(env,ins,thaiDay().slice(0,7))).filter(r=>r.id===u.linked_classroom_id)}; }
 async function dailyReport(env,u,date){
   role(u,["Admin","Supervisor","Inspector"]);
