@@ -440,7 +440,7 @@ async function certificateTemplateModal(){
       const overlay=$("cert-template-overlays");if(!overlay)return;
       overlay.innerHTML=Object.entries(sample).map(([k,value])=>{
         const v=state.fields[k];if(!v?.visible)return "";
-        return '<div class="ops-template-drag" data-field="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+v.size+'px;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(value)+'</div>';
+        return '<div class="ops-template-drag" data-field="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(value)+'</div>';
       }).join("");
       wireDrag();
     };
