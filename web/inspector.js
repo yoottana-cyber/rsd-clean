@@ -193,9 +193,19 @@ let taskRows = [];
       S.scanHandled = true;
       inspectionModal(local);
     } catch (e) {
-      // Keep the pending QR briefly so a login/reload can retry the same scanned location.
-      S.scanHandled = false;
-      savePendingQr(token);
+      const message=String(e?.message||e||"");
+      const nonRetriable=/ไม่ได้อยู่ในงานที่คุณได้รับมอบหมายวันนี้|QR ไม่ถูกต้อง|QR หมดอายุ|ไม่พบพื้นที่|ไม่พบงานตรวจ/i.test(message);
+      if(nonRetriable){
+        // Business-rule errors will not succeed by retrying. Consume/clear the token to avoid hijacking navigation.
+        markQrConsumed(token);
+        clearPendingQr();
+        S.scanToken="";
+        S.scanHandled=true;
+      }else{
+        // Temporary/network failures may be retried after reconnect/login.
+        S.scanHandled=false;
+        savePendingQr(token);
+      }
       error(e);
     } finally {
       busy(false);
