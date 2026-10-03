@@ -1096,8 +1096,16 @@ const adminTables = {
       headers: ["Username", "Password", "FullName", "Role", "ClassName"],
       labels: ["ชื่อผู้ใช้", "รหัสผ่าน", "ชื่อ–สกุล", "สิทธิ์", "ห้องเรียน"],
       sample: [
-        ["inspector01", "", "ชื่อผู้ตรวจ", "Inspector", ""],
-        ["teacher01", "", "ชื่อครูประจำชั้น", "Teacher", "ม.1/1"],
+        ["inspector01", "1234", "ชื่อผู้ตรวจ", "Inspector", ""],
+        ["teacher01", "1234", "ชื่อครูประจำชั้น", "Teacher", "ม.1/1"],
+      ],
+    },
+    Assignments: {
+      headers: ["Username", "AreaName", "Days"],
+      labels: ["ผู้ตรวจ", "พื้นที่", "วันเข้าเวร"],
+      sample: [
+        ["inspector01", "สวนหน้าอาคาร", "1,2,3,4,5"],
+        ["inspector02", "ลานกิจกรรม", "1,3,5"],
       ],
     },
   };
@@ -1195,6 +1203,11 @@ const adminTables = {
       areaName: "AreaName",
       areaname: "AreaName",
       ชื่อพื้นที่: "AreaName",
+      พื้นที่: "AreaName",
+      inspector: "Username",
+      ผู้ตรวจ: "Username",
+      days: "Days",
+      วันเข้าเวร: "Days",
     };
     const keys = matrix[0].map((h) => aliases[h.trim().toLowerCase().replace(/\s+/g, "")]);
     if (keys.some((k) => !k || !spec.headers.includes(k)) || new Set(keys).size !== keys.length)
@@ -1247,7 +1260,9 @@ const adminTables = {
           ? "กำหนดรหัสผ่านเองอย่างน้อย 4 ตัว · Teacher ต้องระบุชื่อห้องเรียน · สิทธิ์อื่นเว้นห้องเรียนว่าง"
           : kind === "Areas"
             ? "เพิ่มห้องเรียนให้เรียบร้อยก่อน ใช้ชื่อห้องเรียนหรือ ClassroomID เพื่อจับคู่"
-            : "กรอกหนึ่งห้องต่อหนึ่งแถว") +
+            : kind === "Assignments"
+              ? "ใช้ Username ของผู้ตรวจ + ชื่อพื้นที่ + วันเข้าเวร เช่น 1,2,3,4,5"
+              : "กรอกหนึ่งห้องต่อหนึ่งแถว") +
         "</p>" +
         '<div class="field"><label for="bulk-file">เลือกไฟล์ CSV / TSV</label><input id="bulk-file" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></div>' +
         '<div class="field"><label for="bulk-text">หัวตารางและรายการข้อมูล</label><textarea id="bulk-text" rows="9" spellcheck="false" autocomplete="off" placeholder="' +
