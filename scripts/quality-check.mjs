@@ -81,6 +81,8 @@ const checks=[
   [inspector.includes('rpc("mapStatus"'),"inspector/teacher maps use centralized map status"],
   [admin.includes('rpc("mapStatus"'),"executive dashboard uses centralized map status"],
   [core.includes("async function ensureRouteModules(route)")&&core.includes('["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]'),"feature modules are lazy-loaded by route"],
+  [!index.includes("cdn.tailwindcss.com")&&read("web/style.css").includes("Minimal utility layer"),"production UI uses local utility CSS instead of Tailwind browser CDN"],
+  [read("web/_headers").includes("https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com"),"CSP permits trusted CDN source-map connections"],
   [index.includes('<script src="/core.js"></script>')&&!index.includes('<script src="/admin.js"></script>')&&!index.includes('<script src="/operations.js"></script>'),"startup HTML loads only the core app bundle"],
   [sw.includes("TRUSTED_RUNTIME_ORIGINS")&&sw.includes("staleWhileRevalidate(RUNTIME,req)"),"trusted CDN and font dependencies have runtime offline cache"],
   [sw.includes('const CERT_CACHE="rsd-certificate-template-v1"')&&sw.includes("k!==CERT_CACHE"),"certificate template cache survives service-worker upgrades"],
