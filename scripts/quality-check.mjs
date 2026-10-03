@@ -43,6 +43,8 @@ const checks=[
   [api.includes("i.status===\"รอตรวจ\"&&!byArea.has(i.area_id)"),"stale pending duty cleanup exists"],
   [api.includes("function dutyWeekday")&&api.includes("/[^1-7]+/")&&api.includes("saturdayDutyEnabled")&&api.includes("sundayDutyEnabled"),"weekend duties are configurable"],
   [admin.includes("activeDutyDayOptions")&&admin.includes('[6, "เสาร์", "ส."]')&&admin.includes('[7, "อาทิตย์", "อา."]'),"assignment UI supports enabled weekend tabs"],
+  [admin.includes("function assignmentCopyTeamModal")&&admin.includes("assignment-copy-team")&&admin.includes('rpc("assign",{userIds:sourceUserIds,areaIds'),"multi-area inspector team assignment exists"],
+  [api.includes("runDbBatches(db,stmts,40)")&&api.includes("users.length<=100&&areas.length<=100"),"large multi-area assignment batches are safe"],
   [coverage.includes('name="saturdayDutyEnabled"')&&coverage.includes('name="sundayDutyEnabled"'),"system settings expose weekend duty switches"],
   [api.includes("function currentInspectionLabels")&&api.includes("async function currentInspectionNameMaps")&&api.includes("AreaName:label.AreaName")&&api.includes("พื้นที่:label.AreaName"),"historical views resolve current master names"],
   [api.includes("async function deleteInspection")&&api.includes('"Inspections",id,recycleLabel("Inspections",snapshot)')&&api.includes('type==="Inspections"'),"recoverable inspection deletion exists"],
