@@ -767,6 +767,7 @@
     $("account").innerHTML = S.user
       ? '<div class="account-user"><span class="account-name">' + esc(S.user.FullName) + '</span>' +
         '<button class="btn small secondary notification-btn" id="notification-btn" type="button" aria-label="แจ้งเตือน"><span class="menu-icon-with-badge"><i data-lucide="bell"></i><b class="notification-badge hidden">0</b></span><span class="account-label">แจ้งเตือน</span></button>' +
+        '<button class="btn small secondary" id="push-btn" type="button" aria-label="Push Notification"><i data-lucide="bell-ring"></i><span class="account-label">Push</span></button>' +
         '<button class="btn small secondary" id="devices-btn" type="button" aria-label="อุปกรณ์"><i data-lucide="monitor-smartphone"></i><span class="account-label">อุปกรณ์</span></button>' +
         install +
         '<button class="btn small secondary" id="change-pass" type="button" aria-label="เปลี่ยนรหัสผ่าน"><i data-lucide="key-round"></i><span class="account-label">รหัสผ่าน</span></button>' +
@@ -777,6 +778,7 @@
     if ($("mobile-more")) $("mobile-more").onclick = mobileMoreMenu;
     if ($("mobile-notification-btn")) $("mobile-notification-btn").onclick = notificationCenterModal;
     if ($("notification-btn")) $("notification-btn").onclick = notificationCenterModal;
+    if ($("push-btn")) $("push-btn").onclick = () => typeof pushNotificationModal==="function" ? pushNotificationModal() : toast("กำลังโหลด Push Notification");
     if ($("devices-btn")) $("devices-btn").onclick = deviceSessionsModal;
 
     if (S.user) {
