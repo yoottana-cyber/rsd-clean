@@ -169,3 +169,32 @@ CREATE TABLE IF NOT EXISTS duty_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_duty_overrides_date ON duty_overrides(override_date, area_id);
 CREATE INDEX IF NOT EXISTS idx_duty_overrides_substitute ON duty_overrides(substitute_user_id, override_date);
+
+
+CREATE TABLE IF NOT EXISTS academic_periods (
+  period_id TEXT PRIMARY KEY,
+  academic_year TEXT NOT NULL,
+  semester TEXT NOT NULL,
+  label TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_academic_periods_dates ON academic_periods(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_academic_periods_active ON academic_periods(is_active, start_date);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  subscription_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL DEFAULT '',
+  auth TEXT NOT NULL DEFAULT '',
+  device_label TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id, enabled);
