@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-40";
+const CACHE="rsd-clean-v2-shell-41";
 const SHELL=[
   "/",
   "/index.html",
@@ -6,6 +6,7 @@ const SHELL=[
   "/core.js",
   "/admin.js",
   "/map-editor.js",
+  "/map-enhancements.js",
   "/inspector.js",
   "/coverage.js",
   "/operations.js",
