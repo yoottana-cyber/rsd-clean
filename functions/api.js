@@ -131,14 +131,15 @@ export async function onRequest(context) {
     enforceRateLimit(request,action,payload,token);
 
     const data = await dispatch(env, action, payload, token, request);
-    if(["saveInspection","reviewInspection","adminEditInspection","saveDutyOverride","deleteDutyOverride","setInspectionException","saveAppSettings","assign","setAssignmentDays","holidays","saveMaster","deleteMaster","restoreTrash","restoreBackup"].includes(action)) notificationCache.clear();
+    if(["saveInspection","reviewInspection","adminEditInspection","deleteInspection","saveDutyOverride","deleteDutyOverride","setInspectionException","saveAppSettings","assign","setAssignmentDays","holidays","saveMaster","deleteMaster","restoreTrash","restoreBackup"].includes(action)) notificationCache.clear();
     if(action==="restoreBackup")appSettingsCache={value:null,at:0};
     const duration=Date.now()-started;
 
     if (!["challenge","login","publicDashboard"].includes(action)) {
       background(context,autoBackupIfDue(env).catch(e => console.error("AUTO_BACKUP_FAILED", e)));
     }
-    if (action === "saveInspection" || action === "reviewInspection" || action === "adminEditInspection") {
+    if (["saveInspection","reviewInspection","adminEditInspection","deleteInspection"].includes(action) ||
+        (action === "restoreTrash" && data?.entityType === "Inspections")) {
       background(context,rebuildRewards(env).catch(e => console.error("REWARD_REBUILD_FAILED", e)));
     }
     if(["saveDutyOverride","reviewInspection","saveInspection"].includes(action)){
@@ -230,6 +231,10 @@ function b64url(bytes, pad = true) {
   return s;
 }
 async function digest(s) { return b64url(await sha256Bytes(s), true); }
+async function fakeCredentialSalt(env, username) {
+  const bytes=await sha256Bytes(await hmac(env,"challenge-salt:"+String(username||"").toLowerCase()));
+  return [...bytes.slice(0,16)].map(n=>n.toString(16).padStart(2,"0")).join("");
+}
 async function hmac(env, s) {
   const key = await crypto.subtle.importKey("raw", enc.encode(String(env.RSD_PEPPER)), { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
   return b64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(String(s)))), true);
@@ -257,7 +262,7 @@ async function dispatch(env, action, p, token, request) {
     const username = text(p.username,80).toLowerCase();
     const u = await db.prepare("SELECT password FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
     const c = parseJson(u?.password, {});
-    return { scheme:c.scheme || "pbkdf2", salt:c.salt || await digest(await hmac(env, username)), iterations:ITERATIONS };
+    return { scheme:c.scheme || "pbkdf2", salt:/^[a-f0-9]{32}$/.test(String(c.salt||""))?c.salt:await fakeCredentialSalt(env, username), iterations:ITERATIONS };
   }
   if (action === "login") return login(env, p);
   if (action === "publicDashboard") return dashboard(env, null, validateDate(p.date || thaiDay()));
@@ -2407,10 +2412,20 @@ async function saveInspection(env,u,p){
 async function photo(env,u,p){ const i=await env.DB.prepare("SELECT * FROM inspections WHERE inspection_id=?").bind(String(p.inspectionId||"")).first(); assert(i&&await visible(env,u,i),"ไม่มีสิทธิ์ดูรูป"); const ids=parseJson(i.photo_links_json,[]); assert(ids.includes(String(p.fileId||"")),"ไม่พบรูปในรายการ"); return gasDrive(env,"photo",{fileId:String(p.fileId)}); }
 
 function rewardRow(r){ return {LogID:r.log_id,Timestamp:r.timestamp,ReferenceID:r.reference_id,Achievement:r.achievement,Details:r.details_json}; }
-function metaOf(i){ const m=parseJson(i.meta_json,{}); m.note=i.note||m.note||""; m.completedAt=i.completed_at||m.completedAt||""; return m; }
+function metaOf(i){ const m=parseJson(i.meta_json,{}); m.note=i.note||m.note||""; m.completedAt=i.completed_at||m.completedAt||""; if(i?._currentAreaName)m.areaName=i._currentAreaName; if(i?._currentClassName)m.className=i._currentClassName; return m; }
+async function applyCurrentInspectionNames(db,ins){
+  if(!Array.isArray(ins)||!ins.length)return ins||[];
+  const maps=await currentInspectionNameMaps(db);
+  for(const i of ins){
+    const raw=parseJson(i.meta_json,{}),area=maps.areas.get(String(i.area_id||raw.areaId||"")),classId=String(raw.classId||"");
+    i._currentAreaName=String(area?.AreaName||raw.areaName||"");
+    i._currentClassName=String((classId&&maps.classes.get(classId))||area?.ClassName||raw.className||"");
+  }
+  return ins;
+}
 function inspectorIdsFrom(i, teamMap){ const t=teamMap.get(i.inspection_id)||[]; if(t.length) return t.map(x=>x.user_id); const m=metaOf(i); return Array.isArray(m.inspectorIds)?m.inspectorIds.map(String):(m.userId?[String(m.userId)]:[]); }
 function inspectorNamesFrom(i, teamMap){ const t=teamMap.get(i.inspection_id)||[]; if(t.length) return t.map(x=>x.user_name); const m=metaOf(i); return Array.isArray(m.inspectorNames)?m.inspectorNames.map(String):(m.userName?[String(m.userName)]:[]); }
-async function inspectionBundle(db){ const ins=await all(db,"SELECT * FROM inspections ORDER BY inspection_date,inspection_id"), teams=await all(db,"SELECT * FROM inspection_inspectors ORDER BY inspection_id,user_name"), map=new Map(); teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);}); return {ins,teamMap:map}; }
+async function inspectionBundle(db){ const ins=await all(db,"SELECT * FROM inspections ORDER BY inspection_date,inspection_id"), teams=await all(db,"SELECT * FROM inspection_inspectors ORDER BY inspection_id,user_name"), map=new Map(); await applyCurrentInspectionNames(db,ins); teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);}); return {ins,teamMap:map}; }
 async function inspectionBundleRange(db,start,end){
   const [ins,teams]=await Promise.all([
     all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,end),
@@ -2419,6 +2434,7 @@ async function inspectionBundleRange(db,start,end){
       WHERE i.inspection_date>=? AND i.inspection_date<=?
       ORDER BY ii.inspection_id,ii.user_name`,start,end)
   ]);
+  await applyCurrentInspectionNames(db,ins);
   const map=new Map();
   teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);});
   return{ins,teamMap:map};
@@ -2454,6 +2470,7 @@ async function dashboard(env,u,d){
     all(env.DB,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,d),
     env.DB.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
+  await applyCurrentInspectionNames(env.DB,ins);
   const ad=activeDates(ins),isHoliday=d<thaiDay()&&!ad.has(d);
   const selected=ins.filter(i=>i.inspection_date===d&&!isHoliday&&(!u||u.role!=="Teacher"||metaOf(i).classId===u.linked_classroom_id));
   const submitted=selected.filter(i=>i.status==="ตรวจแล้ว"),resolved=selected.filter(i=>i.status==="ตรวจแล้ว"||i.status==="งดตรวจ"),counts=[3,2,1].map(n=>submitted.filter(i=>Number(i.score)===n).length);
@@ -2508,6 +2525,7 @@ async function executiveDashboard(env,u,p={}){
     db.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
 
+  await applyCurrentInspectionNames(db,ins);
   const todayStats=executiveStats(ins,refDate,refDate,cfg);
   const weekSeries=[];
   for(let n=7;n>=0;n--){

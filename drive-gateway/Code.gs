@@ -122,9 +122,9 @@ function driveGatewaySetup(){
   if(!p.getProperty('PHOTO_FOLDER_ID'))p.setProperty('PHOTO_FOLDER_ID',DriveApp.createFolder('RSD-Clean-D1-Photos').getId());
   if(!p.getProperty('BACKUP_FOLDER_ID'))p.setProperty('BACKUP_FOLDER_ID',DriveApp.createFolder('RSD-Clean-D1-Backups').getId());
   if(!p.getProperty('CERT_TEMPLATE_FOLDER_ID'))p.setProperty('CERT_TEMPLATE_FOLDER_ID',DriveApp.createFolder('RSD-Clean-Certificate-Templates').getId());
-  console.log('DRIVE_GATEWAY_KEY='+p.getProperty('DRIVE_GATEWAY_KEY'));
-  console.log('PHOTO_FOLDER_ID='+p.getProperty('PHOTO_FOLDER_ID'));
-  console.log('BACKUP_FOLDER_ID='+p.getProperty('BACKUP_FOLDER_ID'));
-  console.log('CERT_TEMPLATE_FOLDER_ID='+p.getProperty('CERT_TEMPLATE_FOLDER_ID'));
+  console.log('DRIVE_GATEWAY_KEY พร้อมใช้งานแล้ว (ไม่แสดงค่า Secret ใน Log)');
+  console.log('โฟลเดอร์รูปภาพพร้อมใช้งานแล้ว');
+  console.log('โฟลเดอร์ Backup พร้อมใช้งานแล้ว');
+  console.log('โฟลเดอร์แม่แบบเกียรติบัตรพร้อมใช้งานแล้ว');
   console.log('Deploy เป็น Web app: Execute as Me / Anyone แล้วนำ URL /exec ไปตั้ง GAS_DRIVE_URL ใน Cloudflare');
 }

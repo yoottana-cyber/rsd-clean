@@ -10,5 +10,6 @@ function exportForD1Migration(){
 }
 function showD1Pepper(){
   const p=PropertiesService.getScriptProperties(),pepper=p.getProperty('PEPPER');if(!pepper)throw Error('ไม่พบ PEPPER');
-  console.log('RSD_PEPPER='+pepper);console.log('ค่านี้เป็นความลับ ใช้ตั้ง Secret ใน Cloudflare แล้วอย่าเผยแพร่');
+  console.log('PEPPER พร้อมใช้งานแล้ว (ระบบจะไม่แสดงค่า Secret ใน Log)');
+  return true;
 }
