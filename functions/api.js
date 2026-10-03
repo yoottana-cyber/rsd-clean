@@ -23,6 +23,11 @@ const DEFAULT_APP_SETTINGS = {
 let sessionMetaReady = false;
 let autoBackupCheckedDay = "";
 let systemEventsReady = false;
+let auditReady = false;
+let recycleReady = false;
+let dutyOverridesReady = false;
+let academicPeriodsReady = false;
+let pushSubscriptionsReady = false;
 let systemEventsCleanupDay = "";
 const rateBuckets = new Map();
 const rateEventLast = new Map();
@@ -123,6 +128,7 @@ export async function onRequest(context) {
 
     const data = await dispatch(env, action, payload, token, request);
     if(["saveInspection","reviewInspection","saveDutyOverride","deleteDutyOverride","setInspectionException","saveAppSettings","assign","setAssignmentDays","holidays","saveMaster","deleteMaster","restoreTrash","restoreBackup"].includes(action)) notificationCache.clear();
+    if(action==="restoreBackup")appSettingsCache={value:null,at:0};
     const duration=Date.now()-started;
 
     if (!["challenge","login","publicDashboard"].includes(action)) {
@@ -411,6 +417,7 @@ async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args)
 const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest"]);
 
 async function ensureAuditTable(db){
+  if(auditReady)return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
     audit_id TEXT PRIMARY KEY,
     timestamp TEXT NOT NULL,
@@ -424,6 +431,7 @@ async function ensureAuditTable(db){
   )`).run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_user_id,timestamp DESC)").run();
+  auditReady=true;
 }
 function safeMasterAuditRow(row={}){
   const out={};
@@ -881,6 +889,7 @@ async function systemStatus(env,u){
 }
 
 async function ensureRecycleTable(db){
+  if(recycleReady)return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS recycle_bin (
     recycle_id TEXT PRIMARY KEY,
     deleted_at TEXT NOT NULL,
@@ -894,6 +903,7 @@ async function ensureRecycleTable(db){
   )`).run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_recycle_expires ON recycle_bin(expires_at)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_recycle_deleted ON recycle_bin(deleted_at DESC)").run();
+  recycleReady=true;
 }
 async function cleanRecycle(db){
   await ensureRecycleTable(db);
@@ -1043,6 +1053,7 @@ function shiftClock(hhmm,minutes){
 }
 
 async function ensureAcademicPeriodsTable(db){
+  if(academicPeriodsReady)return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS academic_periods (
     period_id TEXT PRIMARY KEY,
     academic_year TEXT NOT NULL,
@@ -1056,6 +1067,7 @@ async function ensureAcademicPeriodsTable(db){
   )`).run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_academic_periods_dates ON academic_periods(start_date,end_date)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_academic_periods_active ON academic_periods(is_active,start_date)").run();
+  academicPeriodsReady=true;
 }
 async function academicPeriods(env,u){
   assert(u,"SESSION_EXPIRED");
@@ -1104,6 +1116,7 @@ async function academicPeriodForDate(db,date){
   return db.prepare("SELECT * FROM academic_periods WHERE start_date<=? AND end_date>=? ORDER BY start_date DESC LIMIT 1").bind(date,date).first();
 }
 async function ensurePushSubscriptionsTable(db){
+  if(pushSubscriptionsReady)return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
     subscription_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -1117,6 +1130,7 @@ async function ensurePushSubscriptionsTable(db){
   )`).run();
   await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id,enabled)").run();
+  pushSubscriptionsReady=true;
 }
 function b64urlBytes(input){
   const bytes=input instanceof Uint8Array?input:new TextEncoder().encode(String(input));
@@ -1323,6 +1337,7 @@ async function saveAppSettings(env,u,p){
   return cfg;
 }
 async function ensureDutyOverridesTable(db){
+  if(dutyOverridesReady)return;
   await db.prepare(`CREATE TABLE IF NOT EXISTS duty_overrides (
     override_id TEXT PRIMARY KEY,
     override_date TEXT NOT NULL,
@@ -1336,6 +1351,7 @@ async function ensureDutyOverridesTable(db){
   )`).run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_duty_overrides_date ON duty_overrides(override_date,area_id)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_duty_overrides_substitute ON duty_overrides(substitute_user_id,override_date)").run();
+  dutyOverridesReady=true;
 }
 async function dutyOverrides(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB;await ensureDutyOverridesTable(db);
