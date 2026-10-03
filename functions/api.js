@@ -301,7 +301,8 @@ async function dispatch(env, action, p, token, request) {
     master: async () => master(env,u),
     areaMapLayout: async () => areaMapLayout(env,u),
     areaMapReference: async () => areaMapReference(env,u),
-    saveAreaMapReference: async () => saveAreaMapReference(env,u,p),
+    saveAreaMapReferenceChunk: async () => saveAreaMapReferenceChunk(env,u,p),
+    finalizeAreaMapReferenceUpload: async () => finalizeAreaMapReferenceUpload(env,u,p),
     clearAreaMapReference: async () => clearAreaMapReference(env,u),
     mapStatus: async () => mapStatus(env,u,p),
     saveAreaMapLayout: async () => saveAreaMapLayout(env,u,p),
@@ -430,7 +431,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","saveAreaMapReference","clearAreaMapReference"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout","finalizeAreaMapReferenceUpload","clearAreaMapReference"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -464,7 +465,7 @@ function auditMeta(action,p,result){
   if(action==="removeDutyAssignments")return{entityType:"Assignments",entityId:"bulk",details:{mode:String(p.mode||""),day:Number(p.day||0),userId:String(p.userId||""),areaIds:(p.areaIds||[]).map(String).slice(0,100),changed:Number(result?.changed||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,5),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="saveAreaMapLayout")return{entityType:"AreaMap",entityId:"layout",details:{shapeCount:Number(result?.saved||0)}};
-  if(action==="saveAreaMapReference"||action==="clearAreaMapReference")return{entityType:"AreaMap",entityId:"reference",details:{hasReference:!!result?.HasReference}};
+  if(action==="finalizeAreaMapReferenceUpload"||action==="clearAreaMapReference")return{entityType:"AreaMap",entityId:"reference",details:{hasReference:!!result?.HasReference,size:Number(result?.Size||0)}};
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
   if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
   if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
@@ -1883,23 +1884,49 @@ async function areaMapReference(env,u){
   const m=Object.fromEntries(rows.map(r=>[String(r.key),String(r.value||"")]));
   return{ReferenceVersion:m.area_map_reference_version||"",DataUrl:m.area_map_reference_data||""};
 }
-async function saveAreaMapReference(env,u,p){
+async function saveAreaMapReferenceChunk(env,u,p){
   role(u,["Admin"]);
-  const data=String(p.dataUrl||"");
+  const uploadId=String(p.uploadId||"").trim();
+  assert(/^[A-Za-z0-9-]{8,80}$/.test(uploadId),"รหัสอัปโหลดภาพไม่ถูกต้อง");
+  const index=Number(p.index),total=Number(p.total),chunk=String(p.chunk||"");
+  assert(Number.isInteger(index)&&index>=0,"ลำดับชิ้นภาพไม่ถูกต้อง");
+  assert(Number.isInteger(total)&&total>=1&&total<=60,"จำนวนชิ้นภาพไม่ถูกต้อง");
+  assert(index<total,"ลำดับชิ้นภาพเกินจำนวนทั้งหมด");
+  assert(chunk.length>0&&chunk.length<=65000,"ชิ้นภาพมีขนาดใหญ่เกินไป");
+  assert(/^[A-Za-z0-9+/:;=,]+$/.test(chunk),"ข้อมูลชิ้นภาพไม่ถูกต้อง");
+  if(index===0){
+    await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind("area_map_reference_upload_%").run();
+  }
+  const key="area_map_reference_upload_"+uploadId+"_"+String(index).padStart(4,"0");
+  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind(key,chunk).run();
+  return{received:index+1,total};
+}
+async function finalizeAreaMapReferenceUpload(env,u,p){
+  role(u,["Admin"]);
+  const uploadId=String(p.uploadId||"").trim();
+  assert(/^[A-Za-z0-9-]{8,80}$/.test(uploadId),"รหัสอัปโหลดภาพไม่ถูกต้อง");
+  const total=Number(p.total);
+  assert(Number.isInteger(total)&&total>=1&&total<=60,"จำนวนชิ้นภาพไม่ถูกต้อง");
+  const prefix="area_map_reference_upload_"+uploadId+"_";
+  const rows=await all(env.DB,"SELECT key,value FROM settings WHERE key LIKE ? ORDER BY key",prefix+"%");
+  assert(rows.length===total,"อัปโหลดภาพยังไม่ครบทุกส่วน");
+  const data=rows.map(r=>String(r.value||"")).join("");
   assert(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data),"รูปภาพอ้างอิงไม่ถูกต้อง");
   assert(data.length<=3000000,"ภาพอ้างอิงมีขนาดใหญ่เกินไป");
   const version=nowIso();
   await env.DB.batch([
     env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_data",data),
-    env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version)
+    env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version),
+    env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(prefix+"%")
   ]);
-  return{ReferenceVersion:version,HasReference:true};
+  return{ReferenceVersion:version,HasReference:true,Size:data.length};
 }
 async function clearAreaMapReference(env,u){
   role(u,["Admin"]);
   const version=nowIso();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM settings WHERE key=?").bind("area_map_reference_data"),
+    env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind("area_map_reference_upload_%"),
     env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version)
   ]);
   return{ReferenceVersion:version,HasReference:false};
