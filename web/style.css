@@ -1991,3 +1991,18 @@ tbody tr:hover td{background:#fbfefe}
 .rsd-map-view-controls{display:flex;justify-content:flex-end;gap:4px;margin:0 0 6px}.rsd-map-view-controls button{border:1px solid #d8e5e8;border-radius:8px;background:#fff;color:#496771;min-width:34px;padding:4px 8px;font:500 10px "Kanit",sans-serif;cursor:pointer}.rsd-map-view-controls button:hover{border-color:#9ecbd4;background:#f2fbfc}
 @media(max-width:1200px){.area-map-layer-tools{grid-column:1/-1}}
 @media(max-width:700px){.area-map-layer-tools{grid-column:auto}.area-map-decor-colors{grid-template-columns:1fr}.rsd-map-view-controls{justify-content:center}.rsd-map-view-controls button{min-width:52px;padding:6px 10px}}
+
+
+/* map-context-viewers-v1 */
+.dashboard-map-decor polygon,.dashboard-map-decor rect,
+.ops-control-map-decor polygon,.ops-control-map-decor rect,
+.inspector-map-decor polygon,.inspector-map-decor rect,
+.exec-map-decor polygon,.exec-map-decor rect,
+.teacher-map-decor polygon,.teacher-map-decor rect{
+  stroke-width:2;vector-effect:non-scaling-stroke;
+}
+.dashboard-map-decor text,.ops-control-map-decor text,
+.inspector-map-decor text,.exec-map-decor text,.teacher-map-decor text{
+  font:600 13px "Kanit",sans-serif;fill:#475569;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none;
+}
+.inspector-map-decor,.teacher-map-decor{pointer-events:none}
