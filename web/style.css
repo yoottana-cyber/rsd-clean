@@ -1921,3 +1921,10 @@ tbody tr:hover td{background:#fbfefe}
 .area-map-detail-list{display:grid;gap:6px;margin-top:9px}.area-map-detail-list>div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;font-size:10px}.area-map-detail-list span{color:#84969d}.area-map-detail-list b{color:#365762;font-weight:600;overflow-wrap:anywhere}.area-map-no-duty{font-size:10px;color:#748891;background:#f1f5f7;border-radius:8px;padding:8px;margin-top:8px}
 .area-map-daily-summary{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin:11px 0}.area-map-daily-summary>div{background:#f5fafb;border-radius:10px;padding:8px;display:flex;align-items:center;justify-content:space-between}.area-map-daily-summary span{font-size:9px;color:#7b8e96}.area-map-daily-summary b{font-size:15px;color:#2f5663}
 @media(max-width:700px){.area-map-live-title{align-items:flex-start;flex-direction:column}.area-map-legend{margin-left:0}.area-map-live-controls input[type="date"]{width:100%}}
+
+
+/* area-map-export-v1 */
+.area-map-export-btn{white-space:nowrap}
+.area-map-export-reference{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #dce8eb;border-radius:9px;background:#fff;font-size:10px;color:#536f79;white-space:nowrap}
+.area-map-export-reference input{width:15px;height:15px;accent-color:#0891b2}
+@media(max-width:700px){.area-map-export-btn{flex:1 1 45%}.area-map-export-reference{flex:1 1 100%}}

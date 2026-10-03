@@ -125,7 +125,7 @@ function areaMapRenderEditor(){
     '<div class="area-map-shell">'+
       '<div class="area-map-head"><div><h2 class="text-lg">ผังเขตพื้นที่โรงเรียน</h2><p class="muted mt-1">วาดผังแบบ Vector และเชื่อมกับพื้นที่ตรวจจริงในระบบ</p></div>'+
       '<div class="area-map-head-actions"><span id="area-map-dirty" class="area-map-dirty '+(areaMapState.dirty?"show":"")+'">'+(areaMapState.dirty?"มีการแก้ไขที่ยังไม่บันทึก":"")+'</span><button class="btn secondary" id="area-map-reload">↺ ย้อนการแก้ไข</button><button class="btn" id="area-map-save" '+(areaMapState.dirty?"":"disabled")+'>บันทึกผัง</button></div></div>'+
-      '<div class="area-map-stats"><span>พื้นที่ทั้งหมด <b>'+areas.length+'</b></span><span>วางบนผังแล้ว <b>'+mapped.size+'</b></span><span>ยังไม่วาง <b>'+(areas.length-mapped.size)+'</b></span></div>'+      '<div class="area-map-livebar '+(areaMapState.statusMode?"active":"")+'"><div class="area-map-live-title"><div><b>สถานะการตรวจบนผัง</b><small>'+esc(areaMapStatusDateText(areaMapState.statusDate))+(areaMapStatusTimeText()?' · อัปเดต '+esc(areaMapStatusTimeText()):'')+'</small></div><label class="area-map-live-switch"><input id="area-map-status-mode" type="checkbox" '+(areaMapState.statusMode?"checked":"")+'> แสดงสีสถานะ</label></div><div class="area-map-live-controls"><input id="area-map-status-date" type="date" value="'+esc(areaMapState.statusDate)+'" max="'+thaiDay()+'"><button class="btn small secondary" id="area-map-status-refresh">↻ รีเฟรชสถานะ</button><div class="area-map-legend">'+areaMapStatusLegend()+'</div></div></div>'+
+      '<div class="area-map-stats"><span>พื้นที่ทั้งหมด <b>'+areas.length+'</b></span><span>วางบนผังแล้ว <b>'+mapped.size+'</b></span><span>ยังไม่วาง <b>'+(areas.length-mapped.size)+'</b></span></div>'+      '<div class="area-map-livebar '+(areaMapState.statusMode?"active":"")+'"><div class="area-map-live-title"><div><b>สถานะการตรวจบนผัง</b><small>'+esc(areaMapStatusDateText(areaMapState.statusDate))+(areaMapStatusTimeText()?' · อัปเดต '+esc(areaMapStatusTimeText()):'')+'</small></div><label class="area-map-live-switch"><input id="area-map-status-mode" type="checkbox" '+(areaMapState.statusMode?"checked":"")+'> แสดงสีสถานะ</label></div><div class="area-map-live-controls"><input id="area-map-status-date" type="date" value="'+esc(areaMapState.statusDate)+'" max="'+thaiDay()+'"><button class="btn small secondary" id="area-map-status-refresh">↻ รีเฟรชสถานะ</button><button class="btn small secondary area-map-export-btn" id="area-map-export-169">📸 PNG 16:9</button><button class="btn small secondary area-map-export-btn" id="area-map-export-a4">🖼 PNG A4</button><label class="area-map-export-reference"><input id="area-map-export-reference" type="checkbox"> รวมภาพอ้างอิง</label><div class="area-map-legend">'+areaMapStatusLegend()+'</div></div></div>'+
       '<div class="area-map-toolbar">'+
         '<div class="area-map-area-picker"><label>พื้นที่ที่จะวาด</label><select id="area-map-area"><option value="">— เลือกพื้นที่ —</option>'+options+'</select></div>'+
         '<div class="area-map-tools"><button class="btn small secondary map-tool" data-mode="select">↖ เลือก/ย้าย</button><button class="btn small secondary map-tool" data-mode="rect">▭ สี่เหลี่ยม</button><button class="btn small secondary map-tool" data-mode="polygon">⬠ หลายเหลี่ยม</button><button class="btn small secondary" id="area-map-finish-poly">จบรูป</button><button class="btn small secondary" id="area-map-cancel-poly">ยกเลิกจุด</button></div>'+
@@ -161,6 +161,8 @@ function areaMapBindEditor(){
     areaMapRefreshStatus(false);
   };
   $("area-map-status-refresh").onclick=()=>areaMapRefreshStatus(false);
+  $("area-map-export-169").onclick=()=>areaMapExportImage("169");
+  $("area-map-export-a4").onclick=()=>areaMapExportImage("a4");
 
   $("area-map-area").onchange=e=>{
     areaMapState.selectedAreaId=String(e.target.value||"");
@@ -392,4 +394,173 @@ function areaMapRenderSide(){
     areaMapRenderEditor();
   };
 }
+
+function areaMapExportFilename(kind){
+  const d=String(areaMapState.statusDate||thaiDay()).replace(/-/g,"");
+  return kind==="a4"?"RSD-Clean-Area-Map-A4-"+d+".png":"RSD-Clean-Area-Map-16x9-"+d+".png";
+}
+function areaMapExportDateText(){
+  const date=areaMapState.statusDate||thaiDay();
+  try{
+    return new Date(date+"T12:00:00+07:00").toLocaleDateString("th-TH",{
+      weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"
+    });
+  }catch(e){return date;}
+}
+function areaMapExportGeneratedText(){
+  try{
+    return new Date().toLocaleString("th-TH",{
+      dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Bangkok"
+    });
+  }catch(e){return"";}
+}
+function areaMapExportSummary(){
+  const c=areaMapStatusCounts();
+  return{
+    total:S.master.Areas.length,
+    excellent:Number(c.excellent||0),
+    medium:Number(c.medium||0),
+    improve:Number(c.improve||0),
+    pending:Number(c.pending||0),
+    none:Number(c.none||0),
+    skipped:Number(c.skipped||0)
+  };
+}
+function areaMapExportSvg(includeReference){
+  const live=$("area-map-svg");
+  if(!live)throw new Error("ไม่พบผังสำหรับส่งออก");
+  const svg=live.cloneNode(true);
+
+  svg.querySelectorAll(".map-resize-handle,.map-draft-rect,.map-draft-poly,.map-draft-point").forEach(el=>el.remove());
+  svg.querySelectorAll(".map-shape-group.selected").forEach(el=>el.classList.remove("selected"));
+  if(!includeReference)svg.querySelector("#area-map-reference-image")?.remove();
+
+  const inlineStyle=document.createElementNS("http://www.w3.org/2000/svg","style");
+  inlineStyle.textContent=
+    '.map-shape-geometry{fill-opacity:.58;stroke:#315c69;stroke-width:2.4;vector-effect:non-scaling-stroke}'+
+    '.map-shape-group.status-none .map-shape-geometry{fill-opacity:.33}'+
+    '.map-shape-group.status-pending .map-shape-geometry{fill-opacity:.52}'+
+    '.map-shape-group.status-improve .map-shape-geometry{stroke:#991b1b}'+
+    '.map-shape-group.status-excellent .map-shape-geometry{stroke:#166534}'+
+    '.map-shape-group.locked .map-shape-geometry{stroke-dasharray:8 5}'+
+    '.map-shape-label{font:700 15px Kanit,Noto Sans Thai,Tahoma,sans-serif;fill:#173943;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}'+
+    '.map-shape-sub{font-size:11px;font-weight:500;fill:#415f68}'+
+    '.map-canvas-title{font:700 26px Kanit,Noto Sans Thai,Tahoma,sans-serif;fill:#173e4b}'+
+    '.map-canvas-subtitle{font:400 15px Kanit,Noto Sans Thai,Tahoma,sans-serif;fill:#78909a}';
+  svg.insertBefore(inlineStyle,svg.firstChild);
+  svg.setAttribute("xmlns","http://www.w3.org/2000/svg");
+  svg.setAttribute("width",String(AREA_MAP_W));
+  svg.setAttribute("height",String(AREA_MAP_H));
+  svg.removeAttribute("style");
+  return svg;
+}
+function areaMapExportSvgImage(svg){
+  return new Promise((resolve,reject)=>{
+    const xml=new XMLSerializer().serializeToString(svg),
+      blob=new Blob([xml],{type:"image/svg+xml;charset=utf-8"}),
+      url=URL.createObjectURL(blob),
+      img=new Image();
+    img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("สร้างภาพจากผังไม่สำเร็จ"));};
+    img.src=url;
+  });
+}
+function areaMapExportRoundRect(ctx,x,y,w,h,r){
+  const rr=Math.min(r,w/2,h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr,y);
+  ctx.arcTo(x+w,y,x+w,y+h,rr);
+  ctx.arcTo(x+w,y+h,x,y+h,rr);
+  ctx.arcTo(x,y+h,x,y,rr);
+  ctx.arcTo(x,y,x+w,y,rr);
+  ctx.closePath();
+}
+function areaMapExportSummaryCard(ctx,x,y,w,h,label,value,color){
+  ctx.save();
+  ctx.fillStyle="#ffffff";ctx.strokeStyle="#dbe7ea";ctx.lineWidth=1;
+  areaMapExportRoundRect(ctx,x,y,w,h,13);ctx.fill();ctx.stroke();
+  ctx.fillStyle=color;ctx.beginPath();ctx.arc(x+16,y+18,6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#6d8189";ctx.font='12px "Kanit","Noto Sans Thai",Tahoma,sans-serif';ctx.fillText(label,x+29,y+22);
+  ctx.fillStyle="#193d49";ctx.font='700 25px "Kanit","Noto Sans Thai",Tahoma,sans-serif';ctx.fillText(String(value),x+14,y+53);
+  ctx.restore();
+}
+function areaMapExportLegend(ctx,x,y,color,label,value){
+  ctx.save();
+  ctx.fillStyle=color;ctx.beginPath();ctx.arc(x+5,y-4,5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#526d76";ctx.font='11px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+  ctx.fillText(label+" "+String(value),x+16,y);
+  ctx.restore();
+}
+function areaMapExportDownload(canvas,filename){
+  return new Promise((resolve,reject)=>{
+    canvas.toBlob(blob=>{
+      if(!blob)return reject(new Error("สร้างไฟล์ PNG ไม่สำเร็จ"));
+      const url=URL.createObjectURL(blob),a=document.createElement("a");
+      a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
+      resolve();
+    },"image/png");
+  });
+}
+async function areaMapExportImage(kind="169"){
+  const includeReference=!!$("area-map-export-reference")?.checked&&!!areaMapState.referenceDataUrl,
+    layout=kind==="a4"?{w:1754,h:1240,p:46}:{w:1920,h:1080,p:44};
+
+  busy(true,"กำลังสร้างภาพรายงาน…");
+  try{
+    if(document.fonts?.ready)await document.fonts.ready;
+    const canvas=document.createElement("canvas"),ctx=canvas.getContext("2d");
+    canvas.width=layout.w;canvas.height=layout.h;
+    ctx.fillStyle="#f3f8f9";ctx.fillRect(0,0,layout.w,layout.h);
+
+    ctx.fillStyle="#143b47";ctx.font='700 30px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+    ctx.fillText("รายงานสถานะการตรวจความสะอาดตามพื้นที่",layout.p,48);
+    ctx.fillStyle="#607983";ctx.font='14px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+    ctx.fillText("โรงเรียนรัษฎา · "+areaMapExportDateText(),layout.p,76);
+    ctx.font='11px "Kanit","Noto Sans Thai",Tahoma,sans-serif';
+    ctx.fillText("สร้างรายงานเมื่อ "+areaMapExportGeneratedText(),layout.p,96);
+
+    const s=areaMapExportSummary(),
+      summary=[
+        ["ยอดเยี่ยม",s.excellent,"#22c55e"],
+        ["ปานกลาง",s.medium,"#f59e0b"],
+        ["ปรับปรุง",s.improve,"#ef4444"],
+        ["รอตรวจ",s.pending,"#facc15"],
+        ["ไม่มีเวร",s.none,"#94a3b8"],
+        ["งดตรวจ",s.skipped,"#64748b"]
+      ],
+      gap=10,cardY=112,cardH=64,
+      cardW=(layout.w-layout.p*2-gap*(summary.length-1))/summary.length;
+    summary.forEach((v,i)=>areaMapExportSummaryCard(ctx,layout.p+i*(cardW+gap),cardY,cardW,cardH,v[0],v[1],v[2]));
+
+    const mapTop=194,legendH=58,mapBottom=layout.h-layout.p-legendH,
+      boxW=layout.w-layout.p*2,boxH=mapBottom-mapTop,
+      scale=Math.min(boxW/AREA_MAP_W,boxH/AREA_MAP_H),
+      drawW=AREA_MAP_W*scale,drawH=AREA_MAP_H*scale,
+      drawX=layout.p+(boxW-drawW)/2,drawY=mapTop+(boxH-drawH)/2;
+
+    ctx.save();
+    ctx.fillStyle="#fff";ctx.strokeStyle="#d7e4e8";ctx.lineWidth=1.2;
+    areaMapExportRoundRect(ctx,drawX-8,drawY-8,drawW+16,drawH+16,16);ctx.fill();ctx.stroke();ctx.restore();
+
+    const svg=areaMapExportSvg(includeReference),img=await areaMapExportSvgImage(svg);
+    ctx.drawImage(img,drawX,drawY,drawW,drawH);
+
+    const ly=layout.h-layout.p-20;
+    let lx=layout.p;
+    summary.forEach(v=>{
+      areaMapExportLegend(ctx,lx,ly,v[2],v[0],v[1]);
+      lx+=kind==="a4"?128:140;
+    });
+
+    ctx.fillStyle="#81939a";ctx.font='10px "Kanit","Noto Sans Thai",Tahoma,sans-serif';ctx.textAlign="right";
+    ctx.fillText(includeReference?"รวมภาพอ้างอิงพื้นหลัง":"ไม่รวมภาพอ้างอิงพื้นหลัง",layout.w-layout.p,ly);
+    ctx.textAlign="left";
+
+    await areaMapExportDownload(canvas,areaMapExportFilename(kind));
+    toast(kind==="a4"?"ส่งออก PNG A4 แล้ว":"ส่งออก PNG 16:9 แล้ว");
+  }catch(e){error(e);}
+  finally{busy(false);}
+}
+
 async function areaMapSave(){busy(true,"กำลังบันทึกผังพื้นที่…");try{const shapes=areaMapState.shapes.map((s,i)=>({ShapeID:s.ShapeID,AreaID:s.AreaID,ShapeType:s.ShapeType,X:Number(s.X||0),Y:Number(s.Y||0),Width:Number(s.Width||0),Height:Number(s.Height||0),Points:(s.Points||[]).map(p=>({x:Number(p.x),y:Number(p.y)})),FillColor:s.FillColor||"#38bdf8",Locked:!!s.Locked,SortOrder:i}));const r=await rpc("saveAreaMapLayout",{shapes});areaMapState.dirty=false;toast("บันทึกผังแล้ว "+Number(r.saved||0)+" พื้นที่");areaMapRenderEditor();}catch(e){error(e);}finally{busy(false);}}
