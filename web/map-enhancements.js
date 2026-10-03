@@ -20,6 +20,8 @@ const rsdMapEnh={
   observer:null
 };
 
+function rsdMapIsCompactView(){return window.matchMedia("(max-width: 900px)").matches;}
+
 function rsdMapClone(v){return JSON.parse(JSON.stringify(v));}
 function rsdMapSnapshot(){
   return JSON.stringify({
@@ -405,7 +407,7 @@ function rsdMapEnhanceEditorUi(){
     document.querySelectorAll(".map-add-decor").forEach(b=>b.onclick=()=>rsdMapAddDecoration(b.dataset.kind));
   }
   const zoom=document.querySelector(".area-map-zoom");
-  if(zoom&&!$("area-map-fit")){
+  if(rsdMapIsCompactView()&&zoom&&!$("area-map-fit")){
     zoom.insertAdjacentHTML("afterbegin",'<button class="btn small secondary" id="area-map-fit">⌖ พอดี</button><button class="btn small secondary" id="area-map-pan">✋ เลื่อนผัง</button>');
     $("area-map-fit").onclick=()=>{
       const sc=document.querySelector(".area-map-scroll");if(!sc)return;
@@ -519,7 +521,7 @@ async function rsdMapExportPdf(){
 }
 
 function rsdEnhanceViewer(container){
-  if(!container||container.dataset.rsdMapEnhanced==="1")return;
+  if(!container||!rsdMapIsCompactView()||container.dataset.rsdMapEnhanced==="1")return;
   const svg=container.querySelector("svg");if(!svg||container.closest(".area-map-canvas-card"))return;
   container.dataset.rsdMapEnhanced="1";
   const controls=document.createElement("div");controls.className="rsd-map-view-controls";controls.innerHTML='<button type="button" data-z="-">−</button><button type="button" data-z="fit">พอดี</button><button type="button" data-z="+">＋</button>';
@@ -537,6 +539,31 @@ function rsdEnhanceViewer(container){
 function rsdEnhanceAllViewerMaps(){
   document.querySelectorAll(".ops-control-map-scroll,.dashboard-map-frame,.inspector-map-scroll,.exec-map-scroll,.teacher-map-scroll").forEach(rsdEnhanceViewer);
 }
-rsdMapEnh.observer=new MutationObserver(()=>rsdEnhanceAllViewerMaps());
+function rsdRestoreDesktopMapView(){
+  document.querySelectorAll(".rsd-map-view-controls").forEach(x=>x.remove());
+  document.querySelectorAll(".ops-control-map-scroll,.dashboard-map-frame,.inspector-map-scroll,.exec-map-scroll,.teacher-map-scroll").forEach(container=>{
+    delete container.dataset.rsdMapEnhanced;
+    const svg=container.querySelector("svg");
+    if(svg){
+      svg.style.removeProperty("width");
+      svg.style.removeProperty("min-width");
+      svg.style.removeProperty("max-height");
+    }
+  });
+  if($("area-map-fit"))$("area-map-fit").remove();
+  if($("area-map-pan"))$("area-map-pan").remove();
+  rsdMapEnh.pan=false;
+  $("area-map-svg")?.classList.remove("map-pan-mode");
+}
+function rsdSyncResponsiveMapView(){
+  if(rsdMapIsCompactView()){
+    rsdEnhanceAllViewerMaps();
+    if($("area-map-svg")&&document.querySelector(".area-map-zoom")&&!$("area-map-fit"))rsdMapEnhanceEditorUi();
+  }else{
+    rsdRestoreDesktopMapView();
+  }
+}
+rsdMapEnh.observer=new MutationObserver(()=>rsdSyncResponsiveMapView());
 rsdMapEnh.observer.observe(document.documentElement,{childList:true,subtree:true});
-rsdEnhanceAllViewerMaps();
+window.addEventListener("resize",()=>rsdSyncResponsiveMapView(),{passive:true});
+rsdSyncResponsiveMapView();
