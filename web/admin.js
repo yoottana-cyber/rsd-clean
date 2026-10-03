@@ -794,6 +794,7 @@ const adminTables = {
         '<button class="btn" id="daily-share"><i data-lucide="share-2"></i> แชร์</button>'+
         '<button class="btn secondary" id="daily-copy"><i data-lucide="copy"></i> คัดลอกข้อความ</button>'+
         '<button class="btn secondary" id="daily-image"><i data-lucide="image-down"></i> ดาวน์โหลดภาพ</button>'+
+        (S.user?.Role==="Admin"?'<button class="btn secondary" id="daily-admin-edit"><i data-lucide="pencil"></i> แก้ไขผลย้อนหลัง</button>':'')+
         (["Admin","Supervisor"].includes(S.user?.Role)?'<button class="btn secondary" id="daily-exception"><i data-lucide="circle-off"></i> จัดการงดตรวจ</button>':'')+
       '</div>'+
       '<div id="daily-report-content"><div class="card empty">กำลังโหลดรายงาน…</div></div>';
@@ -802,6 +803,7 @@ const adminTables = {
     $("daily-share").onclick=shareDailyReport;
     $("daily-copy").onclick=copyDailyReport;
     $("daily-image").onclick=downloadDailyReportImage;
+    if($("daily-admin-edit"))$("daily-admin-edit").onclick=()=>adminHistoricalDayEditModal($("daily-date").value);
     if($("daily-exception"))$("daily-exception").onclick=()=>inspectionExceptionModal($("daily-date").value);
     icons();
     await loadDailyReport(seq);
