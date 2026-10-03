@@ -261,7 +261,7 @@ async function loadCoverageHistory(seq=S.seq){
     '</div>'+
     '<section class="card mt-5"><div class="flex flex-wrap justify-between items-center gap-3 mb-4"><h2>รายการย้อนหลัง</h2><button class="btn secondary" id="history-export">ส่งออกช่วงนี้</button></div>'+
       (d.rows.length?table(
-        ["วันที่","ห้องเรียน","พื้นที่","สถานะ/ผล","หมายเหตุ","รับรอง","รูป"].concat(S.user?.Role==="Admin"?["แก้ไข"]:[]),
+        ["วันที่","ห้องเรียน","พื้นที่","สถานะ/ผล","หมายเหตุ","รับรอง","รูป"].concat(S.user?.Role==="Admin"?["จัดการ"]:[]),
         d.rows.map((x,idx)=>{
           const base=[
             coverageDateText(x.Date),
@@ -272,7 +272,11 @@ async function loadCoverageHistory(seq=S.seq){
             coverageApprovalPill(x.ApprovalStatus),
             x.PhotoLinks?.length?'<button class="btn small secondary history-photo" data-index="'+idx+'">ดูรูป</button>':'—'
           ];
-          if(S.user?.Role==="Admin")base.push('<button class="btn small secondary history-edit" data-index="'+idx+'"><i data-lucide="pencil"></i> แก้ไข</button>');
+          if(S.user?.Role==="Admin"){
+            const canDelete=String(x.Date||"")<thaiDay()&&["ตรวจแล้ว","งดตรวจ"].includes(String(x.Status||""));
+            base.push('<div class="flex flex-wrap gap-2"><button class="btn small secondary history-edit" data-index="'+idx+'"><i data-lucide="pencil"></i> แก้ไข</button>'+
+              (canDelete?'<button class="btn small danger history-delete" data-index="'+idx+'"><i data-lucide="trash-2"></i> ลบ</button>':'')+'</div>');
+          }
           return base;
         })
       ):'<div class="empty">ไม่พบข้อมูลในช่วงนี้</div>')+
@@ -284,12 +288,41 @@ async function loadCoverageHistory(seq=S.seq){
   }
   document.querySelectorAll(".history-photo").forEach(b=>b.onclick=()=>coveragePhoto(d.rows[Number(b.dataset.index)]));
   document.querySelectorAll(".history-edit").forEach(b=>b.onclick=()=>adminEditInspectionModal(d.rows[Number(b.dataset.index)],()=>loadCoverageHistory(S.seq)));
+  document.querySelectorAll(".history-delete").forEach(b=>b.onclick=()=>adminDeleteInspectionModal(d.rows[Number(b.dataset.index)],()=>loadCoverageHistory(S.seq)));
   $("history-export").onclick=()=>{
     try{sessionStorage.setItem("rsd-export-prefill",JSON.stringify({start:d.start,end:d.end,type:d.type,id:d.id}));}catch(e){}
     location.hash="exports";route();
   };
   icons();
 }
+async function adminDeleteInspectionModal(row,onDeleted){
+  if(S.user?.Role!=="Admin")return;
+  if(String(row.Date||"")>=thaiDay())return error(new Error("ผลตรวจของวันนี้ให้ใช้การแก้ไขผลแทนการลบ"));
+  if(!["ตรวจแล้ว","งดตรวจ"].includes(String(row.Status||"")))return error(new Error("ลบได้เฉพาะรายการที่ดำเนินการเสร็จแล้ว"));
+  const ask=await Swal.fire({
+    icon:"warning",
+    title:"ย้ายผลตรวจไปถังขยะ?",
+    html:"<b>"+esc(row.ClassName||"—")+" · "+esc(row.AreaName||"—")+"</b><br>"+esc(coverageDateText(row.Date))+"<br><br><span class='muted'>กู้คืนได้จากถังขยะภายใน 30 วัน</span>",
+    input:"textarea",
+    inputLabel:"เหตุผลการลบ",
+    inputPlaceholder:"เช่น บันทึกซ้ำ / ตรวจผิดพื้นที่ / เป็นข้อมูลทดลอง",
+    inputAttributes:{maxlength:"500"},
+    inputValidator:v=>String(v||"").trim().length<3?"กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร":undefined,
+    showCancelButton:true,
+    confirmButtonText:"ย้ายไปถังขยะ",
+    cancelButtonText:"ยกเลิก",
+    confirmButtonColor:"#be123c"
+  });
+  if(!ask.isConfirmed)return;
+  busy(true,"กำลังย้ายผลตรวจไปถังขยะ…");
+  try{
+    await rpc("deleteInspection",{id:row.InspectionID,reason:String(ask.value||"").trim()},true);
+    toast("ย้ายผลตรวจไปถังขยะแล้ว");
+    if(typeof onDeleted==="function")await onDeleted();
+  }catch(e){error(e);}
+  finally{busy(false);}
+}
+
 function adminEditInspectionModal(row,onSaved){
   if(S.user?.Role!=="Admin")return;
   const cfg=S.config||{},labels=cfg.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"},reasons=cfg.skipReasons||["ผู้ตรวจลา","กิจกรรมโรงเรียน","ฝนตก/สภาพอากาศ","พื้นที่ปิด/เข้าไม่ได้","เหตุจำเป็นอื่น"];
