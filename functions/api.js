@@ -1295,7 +1295,8 @@ function defaultCertificateTemplate(){
       month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500},
       period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400},
       issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400}
-    }
+    },
+    textBlocks:[]
   };
 }
 function certField(raw,def){
@@ -1310,16 +1311,33 @@ function certField(raw,def){
     weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):def.weight
   };
 }
+function certTextBlock(raw,index=0){
+  raw=raw&&typeof raw==="object"?raw:{};
+  const color=/^#[0-9a-f]{6}$/i.test(String(raw.color||""))?String(raw.color):"#17334b";
+  const id=text(raw.id||("text-"+(index+1)),80).replace(/[^a-zA-Z0-9_-]/g,"-")||("text-"+(index+1));
+  return{
+    id,
+    text:text(raw.text||"",500),
+    visible:raw.visible!==false,
+    x:Math.min(100,Math.max(0,Number(raw.x??50))),
+    y:Math.min(100,Math.max(0,Number(raw.y??50))),
+    size:Math.min(96,Math.max(10,Number(raw.size??22))),
+    color,
+    weight:[400,500,600,700].includes(Number(raw.weight))?Number(raw.weight):400
+  };
+}
 async function getCertificateTemplate(db){
   const def=defaultCertificateTemplate(),r=await db.prepare("SELECT value FROM settings WHERE key='certificate_template_json'").first(),x=parseJson(r?.value,{});
   const fields={};
   for(const k of Object.keys(def.fields))fields[k]=certField(x?.fields?.[k],def.fields[k]);
+  const textBlocks=Array.isArray(x?.textBlocks)?x.textBlocks.slice(0,20).map((v,i)=>certTextBlock(v,i)).filter(v=>v.text):[];
   return{
     enabled:x?.enabled===true&&!!String(x?.fileId||""),
     fileId:String(x?.fileId||""),
     mime:String(x?.mime||""),
     updatedAt:String(x?.updatedAt||""),
-    fields
+    fields,
+    textBlocks
   };
 }
 async function certificateTemplate(env,u){
@@ -1351,7 +1369,8 @@ async function saveCertificateTemplate(env,u,p){
   assert(fileId,"กรุณาอัปโหลดภาพแม่แบบก่อน");
   const fields={};
   for(const k of Object.keys(def.fields))fields[k]=certField(raw?.fields?.[k],old.fields?.[k]||def.fields[k]);
-  const cfg={enabled:raw.enabled!==false,fileId,mime,updatedAt:nowIso(),fields};
+  const textBlocks=Array.isArray(raw?.textBlocks)?raw.textBlocks.slice(0,20).map((v,i)=>certTextBlock(v,i)).filter(v=>v.text):old.textBlocks||[];
+  const cfg={enabled:raw.enabled!==false,fileId,mime,updatedAt:nowIso(),fields,textBlocks};
   await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('certificate_template_json',?)").bind(JSON.stringify(cfg)).run();
   if(p.uploadTicket){
     await db.prepare("DELETE FROM upload_tickets WHERE ticket=?").bind(String(p.uploadTicket)).run();
