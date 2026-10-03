@@ -87,6 +87,7 @@ async function appSettingsModal(){
         '<div class="coverage-toggle-grid">'+
           '<label class="coverage-toggle"><input name="approvalEnabled" type="checkbox" '+(cfg.approvalEnabled?"checked":"")+'><span><b>เปิดระบบรับรองผลตรวจ</b><small>ผลตรวจ/งดตรวจจะเป็น “รอรับรอง” ก่อนนำไปใช้</small></span></label>'+
           '<label class="coverage-toggle"><input name="offlineEnabled" type="checkbox" '+(cfg.offlineEnabled!==false?"checked":"")+'><span><b>อนุญาต Offline Sync</b><small>ผู้ตรวจบันทึกไว้ในเครื่องเมื่ออินเทอร์เน็ตหลุด</small></span></label>'+
+          '<label class="coverage-toggle"><input name="photoEvidenceEnabled" type="checkbox" '+(cfg.photoEvidenceEnabled?"checked":"")+'><span><b>เปิดการแนบรูปหลักฐาน</b><small>ปิดไว้จะช่วยให้แบบตรวจเบาและไม่เรียก Google Drive ระหว่างบันทึกผล</small></span></label>'+
         '</div>'+
         '<div class="field"><label>เหตุผล “งดตรวจ” (1 บรรทัดต่อ 1 เหตุผล)</label><textarea name="skipReasons" rows="7">'+esc((cfg.skipReasons||[]).join("\n"))+'</textarea></div>'+
         '<button class="btn w-full" type="submit"><i data-lucide="save"></i> บันทึกการตั้งค่า</button>'+
@@ -98,7 +99,7 @@ async function appSettingsModal(){
         scoreLabels:{"1":f.score1.value,"2":f.score2.value,"3":f.score3.value},
         inspectionStart:f.inspectionStart.value,inspectionEnd:f.inspectionEnd.value,
         recycleDays:Number(f.recycleDays.value),certificateSilverMax:Number(f.certificateSilverMax.value),certificateBronzeMax:Number(f.certificateBronzeMax.value),
-        approvalEnabled:f.approvalEnabled.checked,offlineEnabled:f.offlineEnabled.checked,
+        approvalEnabled:f.approvalEnabled.checked,offlineEnabled:f.offlineEnabled.checked,photoEvidenceEnabled:f.photoEvidenceEnabled.checked,
         skipReasons:f.skipReasons.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean)
       };
       try{
