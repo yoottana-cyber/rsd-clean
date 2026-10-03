@@ -4,7 +4,7 @@
    - centralized mapStatus consumption in editor
    - undo/redo
    - polygon vertex editing
-   - decoration/context layers
+   - shared reference-image cache and chunked upload
    - mobile pan/zoom
    - PNG clipboard/share/PDF
    - QR shortcut from the map
