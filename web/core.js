@@ -425,8 +425,10 @@
     if (modalFocus?.isConnected) modalFocus.focus();
   }
   $("modal-close").onclick = closeModal;
+  // ป้องกันการปิดหน้าต่างโดยไม่ตั้งใจเมื่อคลิก/แตะพื้นที่ด้านนอก
+  // ผู้ใช้ยังปิดได้จากปุ่ม X หรือปุ่ม Escape บนคีย์บอร์ด
   $("modal").onclick = (e) => {
-    if (e.target === $("modal")) closeModal();
+    if (e.target === $("modal")) e.preventDefault();
   };
   document.addEventListener("keydown", (e) => {
     if ($("modal").classList.contains("hidden")) return;
