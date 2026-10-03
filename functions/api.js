@@ -1823,12 +1823,12 @@ async function ensureAreaMapTable(db){
   areaMapReady=true;
 }
 function areaMapShapeRow(r){
-  return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),AreaName:String(r.area_name||""),ClassName:String(r.class_name||""),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
+  return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),AreaName:String(r.area_name||""),ClassName:String(r.class_name||""),ResponsibleClassroomID:String(r.responsible_classroom_id||""),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
 }
 async function areaMapLayout(env,u){
-  role(u,["Admin","Supervisor","Inspector"]);
+  role(u,["Admin","Supervisor","Inspector","Teacher"]);
   await ensureAreaMapTable(env.DB);
-  return {canvas:{width:1600,height:1000},shapes:(await all(env.DB,"SELECT s.*,a.area_name,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id")).map(areaMapShapeRow)};
+  return {canvas:{width:1600,height:1000},shapes:(await all(env.DB,"SELECT s.*,a.area_name,a.responsible_classroom_id,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id")).map(areaMapShapeRow)};
 }
 async function saveAreaMapLayout(env,u,p){
   role(u,["Admin"]);

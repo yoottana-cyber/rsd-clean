@@ -725,8 +725,104 @@ let taskRows = [];
       error(e);
     }
   }
+
+  function teacherMapCenter(s){
+    if(s.ShapeType==="polygon"&&Array.isArray(s.Points)&&s.Points.length){
+      const sum=s.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
+      return{x:sum.x/s.Points.length,y:sum.y/s.Points.length};
+    }
+    return{x:Number(s.X||0)+Number(s.Width||0)/2,y:Number(s.Y||0)+Number(s.Height||0)/2};
+  }
+  function teacherMapStatus(item){
+    if(!item)return{key:"none",label:"ยังไม่มีผลวันนี้",color:"#94a3b8"};
+    if(item.Status==="งดตรวจ")return{key:"skipped",label:"งดตรวจ",color:"#64748b"};
+    if(item.Status==="รอตรวจ")return{key:"pending",label:"รอตรวจ",color:"#facc15"};
+    if(item.Status==="ตรวจแล้ว"){
+      if(Number(item.Score)===3)return{key:"excellent",label:S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",color:"#22c55e"};
+      if(Number(item.Score)===2)return{key:"medium",label:S.config?.scoreLabels?.["2"]||"ปานกลาง",color:"#f59e0b"};
+      if(Number(item.Score)===1)return{key:"improve",label:S.config?.scoreLabels?.["1"]||"ปรับปรุง",color:"#ef4444"};
+      return{key:"done",label:"ตรวจแล้ว",color:"#14b8a6"};
+    }
+    return{key:"other",label:item.Status||"มีงานตรวจ",color:"#38bdf8"};
+  }
+  function teacherLatestForArea(recent,areaId){
+    return recent.find(i=>String(i.meta?.areaId||"")===String(areaId)&&i.Status==="ตรวจแล้ว")
+      || recent.find(i=>String(i.meta?.areaId||"")===String(areaId))
+      || null;
+  }
+  function teacherAreaMapHtml(layout,recent){
+    const shapes=layout?.shapes||[],classroomId=String(S.user?.LinkedClassroomID||""),
+      ownShapes=shapes.filter(s=>String(s.ResponsibleClassroomID||"")===classroomId),
+      todayRows=recent.filter(i=>i.InspectionDate===thaiDay()),
+      todayByArea=new Map(todayRows.map(i=>[String(i.meta?.areaId||""),i]));
+    if(!shapes.length)return '<section class="card teacher-map-card mb-7"><div class="teacher-map-head"><div><span class="muted">พื้นที่รับผิดชอบ</span><h2>ผังพื้นที่ของห้องฉัน</h2></div></div><div class="teacher-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
+    if(!ownShapes.length)return '<section class="card teacher-map-card mb-7"><div class="teacher-map-head"><div><span class="muted">พื้นที่รับผิดชอบ</span><h2>ผังพื้นที่ของห้องฉัน</h2></div></div><div class="teacher-map-empty">ยังไม่พบพื้นที่ที่เชื่อมกับห้องเรียนของบัญชีนี้</div></section>';
+
+    let ref="";try{ref=localStorage.getItem("rsd-area-map-reference-v1")||"";}catch(e){}
+    let opacity=.5;try{opacity=Math.max(.1,Math.min(.75,Number(localStorage.getItem("rsd-area-map-reference-opacity-v1")||50)/100));}catch(e){}
+    const reference=ref?'<image href="'+ref+'" x="0" y="0" width="1600" height="1000" opacity="'+opacity+'" pointer-events="none"/>':"";
+
+    const counts={pending:0,excellent:0,medium:0,improve:0,skipped:0,none:0,done:0,other:0};
+    ownShapes.forEach(s=>{const st=teacherMapStatus(todayByArea.get(String(s.AreaID)));counts[st.key]=(counts[st.key]||0)+1;});
+
+    const body=shapes.map(s=>{
+      const mine=String(s.ResponsibleClassroomID||"")===classroomId,
+        item=todayByArea.get(String(s.AreaID)),
+        status=mine?teacherMapStatus(item):{key:"other",label:"พื้นที่อื่น",color:"#cbd5e1"},
+        center=teacherMapCenter(s),
+        geo=s.ShapeType==="polygon"
+          ? '<polygon points="'+(s.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" ")+'" fill="'+status.color+'"/>'
+          : '<rect x="'+Number(s.X||0)+'" y="'+Number(s.Y||0)+'" width="'+Number(s.Width||0)+'" height="'+Number(s.Height||0)+'" rx="10" fill="'+status.color+'"/>';
+      return '<g class="teacher-map-shape '+(mine?"mine status-"+status.key:"other")+'" '+(mine?'data-area="'+esc(s.AreaID)+'" tabindex="0" role="button"':"")+'>'+geo+
+        (mine?'<text x="'+center.x+'" y="'+(center.y-5)+'" text-anchor="middle"><tspan x="'+center.x+'">'+esc(s.AreaName||item?.meta?.areaName||"พื้นที่")+'</tspan><tspan class="sub" x="'+center.x+'" dy="18">'+esc(s.ClassName||item?.meta?.className||"")+'</tspan></text>':"")+
+      '</g>';
+    }).join("");
+
+    const legend=[
+      ["#facc15","รอตรวจ",counts.pending],["#22c55e",S.config?.scoreLabels?.["3"]||"ยอดเยี่ยม",counts.excellent],
+      ["#f59e0b",S.config?.scoreLabels?.["2"]||"ปานกลาง",counts.medium],["#ef4444",S.config?.scoreLabels?.["1"]||"ปรับปรุง",counts.improve],
+      ["#64748b","งดตรวจ",counts.skipped],["#94a3b8","ยังไม่มีผลวันนี้",counts.none]
+    ].filter(x=>x[2]>0).map(x=>'<span><i style="background:'+x[0]+'"></i>'+esc(x[1])+' <b>'+x[2]+'</b></span>').join("");
+
+    return '<section class="card teacher-map-card mb-7">'+
+      '<div class="teacher-map-head"><div><span class="muted">วันนี้ · '+ownShapes.length+' พื้นที่</span><h2>ผังพื้นที่ของห้องฉัน</h2></div><button class="btn small secondary" id="teacher-map-toggle" type="button">ซ่อนผัง</button></div>'+
+      '<div class="teacher-map-legend">'+legend+'</div>'+
+      '<div class="teacher-map-layout" id="teacher-map-body"><div class="teacher-map-scroll"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่รับผิดชอบของห้องเรียน"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div><aside id="teacher-map-detail" class="teacher-map-detail"></aside></div>'+
+    '</section>';
+  }
+  function wireTeacherAreaMap(layout,recent){
+    const body=$("teacher-map-body"),toggle=$("teacher-map-toggle");
+    if(toggle&&body)toggle.onclick=()=>{
+      const hidden=body.classList.toggle("hidden");
+      toggle.textContent=hidden?"แสดงผัง":"ซ่อนผัง";
+    };
+    const show=areaId=>{
+      const box=$("teacher-map-detail");if(!box)return;
+      const shape=(layout?.shapes||[]).find(s=>String(s.AreaID)===String(areaId));
+      if(!shape)return;
+      const today=recent.find(i=>i.InspectionDate===thaiDay()&&String(i.meta?.areaId||"")===String(areaId)),
+        latest=teacherLatestForArea(recent,areaId),status=teacherMapStatus(today),
+        item=today||latest,
+        dateLabel=today?"วันนี้":latest?latest.InspectionDate:"ยังไม่มีผลตรวจ";
+      document.querySelectorAll(".teacher-map-shape.mine").forEach(el=>el.classList.toggle("selected",String(el.dataset.area)===String(areaId)));
+      box.innerHTML='<div class="teacher-map-detail-head"><span style="background:'+status.color+'"></span><div><b>'+esc(shape.AreaName||item?.meta?.areaName||"พื้นที่")+'</b><small>'+esc(shape.ClassName||item?.meta?.className||"")+'</small></div></div>'+
+        '<div class="teacher-map-detail-status"><b>'+esc(today?status.label:(latest?"ผลล่าสุด":"ยังไม่มีผลตรวจ"))+'</b><span>'+esc(dateLabel)+'</span></div>'+
+        (item?'<div class="teacher-map-detail-grid"><div><span>ผลประเมิน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(item.Rating||teacherMapStatus(item).label):esc(item.Status||"—"))+'</b></div><div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—")):"—")+'</b></div><div><span>ผู้ตรวจ</span><b>'+esc((item.Inspectors||[]).map(v=>v.Name).filter(Boolean).join(", ")||"—")+'</b></div>'+(item.Notes?'<div class="wide"><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+'</div>':'<div class="teacher-map-no-result">ยังไม่มีผลตรวจของพื้นที่นี้</div>')+
+        '<div class="teacher-map-detail-actions"><a class="btn small secondary" href="#history" data-history-type="area" data-history-id="'+esc(areaId)+'">ดูประวัติพื้นที่</a></div>';
+      icons();
+    };
+    document.querySelectorAll(".teacher-map-shape.mine").forEach(el=>{
+      const go=()=>show(el.dataset.area);
+      el.onclick=go;
+      el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}};
+    });
+    const first=document.querySelector(".teacher-map-shape.mine");
+    if(first)show(first.dataset.area);
+    else if($("teacher-map-detail"))$("teacher-map-detail").innerHTML='<div class="teacher-map-detail-empty">เลือกพื้นที่บนผังเพื่อดูรายละเอียด</div>';
+  }
+
   async function renderTeacher(seq) {
-    const r = await rpc("teacher");
+    const [r,mapLayout] = await Promise.all([rpc("teacher"),rpc("areaMapLayout",{},true).catch(()=>({shapes:[]}))]);
     if (seq !== S.seq) return;
     const recent = r.inspections,
       done = recent.filter((i) => i.Status === "ตรวจแล้ว");
@@ -738,7 +834,7 @@ let taskRows = [];
       r.rewards.length +
       '</div></section><section class="card"><p class="muted">ผลเกียรติบัตรเดือนนี้ (ชั่วคราว)</p><p class="text-xl mt-4">' +
       esc(r.monthly[0]?.medal || "ยังไม่มีข้อมูล") +
-      '</p></section></div><h2 class="text-lg mb-4">รางวัลของห้องเรียน</h2><div class="task-grid mb-7">' +
+      '</p></section></div>'+teacherAreaMapHtml(mapLayout,recent)+'<h2 class="text-lg mb-4">รางวัลของห้องเรียน</h2><div class="task-grid mb-7">' +
       (r.rewards.length
         ? r.rewards
             .map(
@@ -778,6 +874,8 @@ let taskRows = [];
       };
       icons();
     }
+    wireTeacherAreaMap(mapLayout,recent);
+    icons();
     document
       .querySelectorAll(".teacher-photo")
       .forEach((b) => (b.onclick = () => showPhoto(recent[Number(b.dataset.index)])));
