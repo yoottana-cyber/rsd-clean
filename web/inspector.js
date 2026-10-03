@@ -370,6 +370,7 @@ let taskRows = [];
     };
   }
   function inspectionModal(i, queuedRecord = null) {
+    const photoEnabled=S.config?.photoEvidenceEnabled===true;
     openModal(
       "ประเมิน: " + i.meta.areaName,
       '<form id="inspection-form"><p class="muted">ห้องรับผิดชอบ ' +
@@ -398,10 +399,11 @@ let taskRows = [];
           .join("") +
         '</select></div><div class="field"><label>หมายเหตุ</label><textarea name="notes" maxlength="2000">' +
         esc(i.Notes) +
-        '</textarea></div><div class="field"><label>รูปภาพหลักฐาน (ไม่บังคับ) · JPG, PNG, WebP ไม่เกิน 100 MB</label><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"><p class="muted">การเลือกรูปใหม่จะย้ายรูปเดิมลงถังขยะหลังบันทึกสำเร็จ</p></div>' +
-        (i.PhotoLinks.length
-          ? '<label><input type="checkbox" name="removePhoto"> ลบรูปเดิม</label>'
-          : "") +
+        '</textarea></div>' +
+        (photoEnabled
+          ? '<div class="field"><label>รูปภาพหลักฐาน (ไม่บังคับ) · JPG, PNG, WebP ไม่เกิน 100 MB</label><input type="file" name="photo" accept="image/jpeg,image/png,image/webp"><p class="muted">การเลือกรูปใหม่จะย้ายรูปเดิมลงถังขยะหลังบันทึกสำเร็จ</p></div>' +
+            (i.PhotoLinks.length?'<label><input type="checkbox" name="removePhoto"> ลบรูปเดิม</label>':'')
+          : '') +
         '<div id="upload-progress" class="muted my-3"></div><button class="btn w-full">บันทึกผลการตรวจ</button></form>',
     );
     const form = $("inspection-form");
@@ -425,7 +427,7 @@ let taskRows = [];
       button.disabled = true;
       busy(true, navigator.onLine ? "กำลังบันทึกผลตรวจ…" : "กำลังเก็บผลตรวจไว้ในเครื่อง…");
       const f=form.elements;
-      const selectedPhoto=f.photo.files[0] || null;
+      const selectedPhoto=photoEnabled&&f.photo ? (f.photo.files[0]||null) : null;
       const basePayload={
         id:i.InspectionID,
         version:Number(navigator.onLine ? i.meta.version : (queuedRecord?.payload?.version ?? i.meta.version)),
@@ -433,13 +435,13 @@ let taskRows = [];
         score:Number(f.score.value),
         notes:f.notes.value,
         skipReason:f.skipReason?.value||"",
-        removePhoto:f.removePhoto?.checked||false
+        removePhoto:photoEnabled?(f.removePhoto?.checked||false):false
       };
       const queueRecord=async(reason="")=>{
         if(S.config?.offlineEnabled===false) throw Error("Admin ปิดการบันทึกแบบออฟไลน์ไว้ กรุณาเชื่อมต่ออินเทอร์เน็ตก่อนบันทึก");
         if(!window.rsdOfflineQueue) throw Error("อุปกรณ์นี้ไม่รองรับการเก็บงานแบบออฟไลน์");
-        const prior=queuedRecord?.photo||null;
-        const photo=selectedPhoto||prior||null;
+        const prior=photoEnabled?(queuedRecord?.photo||null):null;
+        const photo=photoEnabled?(selectedPhoto||prior||null):null;
         const record={
           key:String(S.user.UserID)+":"+String(i.InspectionID),
           userId:String(S.user.UserID),
@@ -462,8 +464,8 @@ let taskRows = [];
           await queueRecord();
           return;
         }
-        let photo=selectedPhoto;
-        if(!photo && queuedRecord?.photo) photo=queuedRecord.photo;
+        let photo=photoEnabled?selectedPhoto:null;
+        if(photoEnabled&&!photo&&queuedRecord?.photo)photo=queuedRecord.photo;
         if (photo && !ticket) {
           const upload = await rpc(
             "uploadStart",
@@ -501,9 +503,7 @@ let taskRows = [];
         busy(false);
       }
     };
-    form.elements.photo.onchange = () => {
-      ticket = "";
-    };
+    if(form.elements.photo)form.elements.photo.onchange=()=>{ticket="";};
   }
   /** Resumable upload: 8 MiB is a multiple of Drive's 256 KiB requirement.
    * 308 + Range determines the acknowledged offset; retry with status probe after network errors.
@@ -587,7 +587,7 @@ let taskRows = [];
     for(const q of rows){
       try{
         let uploadTicket="";
-        if(q.photo){
+        if(S.config?.photoEvidenceEnabled===true&&q.photo){
           const upload=await rpc("uploadStart",{id:q.inspectionId,mime:q.photo.type||q.photoType,size:q.photo.size,origin:location.origin},true);
           await uploadChunks(upload.url,q.photo,percent=>{
             if(manual&&$("loading-text"))$("loading-text").textContent="ซิงก์รูปภาพ "+percent+"%";
