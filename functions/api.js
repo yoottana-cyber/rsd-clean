@@ -1895,7 +1895,7 @@ async function saveAreaMapReferenceChunk(env,u,p){
   assert(chunk.length>0&&chunk.length<=65000,"ชิ้นภาพมีขนาดใหญ่เกินไป");
   assert(/^[A-Za-z0-9+/:;=,]+$/.test(chunk),"ข้อมูลชิ้นภาพไม่ถูกต้อง");
   if(index===0){
-    await env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind("area_map_reference_upload_%").run();
+    await env.DB.prepare("DELETE FROM settings WHERE key>=? AND key<?").bind("area_map_reference_upload_","area_map_reference_upload_\uffff").run();
   }
   const key="area_map_reference_upload_"+uploadId+"_"+String(index).padStart(4,"0");
   await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind(key,chunk).run();
@@ -1908,7 +1908,7 @@ async function finalizeAreaMapReferenceUpload(env,u,p){
   const total=Number(p.total);
   assert(Number.isInteger(total)&&total>=1&&total<=60,"จำนวนชิ้นภาพไม่ถูกต้อง");
   const prefix="area_map_reference_upload_"+uploadId+"_";
-  const rows=await all(env.DB,"SELECT key,value FROM settings WHERE key LIKE ? ORDER BY key",prefix+"%");
+  const rows=await all(env.DB,"SELECT key,value FROM settings WHERE key>=? AND key<? ORDER BY key",prefix,prefix+"\uffff");
   assert(rows.length===total,"อัปโหลดภาพยังไม่ครบทุกส่วน");
   const data=rows.map(r=>String(r.value||"")).join("");
   assert(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data),"รูปภาพอ้างอิงไม่ถูกต้อง");
@@ -1917,7 +1917,7 @@ async function finalizeAreaMapReferenceUpload(env,u,p){
   await env.DB.batch([
     env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_data",data),
     env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version),
-    env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind(prefix+"%")
+    env.DB.prepare("DELETE FROM settings WHERE key>=? AND key<?").bind(prefix,prefix+"\uffff")
   ]);
   return{ReferenceVersion:version,HasReference:true,Size:data.length};
 }
@@ -1926,7 +1926,7 @@ async function clearAreaMapReference(env,u){
   const version=nowIso();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM settings WHERE key=?").bind("area_map_reference_data"),
-    env.DB.prepare("DELETE FROM settings WHERE key LIKE ?").bind("area_map_reference_upload_%"),
+    env.DB.prepare("DELETE FROM settings WHERE key>=? AND key<?").bind("area_map_reference_upload_","area_map_reference_upload_\uffff"),
     env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind("area_map_reference_version",version)
   ]);
   return{ReferenceVersion:version,HasReference:false};
