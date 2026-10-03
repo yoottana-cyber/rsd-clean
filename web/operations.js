@@ -511,7 +511,9 @@ async function renderCertificateCenter(seq){
 }
 async function loadCertificates(seq=S.seq){
   const month=$("certificate-month").value,d=await rpc("certificateData",{month},true);if(seq!==S.seq)return;
-  opCertificateData=d;opCertificateTemplateImage="";
+  const nextTemplateKey=certificateTemplateKey(d.template);
+  if(opCertificateTemplateKey&&opCertificateTemplateKey!==nextTemplateKey)certificateResetTemplateMemory();
+  opCertificateData=d;
   const groups={ทอง:d.rows.filter(x=>x.medal==="เหรียญทอง"),เงิน:d.rows.filter(x=>x.medal==="เหรียญเงิน"),ทองแดง:d.rows.filter(x=>x.medal==="เหรียญทองแดง")};
   const templateStatus=d.template?.enabled
     ? '<span class="pill green">ใช้แม่แบบที่อัปโหลด</span>'
@@ -533,6 +535,9 @@ async function loadCertificates(seq=S.seq){
   if($("cert-pdf"))$("cert-pdf").onclick=downloadCertificatesPdf;
   if($("cert-zip"))$("cert-zip").onclick=downloadCertificatesZip;
   icons();
+  if(d.template?.enabled&&d.template?.fileId){
+    setTimeout(()=>ensureCertificateTemplateImage(d).then(()=>certificateDecodedTemplate(d)).catch(e=>console.warn("certificate prefetch",e)),0);
+  }
 }
 function certIssueDateText(d){
   try{return new Date(d.generatedAt||Date.now()).toLocaleDateString("th-TH",{day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"});}
@@ -582,11 +587,11 @@ function certificateHtml(row,d){
 }
 async function ensureCertificateTemplateImage(d){
   if(!d?.template?.enabled)return "";
-  if(d.templateImage)return d.templateImage;
-  if(opCertificateTemplateImage){d.templateImage=opCertificateTemplateImage;return opCertificateTemplateImage;}
-  $("loading-text").textContent="กำลังโหลดแม่แบบเกียรติบัตร…";
-  const image=await rpc("certificateTemplateImage",{},true);
-  d.templateImage=image;opCertificateTemplateImage=image;
+  const key=certificateTemplateKey(d.template);
+  if(d.templateImage&&String(d.templateImageKey||key)===key)return d.templateImage;
+  const loading=$("loading-text");if(loading)loading.textContent="กำลังเตรียมแม่แบบเกียรติบัตร…";
+  const image=await certificateGetTemplateImage(d.template);
+  d.templateImage=image;d.templateImageKey=key;
   return image;
 }
 function certificateCanvasFontFamily(font){
@@ -621,10 +626,9 @@ function certificateDrawText(ctx,text,style,width,height,multiline=false){
   ctx.restore();
 }
 async function customCertificateCanvas(row,d){
-  const t=d.template||{},values=certificateVariableValues(row,d),imageSrc=await ensureCertificateTemplateImage(d);
-  if(!imageSrc)throw Error("ไม่พบภาพพื้นหลังเกียรติบัตร");
+  const t=d.template||{},values=certificateVariableValues(row,d);
   await ensureCertificateTemplateFonts(t);
-  const bg=await certificateLoadImage(imageSrc);
+  const bg=await certificateDecodedTemplate(d);
   const logicalW=1122,logicalH=794,scale=2;
   const canvas=document.createElement("canvas");
   canvas.width=logicalW*scale;canvas.height=logicalH*scale;
@@ -731,12 +735,18 @@ async function ensureCertificateFont(font,weight=400){
   }catch(e){return false;}
 }
 async function ensureCertificateTemplateFonts(template){
-  const jobs=[];
-  Object.values(template?.fields||{}).forEach(v=>{if(v?.visible!==false)jobs.push(ensureCertificateFont(v.font,v.weight));});
-  (template?.textBlocks||[]).forEach(v=>{if(v?.visible!==false)jobs.push(ensureCertificateFont(v.font,v.weight));});
-  if(!jobs.length)jobs.push(ensureCertificateFont("Kanit",400));
-  await Promise.all(jobs);
-  await document.fonts?.ready?.catch?.(()=>{});
+  const used=[];
+  Object.values(template?.fields||{}).forEach(v=>{if(v?.visible!==false)used.push([v.font,v.weight]);});
+  (template?.textBlocks||[]).forEach(v=>{if(v?.visible!==false)used.push([v.font,v.weight]);});
+  if(!used.length)used.push(["Kanit",400]);
+  const key=[...new Set(used.map(v=>String(v[0]||"Kanit")+":"+Number(v[1]||400)))].sort().join("|");
+  if(opCertificateFontsPromise&&opCertificateFontsKey===key)return opCertificateFontsPromise;
+  opCertificateFontsKey=key;
+  opCertificateFontsPromise=(async()=>{
+    await Promise.all(used.map(v=>ensureCertificateFont(v[0],v[1])));
+    await document.fonts?.ready?.catch?.(()=>{});
+  })();
+  return opCertificateFontsPromise;
 }
 function certificateFontOptions(current){
   return [
