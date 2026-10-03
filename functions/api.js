@@ -29,6 +29,7 @@ let recycleReady = false;
 let dutyOverridesReady = false;
 let academicPeriodsReady = false;
 let pushSubscriptionsReady = false;
+let areaMapReady = false;
 let systemEventsCleanupDay = "";
 const rateBuckets = new Map();
 const rateEventLast = new Map();
@@ -298,6 +299,8 @@ async function dispatch(env, action, p, token, request) {
     teacher: async () => teacher(env,u),
     qrAdmin: async () => qrAdmin(env,u,p),
     master: async () => master(env,u),
+    areaMapLayout: async () => areaMapLayout(env,u),
+    saveAreaMapLayout: async () => saveAreaMapLayout(env,u,p),
     report: async () => report(env,u,validateDate(p.start),validateDate(p.end)),
     dailyReport: async () => dailyReport(env,u,validateDate(p.date || thaiDay())),
     inspectionExceptions: async () => inspectionExceptions(env,u,p),
@@ -423,7 +426,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate","saveAreaMapLayout"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -456,6 +459,7 @@ function auditMeta(action,p,result){
   if(action==="setAssignmentDays")return{entityType:"Assignments",entityId:String(p.id||""),details:{days:p.days||[]}};
   if(action==="removeDutyAssignments")return{entityType:"Assignments",entityId:"bulk",details:{mode:String(p.mode||""),day:Number(p.day||0),userId:String(p.userId||""),areaIds:(p.areaIds||[]).map(String).slice(0,100),changed:Number(result?.changed||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,5),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
+  if(action==="saveAreaMapLayout")return{entityType:"AreaMap",entityId:"layout",details:{shapeCount:Number(result?.saved||0)}};
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
   if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
   if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
@@ -1797,6 +1801,44 @@ async function inspectorHome(env,u){
 async function qrTask(env,u,p){ role(u,["Inspector"]); const aid=await qrAreaId(env,p.token); await ensureToday(env); const i=await env.DB.prepare(`SELECT i.* FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id WHERE i.inspection_date=? AND i.area_id=? AND ii.user_id=?`).bind(thaiDay(),aid,u.user_id).first(); assert(i,"พื้นที่นี้ไม่ได้อยู่ในงานที่คุณได้รับมอบหมายวันนี้"); return displayOne(env.DB,i); }
 async function visible(env,u,i){ if(!u) return false; if(["Admin","Supervisor"].includes(u.role)) return true; if(u.role==="Inspector") return !!(await env.DB.prepare("SELECT 1 x FROM inspection_inspectors WHERE inspection_id=? AND user_id=?").bind(i.inspection_id,u.user_id).first()); const m=parseJson(i.meta_json,{}); return u.role==="Teacher" && m.classId===u.linked_classroom_id; }
 
+async function ensureAreaMapTable(db){
+  if(areaMapReady)return;
+  await db.prepare("CREATE TABLE IF NOT EXISTS area_map_shapes (shape_id TEXT PRIMARY KEY,area_id TEXT NOT NULL UNIQUE,shape_type TEXT NOT NULL DEFAULT 'rect',x REAL NOT NULL DEFAULT 0,y REAL NOT NULL DEFAULT 0,width REAL NOT NULL DEFAULT 120,height REAL NOT NULL DEFAULT 80,points_json TEXT NOT NULL DEFAULT '[]',fill_color TEXT NOT NULL DEFAULT '#38bdf8',locked INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_area_map_sort ON area_map_shapes(sort_order,shape_id)").run();
+  areaMapReady=true;
+}
+function areaMapShapeRow(r){
+  return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
+}
+async function areaMapLayout(env,u){
+  role(u,["Admin","Supervisor"]);
+  await ensureAreaMapTable(env.DB);
+  return {canvas:{width:1600,height:1000},shapes:(await all(env.DB,"SELECT * FROM area_map_shapes ORDER BY sort_order,shape_id")).map(areaMapShapeRow)};
+}
+async function saveAreaMapLayout(env,u,p){
+  role(u,["Admin"]);
+  const db=env.DB; await ensureAreaMapTable(db);
+  const shapes=Array.isArray(p.shapes)?p.shapes:[]; assert(shapes.length<=100,"ผังมีพื้นที่มากเกินไป");
+  const m=await masterData(db),validAreas=new Set(m.Areas.map(a=>String(a.AreaID))),seen=new Set(),now=nowIso(),stmts=[db.prepare("DELETE FROM area_map_shapes")];
+  const num=(v,min,max,label)=>{const n=Number(v);assert(Number.isFinite(n)&&n>=min&&n<=max,label+" ไม่ถูกต้อง");return Math.round(n*100)/100;};
+  for(let i=0;i<shapes.length;i++){
+    const s=shapes[i]||{},areaId=String(s.AreaID||""),type=String(s.ShapeType||"rect"),shapeId=text(s.ShapeID||"",120)||uuid(),color=String(s.FillColor||"#38bdf8").trim(),locked=s.Locked?1:0,sortOrder=Number.isFinite(Number(s.SortOrder))?Math.trunc(Number(s.SortOrder)):i;
+    assert(validAreas.has(areaId),"ผังอ้างอิงพื้นที่ที่ไม่มีอยู่"); assert(!seen.has(areaId),"หนึ่งพื้นที่วางบนผังได้ 1 รูปทรง"); seen.add(areaId);
+    assert(type==="rect"||type==="polygon","ชนิดรูปทรงไม่ถูกต้อง"); assert(/^#[0-9a-fA-F]{6}$/.test(color),"สีพื้นที่ไม่ถูกต้อง");
+    let x=0,y=0,w=0,h=0,points=[];
+    if(type==="rect"){
+      x=num(s.X,0,1590,"ตำแหน่ง X"); y=num(s.Y,0,990,"ตำแหน่ง Y"); w=num(s.Width,20,1600,"ความกว้าง"); h=num(s.Height,20,1000,"ความสูง");
+      assert(x+w<=1600.01&&y+h<=1000.01,"รูปทรงอยู่นอกขอบผัง");
+    }else{
+      assert(Array.isArray(s.Points)&&s.Points.length>=3&&s.Points.length<=60,"รูปหลายเหลี่ยมต้องมี 3–60 จุด");
+      points=s.Points.map(pt=>({x:num(pt?.x,0,1600,"จุด X"),y:num(pt?.y,0,1000,"จุด Y")}));
+      const xs=points.map(pt=>pt.x),ys=points.map(pt=>pt.y); x=Math.min(...xs); y=Math.min(...ys); w=Math.max(...xs)-x; h=Math.max(...ys)-y; assert(w>=20&&h>=20,"รูปหลายเหลี่ยมเล็กเกินไป");
+    }
+    stmts.push(db.prepare("INSERT INTO area_map_shapes(shape_id,area_id,shape_type,x,y,width,height,points_json,fill_color,locked,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(shapeId,areaId,type,x,y,w,h,JSON.stringify(points),color,locked,sortOrder,now,now));
+  }
+  await db.batch(stmts);
+  return {saved:shapes.length};
+}
 async function masterData(db){
   const [us,cs,as,assigns]=await Promise.all([all(db,"SELECT * FROM users ORDER BY full_name"),all(db,"SELECT * FROM classrooms ORDER BY class_name"),all(db,"SELECT * FROM areas ORDER BY area_name"),all(db,"SELECT * FROM assignments ORDER BY area_id,user_id")]);
   return { Users:us.map(userRow),Classrooms:cs.map(classRow),Areas:as.map(areaRow),Assignments:assigns.map(assignRow) };
@@ -1840,7 +1882,7 @@ async function deleteMaster(env,u,p){
     await db.prepare("DELETE FROM classrooms WHERE classroom_id=?").bind(id).run();
   }
   if(p.table==="Areas"){
-    const old=m.Areas.find(x=>x.AreaID===id); assert(old,"ไม่พบรายการ"); assert(!m.Assignments.some(a=>a.AreaID===id),"ยกเลิกงานมอบหมายก่อน");
+    const old=m.Areas.find(x=>x.AreaID===id); assert(old,"ไม่พบรายการ"); assert(!m.Assignments.some(a=>a.AreaID===id),"ยกเลิกงานมอบหมายก่อน"); await ensureAreaMapTable(db); assert(!(await db.prepare("SELECT 1 x FROM area_map_shapes WHERE area_id=?").bind(id).first()),"นำพื้นที่ออกจากผังก่อน");
     await putRecycle(db,u,p.table,id,old);
     await db.prepare("DELETE FROM areas WHERE area_id=?").bind(id).run();
   }

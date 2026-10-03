@@ -65,7 +65,7 @@ const adminTables = {
             '<button class="btn secondary admin-tab" data-tab="' + k + '">' + t.name + "</button>",
         )
         .join("") +
-      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><a class="btn secondary" href="#control">ศูนย์งานวันนี้</a><a class="btn secondary" href="#periods">ปีการศึกษา</a><button class="btn secondary" id="excel-import-btn">นำเข้า Excel</button><a class="btn secondary" href="#certificates">เกียรติบัตร</a><button class="btn secondary" id="override-btn">ผู้ตรวจทดแทน</button><button class="btn secondary" id="settings-btn">ตั้งค่าระบบ</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
+      '<button class="btn secondary admin-tab" data-tab="Assignments">มอบหมายงาน</button><button class="btn secondary admin-tab" data-tab="AreaMap">ผังพื้นที่</button><a class="btn secondary" href="#control">ศูนย์งานวันนี้</a><a class="btn secondary" href="#periods">ปีการศึกษา</a><button class="btn secondary" id="excel-import-btn">นำเข้า Excel</button><a class="btn secondary" href="#certificates">เกียรติบัตร</a><button class="btn secondary" id="override-btn">ผู้ตรวจทดแทน</button><button class="btn secondary" id="settings-btn">ตั้งค่าระบบ</button><button class="btn secondary" id="holiday-btn">วันหยุดโรงเรียน</button><button class="btn secondary" id="audit-btn">ประวัติการเปลี่ยนแปลง</button><button class="btn secondary" id="trash-btn">ถังขยะ</button><button class="btn secondary" id="backup-btn">สำรองและกู้คืน</button><button class="btn secondary" id="status-btn">สถานะระบบ</button><button class="btn secondary" id="monitor-btn">มอนิเตอร์ระบบ</button></div><section class="card" id="admin-content"></section>';
     document.querySelectorAll(".admin-tab").forEach(
       (b) =>
         (b.onclick = () => {
@@ -85,6 +85,7 @@ const adminTables = {
     adminContent();
   }
   function adminContent() {
+    if (adminTab === "AreaMap") { areaMapContent(); return; }
     if (adminTab === "Assignments") {
       assignmentContent();
       return;

@@ -28,6 +28,23 @@ CREATE TABLE IF NOT EXISTS areas (
 );
 CREATE INDEX IF NOT EXISTS idx_areas_class ON areas(responsible_classroom_id);
 
+CREATE TABLE IF NOT EXISTS area_map_shapes (
+  shape_id TEXT PRIMARY KEY,
+  area_id TEXT NOT NULL UNIQUE,
+  shape_type TEXT NOT NULL DEFAULT 'rect',
+  x REAL NOT NULL DEFAULT 0,
+  y REAL NOT NULL DEFAULT 0,
+  width REAL NOT NULL DEFAULT 120,
+  height REAL NOT NULL DEFAULT 80,
+  points_json TEXT NOT NULL DEFAULT '[]',
+  fill_color TEXT NOT NULL DEFAULT '#38bdf8',
+  locked INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_area_map_sort ON area_map_shapes(sort_order,shape_id);
+
 CREATE TABLE IF NOT EXISTS assignments (
   assignment_id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,

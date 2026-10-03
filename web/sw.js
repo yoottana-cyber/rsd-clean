@@ -1,10 +1,11 @@
-const CACHE="rsd-clean-v2-shell-30";
+const CACHE="rsd-clean-v2-shell-31";
 const SHELL=[
   "/",
   "/index.html",
   "/style.css",
   "/core.js",
   "/admin.js",
+  "/map-editor.js",
   "/inspector.js",
   "/coverage.js",
   "/operations.js",
