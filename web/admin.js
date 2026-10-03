@@ -1498,7 +1498,7 @@ const adminTables = {
     if (!bundle || bundle.format !== "rsd-clean-d1-backup-v1" || !bundle.tables) {
       return Swal.fire({icon:"error",title:"ไฟล์ Backup ไม่ถูกต้อง",text:"รองรับเฉพาะ RSD Clean D1 Backup v1"});
     }
-    const names=["users","classrooms","areas","assignments","inspections","inspection_inspectors","rewards_log","holidays","settings","audit_log"];
+    const names=["users","classrooms","areas","assignments","inspections","inspection_inspectors","rewards_log","holidays","settings","audit_log","recycle_bin","duty_overrides","academic_periods","push_subscriptions"];
     const counts=names.map(n=>[n,Array.isArray(bundle.tables[n])?bundle.tables[n].length:0]);
     const created=bundle.createdAt ? new Date(bundle.createdAt).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"}) : "ไม่ระบุ";
     const summary=counts.map(([n,c])=>"<tr><td style='text-align:left;padding:3px 10px'>"+esc(n)+"</td><td style='text-align:right;padding:3px 10px'>"+c+"</td></tr>").join("");
