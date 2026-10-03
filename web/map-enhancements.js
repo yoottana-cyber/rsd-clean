@@ -13,7 +13,6 @@
 const rsdMapEnh={
   undo:[],
   redo:[],
-  selectedDecorationId:"",
   selectedVertex:-1,
   pan:false,
   panGesture:null,
@@ -25,8 +24,7 @@ function rsdMapIsCompactView(){return window.matchMedia("(max-width: 900px)").ma
 function rsdMapClone(v){return JSON.parse(JSON.stringify(v));}
 function rsdMapSnapshot(){
   return JSON.stringify({
-    shapes:areaMapState.shapes||[],
-    decorations:areaMapState.decorations||[]
+    shapes:areaMapState.shapes||[]
   });
 }
 function rsdMapRecordBefore(){
@@ -41,10 +39,8 @@ function rsdMapRecordBefore(){
 function rsdMapRestoreSnapshot(snap){
   const x=JSON.parse(snap);
   areaMapState.shapes=Array.isArray(x.shapes)?x.shapes:[];
-  areaMapState.decorations=Array.isArray(x.decorations)?x.decorations:[];
   areaMapState.selectedShapeId="";
   areaMapState.selectedAreaId="";
-  rsdMapEnh.selectedDecorationId="";
   rsdMapEnh.selectedVertex=-1;
   areaMapState.dirty=true;
   areaMapRenderEditor();
@@ -120,14 +116,43 @@ areaMapStatusLegend=function(){
   return rows.filter(x=>x[2]>0).map(x=>'<span class="area-map-legend-item"><i style="background:'+x[0]+'"></i>'+x[1]+' <b>'+x[2]+'</b></span>').join("");
 };
 
+async function rsdEnsureMapReference(meta){
+  const serverVersion=String(meta?.ReferenceVersion||"");
+  const hasReference=!!meta?.HasReference;
+  const localData=areaMapLocalGet(AREA_MAP_REFERENCE_KEY,"");
+  const localVersion=areaMapLocalGet(AREA_MAP_REFERENCE_VERSION_KEY,"");
+
+  if(!hasReference){
+    if(S.user?.Role==="Admin"&&localData&&!localVersion){
+      try{
+        const saved=await rpc("saveAreaMapReference",{dataUrl:localData},true);
+        areaMapLocalSet(AREA_MAP_REFERENCE_VERSION_KEY,String(saved?.ReferenceVersion||""));
+        return localData;
+      }catch(e){}
+    }
+    try{localStorage.removeItem(AREA_MAP_REFERENCE_KEY);}catch(e){}
+    areaMapLocalSet(AREA_MAP_REFERENCE_VERSION_KEY,serverVersion);
+    return"";
+  }
+  if(localData&&localVersion===serverVersion)return localData;
+  const remote=await rpc("areaMapReference",{},true);
+  const data=String(remote?.DataUrl||"");
+  if(data){
+    areaMapLocalSet(AREA_MAP_REFERENCE_KEY,data);
+    areaMapLocalSet(AREA_MAP_REFERENCE_VERSION_KEY,String(remote?.ReferenceVersion||serverVersion));
+  }
+  return data;
+}
+window.rsdEnsureMapReference=rsdEnsureMapReference;
+
 areaMapContent=async function(){
   $("admin-content").innerHTML='<div class="map-editor-loading"><div class="spinner"></div><b>กำลังเปิดผังพื้นที่…</b></div>';
   try{
     const date=areaMapState.statusDate||thaiDay(),data=await rpc("mapStatus",{date},true);
     if(adminTab!=="AreaMap")return;
+    await rsdEnsureMapReference(data);
     areaMapState={
       shapes:(data.shapes||[]).map(s=>({...s,Points:Array.isArray(s.Points)?s.Points:[]})),
-      decorations:(data.decorations||[]).map(d=>({...d,Points:Array.isArray(d.Points)?d.Points:[]})),
       selectedAreaId:"",
       selectedShapeId:"",
       mode:"select",
@@ -144,8 +169,7 @@ areaMapContent=async function(){
     };
     rsdMapEnh.undo=[];
     rsdMapEnh.redo=[];
-    rsdMapEnh.selectedDecorationId="";
-    rsdMapEnh.selectedVertex=-1;
+      rsdMapEnh.selectedVertex=-1;
     areaMapRenderEditor();
     areaMapScheduleStatusRefresh();
   }catch(e){
@@ -159,9 +183,10 @@ areaMapRefreshStatus=async function(silent=false){
   try{
     const data=await rpc("mapStatus",{date},true);
     if(adminTab!=="AreaMap")return;
+    await rsdEnsureMapReference(data);
     areaMapState.daily=rsdMapDailyFromStatus(data);
     areaMapState.mapMeta={isHoliday:!!data.isHoliday,holidayReason:data.holidayReason||""};
-    areaMapState.decorations=(data.decorations||areaMapState.decorations||[]).map(d=>({...d,Points:Array.isArray(d.Points)?d.Points:[]}));
+    areaMapState.referenceDataUrl=areaMapLocalGet(AREA_MAP_REFERENCE_KEY,"");
     areaMapRenderEditor();
     if(!silent)toast("อัปเดตสถานะผังแล้ว");
   }catch(e){if(!silent)error(e);}
@@ -171,150 +196,10 @@ areaMapRefreshStatus=async function(silent=false){
 const rsdBaseMapRenderSvg=areaMapRenderSvg;
 areaMapRenderSvg=function(){
   rsdBaseMapRenderSvg();
-  rsdMapRenderDecorations();
   rsdMapRenderVertices();
   rsdMapWireEditorGestures();
 };
 
-function rsdMapDecorationCenter(d){
-  if(d.ShapeType==="polygon"&&Array.isArray(d.Points)&&d.Points.length){
-    const sum=d.Points.reduce((a,p)=>({x:a.x+Number(p.x||0),y:a.y+Number(p.y||0)}),{x:0,y:0});
-    return{x:sum.x/d.Points.length,y:sum.y/d.Points.length};
-  }
-  return{x:Number(d.X||0)+Number(d.Width||0)/2,y:Number(d.Y||0)+Number(d.Height||0)/2};
-}
-function rsdMapRecalcDecoration(d){
-  if(d.ShapeType!=="polygon"||!d.Points?.length)return;
-  const xs=d.Points.map(p=>Number(p.x)),ys=d.Points.map(p=>Number(p.y));
-  d.X=Math.min(...xs);d.Y=Math.min(...ys);d.Width=Math.max(...xs)-d.X;d.Height=Math.max(...ys)-d.Y;
-}
-function rsdMapUpdateDecorationDom(d){
-  const el=[...document.querySelectorAll(".map-decoration")].find(x=>String(x.dataset.decor)===String(d.DecorationID));
-  if(!el)return;
-  const geo=el.querySelector(".map-decoration-geometry"),label=el.querySelector(".map-decoration-label");
-  if(geo){
-    if(d.ShapeType==="polygon"){
-      geo.setAttribute("points",(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" "));
-    }else{
-      geo.setAttribute("x",Number(d.X||0));
-      geo.setAttribute("y",Number(d.Y||0));
-      geo.setAttribute("width",Number(d.Width||0));
-      geo.setAttribute("height",Number(d.Height||0));
-    }
-  }
-  const c=rsdMapDecorationCenter(d);
-  if(label){label.setAttribute("x",c.x);label.setAttribute("y",c.y);}
-  const h=el.querySelector(".map-decoration-resize");
-  if(h){
-    h.setAttribute("x",Number(d.X||0)+Number(d.Width||0)-9);
-    h.setAttribute("y",Number(d.Y||0)+Number(d.Height||0)-9);
-  }
-}
-function rsdMapRenderDecorations(){
-  const svg=$("area-map-svg");
-  if(!svg)return;
-  const old=$("map-decoration-layer");if(old)old.remove();
-  const layer=document.createElementNS("http://www.w3.org/2000/svg","g");
-  layer.id="map-decoration-layer";
-  const list=[...(areaMapState.decorations||[])].sort((a,b)=>Number(a.SortOrder||0)-Number(b.SortOrder||0));
-  for(const d of list){
-    const g=document.createElementNS("http://www.w3.org/2000/svg","g");
-    g.classList.add("map-decoration");
-    if(String(d.DecorationID)===String(rsdMapEnh.selectedDecorationId))g.classList.add("selected");
-    g.dataset.decor=String(d.DecorationID);
-    const geo=document.createElementNS("http://www.w3.org/2000/svg",d.ShapeType==="polygon"?"polygon":"rect");
-    geo.classList.add("map-decoration-geometry");
-    if(d.ShapeType==="polygon")geo.setAttribute("points",(d.Points||[]).map(p=>Number(p.x)+","+Number(p.y)).join(" "));
-    else{
-      geo.setAttribute("x",Number(d.X||0));geo.setAttribute("y",Number(d.Y||0));
-      geo.setAttribute("width",Number(d.Width||0));geo.setAttribute("height",Number(d.Height||0));geo.setAttribute("rx","7");
-    }
-    geo.setAttribute("fill",d.FillColor||"#dbeafe");
-    geo.setAttribute("stroke",d.StrokeColor||"#64748b");
-    geo.setAttribute("fill-opacity",String(Number(d.Opacity??.45)));
-    g.appendChild(geo);
-    if(d.Label){
-      const c=rsdMapDecorationCenter(d),t=document.createElementNS("http://www.w3.org/2000/svg","text");
-      t.setAttribute("x",c.x);t.setAttribute("y",c.y);t.setAttribute("text-anchor","middle");t.setAttribute("class","map-decoration-label");t.textContent=d.Label;g.appendChild(t);
-    }
-    if(g.classList.contains("selected")&&!d.Locked&&d.ShapeType==="rect"&&!areaMapState.viewOnly){
-      const h=document.createElementNS("http://www.w3.org/2000/svg","rect");
-      h.setAttribute("x",Number(d.X)+Number(d.Width)-9);h.setAttribute("y",Number(d.Y)+Number(d.Height)-9);
-      h.setAttribute("width","18");h.setAttribute("height","18");h.setAttribute("rx","4");h.setAttribute("class","map-decoration-resize");h.dataset.resize="1";g.appendChild(h);
-    }
-    layer.appendChild(g);
-  }
-  const before=svg.querySelector(".map-canvas-title")||svg.querySelector(".map-shape-group")||null;
-  svg.insertBefore(layer,before);
-  layer.querySelectorAll(".map-decoration").forEach(el=>{
-    el.addEventListener("pointerdown",e=>rsdMapDecorationPointerDown(e,el));
-    el.addEventListener("click",e=>e.stopPropagation());
-  });
-}
-function rsdMapDecorationPointerDown(e,el){
-  e.preventDefault();
-  e.stopPropagation();
-  const d=(areaMapState.decorations||[]).find(x=>String(x.DecorationID)===String(el.dataset.decor));
-  if(!d)return;
-
-  rsdMapEnh.selectedDecorationId=String(d.DecorationID);
-  areaMapState.selectedShapeId="";
-  areaMapState.selectedAreaId="";
-  rsdMapEnh.selectedVertex=-1;
-
-  document.querySelectorAll(".map-decoration").forEach(x=>x.classList.toggle("selected",x===el));
-  areaMapRenderSide();
-
-  if(areaMapState.viewOnly||d.Locked||areaMapState.mode!=="select")return;
-
-  rsdMapRecordBefore();
-  const startPoint=areaMapPoint(e);
-  const gesture={resize:!!e.target.dataset.resize,last:startPoint,decor:d,pointerId:e.pointerId,moved:false};
-
-  try{el.setPointerCapture(e.pointerId);}catch(x){}
-
-  const move=ev=>{
-    if(ev.pointerId!==gesture.pointerId)return;
-    ev.preventDefault();
-    const p=areaMapPoint(ev),dx=p.x-gesture.last.x,dy=p.y-gesture.last.y;
-    if(Math.abs(dx)<0.01&&Math.abs(dy)<0.01)return;
-    gesture.last=p;
-    gesture.moved=true;
-
-    if(gesture.resize&&d.ShapeType==="rect"){
-      d.Width=Math.max(20,Math.min(AREA_MAP_W-Number(d.X),p.x-Number(d.X)));
-      d.Height=Math.max(20,Math.min(AREA_MAP_H-Number(d.Y),p.y-Number(d.Y)));
-    }else if(d.ShapeType==="polygon"){
-      const xs=d.Points.map(v=>Number(v.x)),ys=d.Points.map(v=>Number(v.y));
-      const mx=Math.max(-Math.min(...xs),Math.min(AREA_MAP_W-Math.max(...xs),dx));
-      const my=Math.max(-Math.min(...ys),Math.min(AREA_MAP_H-Math.max(...ys),dy));
-      d.Points=d.Points.map(v=>({x:Number(v.x)+mx,y:Number(v.y)+my}));
-      rsdMapRecalcDecoration(d);
-    }else{
-      d.X=Math.max(0,Math.min(AREA_MAP_W-Number(d.Width),Number(d.X)+dx));
-      d.Y=Math.max(0,Math.min(AREA_MAP_H-Number(d.Height),Number(d.Y)+dy));
-    }
-
-    // Important: update the existing SVG node in-place.
-    // Re-rendering the whole SVG here would destroy pointer capture mid-drag.
-    rsdMapUpdateDecorationDom(d);
-  };
-
-  const finish=ev=>{
-    if(ev&&ev.pointerId!==gesture.pointerId)return;
-    el.removeEventListener("pointermove",move);
-    el.removeEventListener("pointerup",finish);
-    el.removeEventListener("pointercancel",finish);
-    try{if(el.hasPointerCapture?.(gesture.pointerId))el.releasePointerCapture(gesture.pointerId);}catch(x){}
-    if(gesture.moved)areaMapMarkDirty();
-    areaMapRenderSvg();
-    areaMapRenderSide();
-  };
-
-  el.addEventListener("pointermove",move);
-  el.addEventListener("pointerup",finish);
-  el.addEventListener("pointercancel",finish);
-}
 function rsdMapRenderVertices(){
   const svg=$("area-map-svg");if(!svg)return;
   const s=(areaMapState.shapes||[]).find(x=>String(x.ShapeID)===String(areaMapState.selectedShapeId));
@@ -379,7 +264,6 @@ areaMapFinishPolygon=function(){
 
 const rsdBaseMapRenderSide=areaMapRenderSide;
 areaMapRenderSide=function(){
-  if(rsdMapEnh.selectedDecorationId){rsdMapDecorationSide();return;}
   rsdBaseMapRenderSide();
   const side=$("area-map-side"),s=(areaMapState.shapes||[]).find(x=>String(x.ShapeID)===String(areaMapState.selectedShapeId));
   if(!side||!s)return;
@@ -404,42 +288,6 @@ areaMapRenderSide=function(){
     rsdMapEnh.selectedVertex=Math.min(i,s.Points.length-1);areaMapRecalcPolygon(s);areaMapMarkDirty();areaMapRenderEditor();
   };
 };
-function rsdMapDecorationSide(){
-  const side=$("area-map-side"),d=(areaMapState.decorations||[]).find(x=>String(x.DecorationID)===String(rsdMapEnh.selectedDecorationId));
-  if(!side||!d){rsdMapEnh.selectedDecorationId="";rsdBaseMapRenderSide();return;}
-  const names={building:"อาคาร",road:"ถนน/ทางเดิน",field:"สนาม",label:"ป้ายชื่อ",landmark:"จุดสำคัญ",other:"อื่น ๆ"};
-  side.innerHTML='<div class="area-map-side-title"><b>'+esc(d.Label||names[d.Kind]||"สิ่งประกอบผัง")+'</b><small>Layer สิ่งปลูกสร้าง · ไม่มีคะแนน</small></div>'+
-    '<label class="field"><span>ชื่อ/ป้ายกำกับ</span><input id="decor-label" value="'+esc(d.Label||"")+'" maxlength="200"></label>'+
-    '<label class="field"><span>ประเภท</span><select id="decor-kind">'+Object.entries(names).map(x=>'<option value="'+x[0]+'" '+(d.Kind===x[0]?"selected":"")+'>'+x[1]+'</option>').join("")+'</select></label>'+
-    '<div class="area-map-decor-colors"><label class="field"><span>สีพื้น</span><input id="decor-fill" type="color" value="'+esc(d.FillColor||"#dbeafe")+'"></label><label class="field"><span>สีเส้น</span><input id="decor-stroke" type="color" value="'+esc(d.StrokeColor||"#64748b")+'"></label></div>'+
-    '<label class="field"><span>ความโปร่งใส <b id="decor-opacity-label">'+Math.round(Number(d.Opacity??.45)*100)+'%</b></span><input id="decor-opacity" type="range" min="5" max="100" step="5" value="'+Math.round(Number(d.Opacity??.45)*100)+'"></label>'+
-    '<label class="area-map-lock"><input id="decor-lock" type="checkbox" '+(d.Locked?"checked":"")+'> ล็อกตำแหน่ง</label>'+
-    '<button class="btn danger w-full mt-3" id="decor-delete">ลบสิ่งประกอบนี้</button>'+
-    '<div class="area-map-tip">Layer นี้ใช้เป็นบริบทของแผนผัง เช่น อาคาร ถนน สนาม และป้ายชื่อ ไม่มีผลต่อคะแนนหรือเวรตรวจ</div>';
-  const bind=(id,key,transform=v=>v)=>{
-    const el=$(id);if(!el)return;
-    el.addEventListener("pointerdown",rsdMapRecordBefore,{once:true});
-    el.oninput=()=>{d[key]=transform(el.type==="checkbox"?el.checked:el.value);if(id==="decor-opacity"&&$("decor-opacity-label"))$("decor-opacity-label").textContent=Math.round(Number(d.Opacity)*100)+"%";areaMapMarkDirty();areaMapRenderSvg();};
-    el.onchange=el.oninput;
-  };
-  bind("decor-label","Label",String);bind("decor-kind","Kind",String);bind("decor-fill","FillColor",String);bind("decor-stroke","StrokeColor",String);bind("decor-opacity","Opacity",v=>Number(v)/100);bind("decor-lock","Locked",Boolean);
-  $("decor-delete").onpointerdown=rsdMapRecordBefore;
-  $("decor-delete").onclick=()=>{areaMapState.decorations=areaMapState.decorations.filter(x=>String(x.DecorationID)!==String(d.DecorationID));rsdMapEnh.selectedDecorationId="";areaMapMarkDirty();areaMapRenderEditor();};
-}
-function rsdMapAddDecoration(kind){
-  rsdMapRecordBefore();
-  const defs={
-    building:{label:"อาคาร",w:260,h:140,fill:"#dbeafe",stroke:"#64748b"},
-    road:{label:"ถนน/ทางเดิน",w:420,h:55,fill:"#e5e7eb",stroke:"#6b7280"},
-    field:{label:"สนาม",w:360,h:220,fill:"#dcfce7",stroke:"#16a34a"},
-    label:{label:"ป้ายชื่อ",w:260,h:60,fill:"#fef3c7",stroke:"#a16207"},
-    landmark:{label:"จุดสำคัญ",w:140,h:100,fill:"#fae8ff",stroke:"#a21caf"}
-  },x=defs[kind]||{label:"อื่น ๆ",w:220,h:120,fill:"#e2e8f0",stroke:"#64748b"},id=areaMapUid();
-  const d={DecorationID:id,Kind:kind,Label:x.label,ShapeType:"rect",X:Math.round((AREA_MAP_W-x.w)/2),Y:Math.round((AREA_MAP_H-x.h)/2),Width:x.w,Height:x.h,Points:[],FillColor:x.fill,StrokeColor:x.stroke,Opacity:.42,Locked:false,SortOrder:(areaMapState.decorations||[]).length};
-  if(!Array.isArray(areaMapState.decorations))areaMapState.decorations=[];
-  areaMapState.decorations.push(d);rsdMapEnh.selectedDecorationId=id;areaMapState.selectedShapeId="";areaMapState.selectedAreaId="";areaMapMarkDirty();areaMapRenderEditor();
-}
-
 const rsdBaseMapRenderEditor=areaMapRenderEditor;
 areaMapRenderEditor=function(){
   rsdBaseMapRenderEditor();
@@ -450,11 +298,6 @@ function rsdMapEnhanceEditorUi(){
   if(actions&&!$("area-map-undo")){
     actions.insertAdjacentHTML("afterbegin",'<button class="btn secondary" id="area-map-undo">↶ ย้อนกลับ</button><button class="btn secondary" id="area-map-redo">↷ ทำซ้ำ</button>');
     $("area-map-undo").onclick=rsdMapUndo;$("area-map-redo").onclick=rsdMapRedo;
-  }
-  const tools=document.querySelector(".area-map-tools");
-  if(tools&&!document.querySelector(".area-map-layer-tools")){
-    tools.insertAdjacentHTML("afterend",'<div class="area-map-layer-tools"><b>Layer สิ่งปลูกสร้าง</b><div class="flex flex-wrap gap-1"><button class="btn small secondary map-add-decor" data-kind="building">🏢 อาคาร</button><button class="btn small secondary map-add-decor" data-kind="road">🛣 ถนน</button><button class="btn small secondary map-add-decor" data-kind="field">🏟 สนาม</button><button class="btn small secondary map-add-decor" data-kind="landmark">📍 จุดสำคัญ</button><button class="btn small secondary map-add-decor" data-kind="label">T ป้ายชื่อ</button></div></div>');
-    document.querySelectorAll(".map-add-decor").forEach(b=>b.onclick=()=>rsdMapAddDecoration(b.dataset.kind));
   }
   const zoom=document.querySelector(".area-map-zoom");
   if(rsdMapIsCompactView()&&zoom&&!$("area-map-fit")){
@@ -481,7 +324,6 @@ function rsdMapEnhanceEditorUi(){
   }
   rsdMapUpdateHistoryButtons();
   areaMapRenderSide();
-  rsdMapRenderDecorations();
   rsdMapRenderVertices();
 }
 
@@ -489,24 +331,13 @@ areaMapSave=async function(){
   busy(true,"กำลังบันทึกผังพื้นที่…");
   try{
     const shapes=(areaMapState.shapes||[]).map((s,i)=>({ShapeID:s.ShapeID,AreaID:s.AreaID,ShapeType:s.ShapeType,X:Number(s.X||0),Y:Number(s.Y||0),Width:Number(s.Width||0),Height:Number(s.Height||0),Points:(s.Points||[]).map(p=>({x:Number(p.x),y:Number(p.y)})),FillColor:s.FillColor||"#38bdf8",Locked:!!s.Locked,SortOrder:i}));
-    const decorations=(areaMapState.decorations||[]).map((d,i)=>({...d,SortOrder:i}));
-    const [a,b]=await Promise.all([rpc("saveAreaMapLayout",{shapes}),rpc("saveAreaMapDecorations",{decorations})]);
-    areaMapState.dirty=false;toast("บันทึกผังแล้ว "+Number(a.saved||0)+" พื้นที่ · สิ่งประกอบ "+Number(b.saved||0));areaMapRenderEditor();
+    const result=await rpc("saveAreaMapLayout",{shapes});
+    areaMapState.dirty=false;
+    toast("บันทึกผังแล้ว "+Number(result.saved||0)+" พื้นที่");
+    areaMapRenderEditor();
   }catch(e){error(e);}finally{busy(false);}
 };
 
-function rsdMapDrawDecorationsToCanvas(ctx){
-  for(const d of areaMapState.decorations||[]){
-    ctx.save();ctx.globalAlpha=Number(d.Opacity??.42);ctx.fillStyle=d.FillColor||"#dbeafe";ctx.strokeStyle=d.StrokeColor||"#64748b";ctx.lineWidth=2;
-    ctx.beginPath();
-    if(d.ShapeType==="polygon"&&d.Points?.length>=3){
-      ctx.moveTo(Number(d.Points[0].x),Number(d.Points[0].y));for(let i=1;i<d.Points.length;i++)ctx.lineTo(Number(d.Points[i].x),Number(d.Points[i].y));ctx.closePath();
-    }else{ctx.rect(Number(d.X||0),Number(d.Y||0),Number(d.Width||0),Number(d.Height||0));}
-    ctx.fill();ctx.stroke();ctx.globalAlpha=1;
-    if(d.Label){const c=rsdMapDecorationCenter(d);ctx.font='600 14px "Kanit"';ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle="#334155";ctx.fillText(d.Label,c.x,c.y);}
-    ctx.restore();
-  }
-}
 function rsdMapRedrawAreaShapes(ctx){
   for(const s of areaMapState.shapes||[]){
     const area=areaMapArea(s.AreaID),st=areaMapStatusInfo(s.AreaID),
@@ -540,7 +371,7 @@ async function rsdMapBuildReportCanvas(kind="169"){
   summary.forEach((v,i)=>areaMapExportSummaryCard(ctx,layout.p+i*(cardW+gap),cardY,cardW,cardH,v[0],v[1],v[2]));
   const mapTop=194,legendH=58,mapBottom=layout.h-layout.p-legendH,boxW=layout.w-layout.p*2,boxH=mapBottom-mapTop,scale=Math.min(boxW/AREA_MAP_W,boxH/AREA_MAP_H),drawW=AREA_MAP_W*scale,drawH=AREA_MAP_H*scale,drawX=layout.p+(boxW-drawW)/2,drawY=mapTop+(boxH-drawH)/2;
   ctx.save();ctx.fillStyle="#fff";ctx.strokeStyle="#d7e4e8";ctx.lineWidth=1.2;areaMapExportRoundRect(ctx,drawX-8,drawY-8,drawW+16,drawH+16,16);ctx.fill();ctx.stroke();ctx.restore();
-  const mapCanvas=await areaMapExportMapCanvas(includeReference),mapCtx=mapCanvas.getContext("2d");rsdMapDrawDecorationsToCanvas(mapCtx);rsdMapRedrawAreaShapes(mapCtx);ctx.drawImage(mapCanvas,drawX,drawY,drawW,drawH);
+  const mapCanvas=await areaMapExportMapCanvas(includeReference),mapCtx=mapCanvas.getContext("2d");rsdMapRedrawAreaShapes(mapCtx);ctx.drawImage(mapCanvas,drawX,drawY,drawW,drawH);
   const ly=layout.h-layout.p-20;let lx=layout.p;summary.forEach(v=>{areaMapExportLegend(ctx,lx,ly,v[2],v[0],v[1]);lx+=kind==="a4"?128:150;});
   return canvas;
 }
