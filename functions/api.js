@@ -1192,7 +1192,7 @@ async function pushStatus(env,u){
   const db=env.DB;await ensurePushSubscriptionsTable(db);
   const rows=await all(db,"SELECT subscription_id,device_label,enabled,created_at,updated_at FROM push_subscriptions WHERE user_id=? ORDER BY updated_at DESC",u.user_id);
   return{
-    configured:!!env.VAPID_PUBLIC_KEY,
+    configured:!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK),
     publicKey:String(env.VAPID_PUBLIC_KEY||""),
     subscriptions:rows.map(r=>({SubscriptionID:r.subscription_id,DeviceLabel:r.device_label,Enabled:Number(r.enabled||0)===1,CreatedAt:r.created_at,UpdatedAt:r.updated_at}))
   };
