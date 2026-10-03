@@ -1435,6 +1435,11 @@ async function saveCertificateTemplate(env,u,p){
     wt=await certificateTemplateVerifyTicket(env,u,workingTicket,["CERT_TEMPLATE_WORKING","CERT_TEMPLATE"]),
     ot=await certificateTemplateVerifyTicket(env,u,originalTicket,["CERT_TEMPLATE_ORIGINAL"]);
 
+  if(wt&& !ot && !old.originalFileId && old.fileId && old.optimized!==true){
+    originalFileId=String(old.fileId);
+    originalMime=String(old.mime||"");
+    originalSize=Number(old.workingSize||0);
+  }
   if(wt){fileId=String(wt.file_id);mime=String(wt.mime);workingSize=Number(wt.size||0);}
   if(ot){originalFileId=String(ot.file_id);originalMime=String(ot.mime);originalSize=Number(ot.size||0);}
   assert(fileId,"กรุณาอัปโหลดภาพแม่แบบก่อน");
