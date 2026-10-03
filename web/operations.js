@@ -340,7 +340,7 @@ async function certificateCanvas(row,d){
   await loadCoverageScript("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",()=>!!window.html2canvas);
   const stage=document.createElement("div");stage.className="ops-certificate-stage";stage.innerHTML=certificateHtml(row,d);document.body.appendChild(stage);
   try{
-    await document.fonts?.ready?.catch?.(()=>{});
+    await ensureCertificateTemplateFonts(d.template||{});
     const imgs=[...stage.querySelectorAll("img")];
     await Promise.all(imgs.map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=img.onerror=resolve;})));
     return await html2canvas(stage.firstElementChild,{scale:1.4,useCORS:true,backgroundColor:"#fff"});
@@ -405,7 +405,26 @@ function certCustomBlock(textValue="",y=50,size=22,color="#17334b",weight=400,fo
   return{id:"custom-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),text:textValue,visible:true,x:50,y,size,color,weight,font};
 }
 function certificateFontCss(font){
-  return String(font)==="Kanit" ? '"Kanit",sans-serif' : '"TH Sarabun New","Sarabun",sans-serif';
+  return String(font)==="Kanit" ? '"Kanit","Noto Sans Thai",sans-serif' : '"Sarabun","Noto Sans Thai",sans-serif';
+}
+async function ensureCertificateFont(font,weight=400){
+  if(!document.fonts?.load)return;
+  const family=String(font)==="Kanit"?"Kanit":"Sarabun";
+  const w=[300,400,500,600,700].includes(Number(weight))?Number(weight):400;
+  try{
+    await Promise.race([
+      document.fonts.load(w+' 32px "'+family+'"',"กขค ABC 123"),
+      new Promise(resolve=>setTimeout(resolve,4500))
+    ]);
+  }catch(e){}
+}
+async function ensureCertificateTemplateFonts(template){
+  const jobs=[];
+  Object.values(template?.fields||{}).forEach(v=>{if(v?.visible!==false)jobs.push(ensureCertificateFont(v.font,v.weight));});
+  (template?.textBlocks||[]).forEach(v=>{if(v?.visible!==false)jobs.push(ensureCertificateFont(v.font,v.weight));});
+  if(!jobs.length)jobs.push(ensureCertificateFont("Kanit",400));
+  await Promise.all(jobs);
+  await document.fonts?.ready?.catch?.(()=>{});
 }
 function certificateFontOptions(current){
   return [
@@ -456,6 +475,7 @@ async function certificateTemplateModal(){
         '<div class="ops-template-tools">'+
           '<div class="field"><label>ภาพพื้นหลังเกียรติบัตร</label><input id="cert-template-file" type="file" accept="image/png,image/jpeg"><small class="muted">PNG/JPG · สูงสุด 8 MB · แนะนำ A4 แนวนอน</small></div>'+
           '<label class="coverage-toggle"><input id="cert-template-enabled" type="checkbox" '+(state.enabled?"checked":"")+'><span><b>ใช้แม่แบบนี้ในการสร้างเกียรติบัตร</b><small>ปิดได้โดยไม่ลบภาพและตำแหน่งที่ตั้งไว้</small></span></label>'+
+          '<div class="ops-template-group"><div class="ops-template-group-head"><div><b>ฟอนต์ทั้งแม่แบบ</b><small>เปลี่ยนข้อความทุกชิ้นพร้อมกัน</small></div><div class="flex gap-2"><button class="btn small secondary" id="cert-all-kanit" type="button">ใช้ Kanit ทั้งหมด</button><button class="btn small secondary" id="cert-all-sarabun" type="button">ใช้ Sarabun ทั้งหมด</button></div></div></div>'+
           '<div class="ops-template-group"><div class="ops-template-group-head"><div><b>ข้อมูลอัตโนมัติ</b><small>ระบบเปลี่ยนค่าให้แต่ละห้องอัตโนมัติ</small></div></div><div class="ops-template-fields">'+controls+'</div></div>'+
           '<div class="ops-template-group">'+
             '<div class="ops-template-group-head"><div><b>ข้อความกำหนดเอง</b><small>ใช้ตัวแปร {className} {medal} {month} {period} {issueDate} ได้</small></div>'+
@@ -506,10 +526,11 @@ async function certificateTemplateModal(){
         '</div>'
       ).join(""):'<div class="empty">ยังไม่มีข้อความกำหนดเอง</div>';
       wrap.querySelectorAll("[data-custom-id]").forEach(el=>{
-        el.oninput=()=>{
+        el.oninput=async()=>{
           const v=findCustom(el.dataset.customId);if(!v)return;
           const p=el.dataset.customProp;
           v[p]=p==="visible"?el.checked:(p==="text"||p==="color"||p==="font"?el.value:Number(el.value));
+          if(p==="font")await ensureCertificateFont(v.font,v.weight);
           renderPreview();
         };
       });
@@ -552,12 +573,24 @@ async function certificateTemplateModal(){
     };
 
     box.querySelectorAll("[data-cert-field]").forEach(el=>{
-      el.oninput=()=>{
+      el.oninput=async()=>{
         const k=el.dataset.certField,p=el.dataset.certProp;
         state.fields[k][p]=p==="visible"?el.checked:(p==="color"||p==="font"?el.value:Number(el.value));
+        if(p==="font")await ensureCertificateFont(state.fields[k].font,state.fields[k].weight);
         renderPreview();
       };
     });
+    const applyFontAll=async(font)=>{
+      Object.values(state.fields).forEach(v=>v.font=font);
+      state.textBlocks.forEach(v=>v.font=font);
+      await ensureCertificateFont(font,400);
+      Object.keys(state.fields).forEach(syncField);
+      renderCustomControls();
+      renderPreview();
+      toast("เปลี่ยนฟอนต์ทั้งแม่แบบเป็น "+font+" แล้ว");
+    };
+    if($("cert-all-kanit"))$("cert-all-kanit").onclick=()=>applyFontAll("Kanit");
+    if($("cert-all-sarabun"))$("cert-all-sarabun").onclick=()=>applyFontAll("Sarabun");
     $("cert-add-text").onclick=()=>{
       state.textBlocks.push(certCustomBlock("",50,22));
       renderCustomControls();renderPreview();
@@ -568,12 +601,12 @@ async function certificateTemplateModal(){
         return Swal.fire({icon:"info",title:"มีข้อความกำหนดเองอยู่แล้ว",text:"ลบข้อความเดิมก่อน หากต้องการใช้ชุดข้อความตัวอย่าง"});
       }
       state.textBlocks=[
-        certCustomBlock("โรงเรียนรัษฎา อำเภอรัษฎา จังหวัดตรัง",31,34,"#4c86b7",700,"Sarabun"),
-        certCustomBlock("ขอมอบเกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า",39,24,"#111827",500,"Sarabun"),
-        certCustomBlock("นักเรียนระดับชั้น {className}",53,38,"#4c86b7",700,"Sarabun"),
-        certCustomBlock("ได้ดูแลเขตพื้นที่ของห้องเรียนอยู่ในระดับ {medal}",65,25,"#111827",500,"Sarabun"),
-        certCustomBlock("ประจำเดือน {month}",72,23,"#111827",500,"Sarabun"),
-        certCustomBlock("ให้ไว้ ณ วันที่ {issueDate}",78,20,"#111827",500,"Sarabun")
+        certCustomBlock("โรงเรียนรัษฎา อำเภอรัษฎา จังหวัดตรัง",31,34,"#4c86b7",700,"Kanit"),
+        certCustomBlock("ขอมอบเกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า",39,24,"#111827",500,"Kanit"),
+        certCustomBlock("นักเรียนระดับชั้น {className}",53,38,"#4c86b7",700,"Kanit"),
+        certCustomBlock("ได้ดูแลเขตพื้นที่ของห้องเรียนอยู่ในระดับ {medal}",65,25,"#111827",500,"Kanit"),
+        certCustomBlock("ประจำเดือน {month}",72,23,"#111827",500,"Kanit"),
+        certCustomBlock("ให้ไว้ ณ วันที่ {issueDate}",78,20,"#111827",500,"Kanit")
       ];
       Object.keys(state.fields).forEach(k=>state.fields[k].visible=false);
       box.querySelectorAll("[data-cert-field]").forEach(el=>{if(el.dataset.certProp==="visible")el.checked=false;});
@@ -588,6 +621,7 @@ async function certificateTemplateModal(){
       $("cert-template-image").src=localUrl;$("cert-template-image").classList.remove("hidden");$("cert-template-empty").classList.add("hidden");renderPreview();
     };
     if(image)$("cert-template-empty").classList.add("hidden");
+    await ensureCertificateTemplateFonts(state);
     renderCustomControls();renderPreview();
 
     $("cert-template-save").onclick=async()=>{
