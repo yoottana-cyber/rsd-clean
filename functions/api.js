@@ -128,6 +128,9 @@ export async function onRequest(context) {
     if (action === "saveInspection" || action === "reviewInspection") {
       background(context,rebuildRewards(env).catch(e => console.error("REWARD_REBUILD_FAILED", e)));
     }
+    if(["saveDutyOverride","reviewInspection","saveInspection"].includes(action)){
+      background(context,pushAfterAction(env,action,payload,data));
+    }
     if(duration>=1200 && action!=="systemEvents"){
       background(context,writeSystemEvent(env,{
         eventType:"slow",
@@ -261,6 +264,8 @@ async function dispatch(env, action, p, token, request) {
     pushStatus: async () => pushStatus(env,u),
     savePushSubscription: async () => savePushSubscription(env,u,p),
     deletePushSubscription: async () => deletePushSubscription(env,u,p),
+    sendPushReminder: async () => sendPushReminder(env,u,p),
+    sendPushTest: async () => sendPushTest(env,u),
     appSettings: async () => appSettings(env,u),
     saveAppSettings: async () => saveAppSettings(env,u,p),
     dutyOverrides: async () => dutyOverrides(env,u,p),
@@ -399,7 +404,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest"]);
 
 async function ensureAuditTable(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
@@ -447,6 +452,8 @@ function auditMeta(action,p,result){
   if(action==="deleteAcademicPeriod")return{entityType:"AcademicPeriod",entityId:String(p.id||""),details:{deleted:true}};
   if(action==="savePushSubscription")return{entityType:"PushSubscription",entityId:String(result?.SubscriptionID||""),details:{enabled:true}};
   if(action==="deletePushSubscription")return{entityType:"PushSubscription",entityId:String(p.id||""),details:{deleted:true}};
+  if(action==="sendPushReminder")return{entityType:"Push",entityId:String(p.date||thaiDay()),details:{sent:Number(result?.sent||0),failed:Number(result?.failed||0)}};
+  if(action==="sendPushTest")return{entityType:"Push",entityId:String(u?.user_id||""),details:{test:true,sent:Number(result?.sent||0)}};
   return{entityType:"",entityId:"",details:{}};
 }
 async function writeAudit(env,u,action,p,result){
@@ -1089,6 +1096,75 @@ async function ensurePushSubscriptionsTable(db){
   await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint ON push_subscriptions(endpoint)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id,enabled)").run();
 }
+function b64urlBytes(input){
+  const bytes=input instanceof Uint8Array?input:new TextEncoder().encode(String(input));
+  let bin="";for(const b of bytes)bin+=String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+async function vapidAuthorization(env,endpoint){
+  assert(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK,"ยังไม่ได้ตั้งค่า VAPID สำหรับ Web Push");
+  let jwk;try{jwk=JSON.parse(env.VAPID_PRIVATE_JWK);}catch(e){throw Error("VAPID_PRIVATE_JWK ไม่ถูกต้อง");}
+  const origin=new URL(endpoint).origin,header=b64urlBytes(JSON.stringify({typ:"JWT",alg:"ES256"}));
+  const payload=b64urlBytes(JSON.stringify({aud:origin,exp:Math.floor(Date.now()/1000)+12*3600,sub:String(env.VAPID_SUBJECT||"mailto:admin@example.com")}));
+  const unsigned=header+"."+payload,key=await crypto.subtle.importKey("jwk",jwk,{name:"ECDSA",namedCurve:"P-256"},false,["sign"]);
+  const sig=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},key,new TextEncoder().encode(unsigned)));
+  return "vapid t="+unsigned+"."+b64urlBytes(sig)+", k="+String(env.VAPID_PUBLIC_KEY);
+}
+async function sendEmptyPush(env,row){
+  try{
+    const auth=await vapidAuthorization(env,row.endpoint);
+    const res=await fetch(row.endpoint,{method:"POST",headers:{TTL:"300",Urgency:"normal",Authorization:auth}});
+    if(res.status===404||res.status===410)return{ok:false,gone:true,status:res.status};
+    if(!res.ok)return{ok:false,status:res.status};
+    return{ok:true,status:res.status};
+  }catch(e){return{ok:false,error:String(e?.message||e)};}
+}
+async function sendPushToUsers(env,userIds){
+  const db=env.DB;await ensurePushSubscriptionsTable(db);
+  if(!env.VAPID_PUBLIC_KEY||!env.VAPID_PRIVATE_JWK)return{configured:false,sent:0,failed:0,targets:0};
+  const ids=[...new Set((userIds||[]).map(String).filter(Boolean))];
+  if(!ids.length)return{configured:true,sent:0,failed:0,targets:0};
+  const placeholders=ids.map(()=>"?").join(","),rows=await all(db,`SELECT * FROM push_subscriptions WHERE enabled=1 AND user_id IN (${placeholders})`,...ids);
+  let sent=0,failed=0;const gone=[];
+  const results=await Promise.all(rows.map(r=>sendEmptyPush(env,r)));
+  results.forEach((r,i)=>{if(r.ok)sent++;else{failed++;if(r.gone)gone.push(rows[i].subscription_id);}});
+  if(gone.length){
+    const q=gone.map(()=>"?").join(",");
+    await db.prepare(`DELETE FROM push_subscriptions WHERE subscription_id IN (${q})`).bind(...gone).run();
+  }
+  return{configured:true,sent,failed,targets:rows.length};
+}
+async function sendPushReminder(env,u,p){
+  role(u,["Admin","Supervisor"]);const db=env.DB,date=validateDate(p.date||thaiDay());
+  assert(date===thaiDay(),"Push เตือนงานค้างรองรับเฉพาะวันนี้");
+  await ensureToday(env);
+  const ids=(await all(db,`SELECT DISTINCT ii.user_id FROM inspection_inspectors ii
+    JOIN inspections i ON i.inspection_id=ii.inspection_id
+    WHERE i.inspection_date=? AND i.status='รอตรวจ'`,date)).map(x=>x.user_id);
+  const result=await sendPushToUsers(env,ids);
+  assert(result.configured,"ยังไม่ได้ตั้งค่า VAPID สำหรับ Web Push");
+  return{...result,inspectors:ids.length};
+}
+async function sendPushTest(env,u){
+  const result=await sendPushToUsers(env,[u.user_id]);
+  assert(result.configured,"ยังไม่ได้ตั้งค่า VAPID สำหรับ Web Push");
+  assert(result.targets>0,"อุปกรณ์นี้ยังไม่ได้ลงทะเบียน Push Notification");
+  return result;
+}
+async function pushAfterAction(env,action,p,data){
+  try{
+    if(action==="saveDutyOverride"&&data?.SubstituteUserID)return sendPushToUsers(env,[data.SubstituteUserID]);
+    if(action==="reviewInspection"&&String(p?.decision||"")==="return"){
+      const rows=await all(env.DB,"SELECT user_id FROM inspection_inspectors WHERE inspection_id=?",String(p.id||""));
+      return sendPushToUsers(env,rows.map(x=>x.user_id));
+    }
+    if(action==="saveInspection"&&String(p?.status||"")==="ตรวจแล้ว"&&Number(p?.score||0)===1){
+      const ids=(await all(env.DB,"SELECT user_id FROM users WHERE role IN ('Admin','Supervisor')")).map(x=>x.user_id);
+      return sendPushToUsers(env,ids);
+    }
+  }catch(e){console.error("PUSH_AFTER_ACTION_FAILED",e);}
+}
+
 async function pushStatus(env,u){
   const db=env.DB;await ensurePushSubscriptionsTable(db);
   const rows=await all(db,"SELECT subscription_id,device_label,enabled,created_at,updated_at FROM push_subscriptions WHERE user_id=? ORDER BY updated_at DESC",u.user_id);
