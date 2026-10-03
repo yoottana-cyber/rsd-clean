@@ -335,12 +335,68 @@ async function ensureCertificateTemplateImage(d){
   d.templateImage=image;opCertificateTemplateImage=image;
   return image;
 }
+function certificateCanvasFontFamily(font){
+  return String(font)==="Kanit" ? '"Kanit", sans-serif' : '"Sarabun", sans-serif';
+}
+function certificateCanvasLineHeight(size){
+  return Math.max(12,Number(size||20)*1.22);
+}
+async function certificateLoadImage(src){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=()=>reject(Error("โหลดภาพพื้นหลังเกียรติบัตรไม่สำเร็จ"));
+    if(/^https?:/i.test(String(src||"")))img.crossOrigin="anonymous";
+    img.src=src;
+  });
+}
+function certificateDrawText(ctx,text,style,width,height,multiline=false){
+  if(style?.visible===false||!String(text||"").trim())return;
+  const size=Math.max(8,Number(style?.size||20)),weight=[300,400,500,600,700].includes(Number(style?.weight))?Number(style.weight):400;
+  const x=width*Math.min(100,Math.max(0,Number(style?.x??50)))/100;
+  const y=height*Math.min(100,Math.max(0,Number(style?.y??50)))/100;
+  const family=certificateCanvasFontFamily(style?.font);
+  ctx.save();
+  ctx.fillStyle=String(style?.color||"#17334b");
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.font=weight+" "+size+"px "+family;
+  const lines=multiline?String(text).split(/\r?\n/):[String(text).replace(/\r?\n/g," ")];
+  const lineHeight=certificateCanvasLineHeight(size),total=(lines.length-1)*lineHeight;
+  lines.forEach((line,index)=>ctx.fillText(line,x,y-total/2+index*lineHeight));
+  ctx.restore();
+}
+async function customCertificateCanvas(row,d){
+  const t=d.template||{},values=certificateVariableValues(row,d),imageSrc=await ensureCertificateTemplateImage(d);
+  if(!imageSrc)throw Error("ไม่พบภาพพื้นหลังเกียรติบัตร");
+  await ensureCertificateTemplateFonts(t);
+  const bg=await certificateLoadImage(imageSrc);
+  const logicalW=1122,logicalH=794,scale=2;
+  const canvas=document.createElement("canvas");
+  canvas.width=logicalW*scale;canvas.height=logicalH*scale;
+  const ctx=canvas.getContext("2d");
+  ctx.scale(scale,scale);
+  ctx.fillStyle="#fff";ctx.fillRect(0,0,logicalW,logicalH);
+  ctx.drawImage(bg,0,0,logicalW,logicalH);
+  Object.entries(values).forEach(([key,value])=>{
+    const style=t.fields?.[key];
+    if(style)certificateDrawText(ctx,value,style,logicalW,logicalH,false);
+  });
+  (t.textBlocks||[]).forEach(block=>{
+    if(!block||block.visible===false)return;
+    certificateDrawText(ctx,certificateResolveText(block.text,values),block,logicalW,logicalH,true);
+  });
+  return canvas;
+}
 async function certificateCanvas(row,d){
-  if(d.template?.enabled)await ensureCertificateTemplateImage(d);
+  if(d.template?.enabled){
+    await ensureCertificateTemplateImage(d);
+    return customCertificateCanvas(row,d);
+  }
   await loadCoverageScript("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",()=>!!window.html2canvas);
   const stage=document.createElement("div");stage.className="ops-certificate-stage";stage.innerHTML=certificateHtml(row,d);document.body.appendChild(stage);
   try{
-    await ensureCertificateTemplateFonts(d.template||{});
+    await document.fonts?.ready?.catch?.(()=>{});
     const imgs=[...stage.querySelectorAll("img")];
     await Promise.all(imgs.map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=img.onerror=resolve;})));
     return await html2canvas(stage.firstElementChild,{scale:1.4,useCORS:true,backgroundColor:"#fff"});
@@ -389,11 +445,11 @@ function certTemplateDefaults(){
   return{
     enabled:true,
     fields:{
-      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700,font:"Sarabun"},
-      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700,font:"Sarabun"},
-      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500,font:"Sarabun"},
-      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400,font:"Sarabun"},
-      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400,font:"Sarabun"}
+      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700,font:"Kanit"},
+      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700,font:"Kanit"},
+      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500,font:"Kanit"},
+      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400,font:"Kanit"},
+      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400,font:"Kanit"}
     },
     textBlocks:[]
   };
@@ -408,15 +464,17 @@ function certificateFontCss(font){
   return String(font)==="Kanit" ? '"Kanit","Noto Sans Thai",sans-serif' : '"Sarabun","Noto Sans Thai",sans-serif';
 }
 async function ensureCertificateFont(font,weight=400){
-  if(!document.fonts?.load)return;
+  if(!document.fonts?.load)return false;
   const family=String(font)==="Kanit"?"Kanit":"Sarabun";
   const w=[300,400,500,600,700].includes(Number(weight))?Number(weight):400;
   try{
     await Promise.race([
       document.fonts.load(w+' 32px "'+family+'"',"กขค ABC 123"),
-      new Promise(resolve=>setTimeout(resolve,4500))
+      new Promise(resolve=>setTimeout(resolve,5000))
     ]);
-  }catch(e){}
+    await document.fonts.ready;
+    return document.fonts.check(w+' 32px "'+family+'"',"กขค ABC 123");
+  }catch(e){return false;}
 }
 async function ensureCertificateTemplateFonts(template){
   const jobs=[];
@@ -428,9 +486,9 @@ async function ensureCertificateTemplateFonts(template){
 }
 function certificateFontOptions(current){
   return [
-    ["Sarabun","TH Sarabun New / Sarabun"],
-    ["Kanit","Kanit"]
-  ].map(([v,label])=>'<option value="'+v+'" '+(String(current||"Sarabun")===v?"selected":"")+'>'+label+'</option>').join("");
+    ["Kanit","Kanit"],
+    ["Sarabun","Sarabun"]
+  ].map(([v,label])=>'<option value="'+v+'" '+(String(current||"Kanit")===v?"selected":"")+'>'+label+'</option>').join("");
 }
 async function certificateTemplateModal(){
   if(S.user?.Role!=="Admin")return;
