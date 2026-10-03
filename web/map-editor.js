@@ -1,6 +1,7 @@
 
 const AREA_MAP_W=1600, AREA_MAP_H=1000;
 const AREA_MAP_REFERENCE_KEY="rsd-area-map-reference-v1";
+const AREA_MAP_REFERENCE_VERSION_KEY="rsd-area-map-reference-server-version-v1";
 const AREA_MAP_REFERENCE_OPACITY_KEY="rsd-area-map-reference-opacity-v1";
 const AREA_MAP_GRID_KEY="rsd-area-map-grid-v1";
 function areaMapLocalGet(key,fallback=""){try{const v=localStorage.getItem(key);return v===null?fallback:v;}catch(e){return fallback;}}
@@ -140,7 +141,7 @@ function areaMapRenderEditor(){
         '<div class="area-map-zoom"><button class="btn small secondary" id="area-map-zoom-out">−</button><span id="area-map-zoom-label">'+Math.round(areaMapState.zoom*100)+'%</span><button class="btn small secondary" id="area-map-zoom-in">＋</button><button class="btn small secondary" id="area-map-view-toggle">'+(areaMapState.viewOnly?"✎ กลับโหมดแก้ไข":"👁 โหมดดู")+'</button></div>'+
       '</div>'+
       '<div class="area-map-workspace"><div class="area-map-canvas-card"><div class="area-map-hint" id="area-map-hint"></div>'+
-      (hasReference?'<div class="area-map-reference-note">ภาพอ้างอิงใช้ช่วยวาดเท่านั้น · ถูกล็อกไว้ด้านล่างและไม่ถูกบันทึกลง D1</div>':"")+
+      (hasReference?'<div class="area-map-reference-note">ภาพอ้างอิงกลางของระบบ · ทุกเครื่องใช้ภาพเดียวกัน และเบราว์เซอร์จะ cache ไว้เพื่อความเร็ว</div>':"")+
       '<div class="area-map-scroll"><svg id="area-map-svg" viewBox="0 0 '+AREA_MAP_W+' '+AREA_MAP_H+'"></svg></div></div><aside class="area-map-side" id="area-map-side"></aside></div>'+
     '</div>';
 
@@ -225,13 +226,15 @@ async function areaMapReferenceFileSelected(file){
   if(!file)return;
   if(!/^image\/(png|jpeg|webp)$/.test(String(file.type||"")))return error(new Error("รองรับไฟล์ PNG, JPG และ WebP"));
   if(Number(file.size||0)>12*1024*1024)return error(new Error("ภาพอ้างอิงต้องไม่เกิน 12 MB"));
-  busy(true,"กำลังเตรียมภาพอ้างอิง…");
+  busy(true,"กำลังบันทึกภาพอ้างอิงกลาง…");
   try{
     const dataUrl=await areaMapCompressReference(file);
+    const saved=await rpc("saveAreaMapReference",{dataUrl});
     areaMapState.referenceDataUrl=dataUrl;
     areaMapState.referenceVisible=true;
-    const saved=areaMapLocalSet(AREA_MAP_REFERENCE_KEY,dataUrl);
-    toast(saved?"เพิ่มภาพอ้างอิงแล้ว":"ใช้ภาพได้ในครั้งนี้ แต่พื้นที่เก็บข้อมูลของเบราว์เซอร์ไม่พอ");
+    areaMapLocalSet(AREA_MAP_REFERENCE_KEY,dataUrl);
+    areaMapLocalSet(AREA_MAP_REFERENCE_VERSION_KEY,String(saved.ReferenceVersion||""));
+    toast("บันทึกภาพอ้างอิงกลางแล้ว · ทุกเครื่องจะใช้ภาพนี้");
     areaMapRenderEditor();
   }catch(e){error(e);}
   finally{busy(false);}
@@ -258,13 +261,19 @@ async function areaMapCompressReference(file){
   return canvas.toDataURL("image/jpeg",.72);
 }
 async function areaMapClearReference(){
-  const ok=await Swal.fire({icon:"question",title:"ลบภาพอ้างอิงจากเครื่องนี้?",text:"กรอบพื้นที่ที่วาดและบันทึกไว้จะไม่ถูกลบ",showCancelButton:true,confirmButtonText:"ลบภาพอ้างอิง",cancelButtonText:"ยกเลิก"});
+  const ok=await Swal.fire({icon:"question",title:"ลบภาพอ้างอิงกลาง?",text:"ภาพจะหายจากทุกเครื่อง แต่กรอบพื้นที่ที่วาดไว้จะไม่ถูกลบ",showCancelButton:true,confirmButtonText:"ลบภาพอ้างอิง",cancelButtonText:"ยกเลิก"});
   if(!ok.isConfirmed)return;
-  try{localStorage.removeItem(AREA_MAP_REFERENCE_KEY);}catch(e){}
-  areaMapState.referenceDataUrl="";
-  areaMapState.referenceVisible=false;
-  areaMapRenderEditor();
-  toast("ลบภาพอ้างอิงแล้ว");
+  busy(true,"กำลังลบภาพอ้างอิง…");
+  try{
+    const result=await rpc("clearAreaMapReference",{});
+    try{localStorage.removeItem(AREA_MAP_REFERENCE_KEY);}catch(e){}
+    areaMapLocalSet(AREA_MAP_REFERENCE_VERSION_KEY,String(result.ReferenceVersion||""));
+    areaMapState.referenceDataUrl="";
+    areaMapState.referenceVisible=false;
+    areaMapRenderEditor();
+    toast("ลบภาพอ้างอิงกลางแล้ว");
+  }catch(e){error(e);}
+  finally{busy(false);}
 }
 function areaMapUpdateToolbar(){
   document.querySelectorAll(".map-tool").forEach(b=>b.classList.toggle("active",!areaMapState.viewOnly&&b.dataset.mode===areaMapState.mode));
