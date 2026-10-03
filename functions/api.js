@@ -14,6 +14,7 @@ const DEFAULT_APP_SETTINGS = {
   inspectionEnd:"16:30",
   approvalEnabled:false,
   offlineEnabled:true,
+  photoEvidenceEnabled:false,
   recycleDays:30,
   certificateSilverMax:3,
   certificateBronzeMax:5,
@@ -26,6 +27,8 @@ let systemEventsCleanupDay = "";
 const rateBuckets = new Map();
 const rateEventLast = new Map();
 const notificationCache = new Map();
+let appSettingsCache = { value:null, at:0 };
+let driveHealthCache = { value:null, at:0 };
 let rateSweepAt = 0;
 
 function clientAddress(request){
@@ -302,6 +305,7 @@ async function dispatch(env, action, p, token, request) {
     backupNow: async () => backupNow(env,u),
     restoreBackup: async () => restoreBackup(env,u,p),
     systemStatus: async () => systemStatus(env,u),
+    driveStatus: async () => driveStatus(env,u),
     systemEvents: async () => systemEvents(env,u,p),
     clientError: async () => clientError(env,u,p,request),
     notifications: async () => notifications(env,u),
@@ -774,6 +778,31 @@ async function systemEvents(env,u,p){
   };
 }
 
+async function driveStatus(env,u){
+  role(u,["Admin"]);
+  const configured=!!(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY);
+  if(!configured)return{configured:false,ok:false,message:"ยังไม่ได้ตั้งค่า Drive Gateway",cached:false};
+  if(driveHealthCache.value&&Date.now()-driveHealthCache.at<60000)return{...driveHealthCache.value,cached:true};
+  const timeout=()=>new Promise((_,reject)=>setTimeout(()=>reject(Error("TIMEOUT")),8000));
+  let result;
+  try{
+    try{
+      const ping=await Promise.race([gasDrive(env,"ping",{}),timeout()]);
+      result={configured:true,ok:!!ping?.ok,message:"เชื่อมต่อได้",service:String(ping?.service||"RSD Clean Drive Gateway")};
+    }catch(firstErr){
+      if(String(firstErr?.message||firstErr).includes("ไม่พบ Drive API")){
+        const res=await Promise.race([fetch(env.GAS_DRIVE_URL,{method:"GET",redirect:"follow",headers:{"Cache-Control":"no-cache"}}),timeout()]);
+        const raw=await res.text();let body={};try{body=JSON.parse(raw);}catch{}
+        result={configured:true,ok:res.ok&&body?.ok===true,message:res.ok?(body?.ok===true?"เชื่อมต่อได้":"Gateway ตอบกลับไม่สมบูรณ์"):"HTTP "+res.status,service:String(body?.service||"")};
+      }else throw firstErr;
+    }
+  }catch(e){
+    result={configured:true,ok:false,message:e?.message==="TIMEOUT"?"เชื่อมต่อเกิน 8 วินาที":String(e?.message||e)};
+  }
+  driveHealthCache={value:result,at:Date.now()};
+  return{...result,cached:false};
+}
+
 async function systemStatus(env,u){
   role(u,["Admin"]);
   const db=env.DB;
@@ -784,62 +813,39 @@ async function systemStatus(env,u){
   await ensureAcademicPeriodsTable(db);
   await ensurePushSubscriptionsTable(db);
 
-  const countSql = [
-    ["users","SELECT COUNT(*) n FROM users"],
-    ["classrooms","SELECT COUNT(*) n FROM classrooms"],
-    ["areas","SELECT COUNT(*) n FROM areas"],
-    ["assignments","SELECT COUNT(*) n FROM assignments"],
-    ["inspections","SELECT COUNT(*) n FROM inspections"],
-    ["auditLogs","SELECT COUNT(*) n FROM audit_log"],
-    ["activeSessions","SELECT COUNT(*) n FROM sessions WHERE expires_at>?"],
-    ["photos","SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'"],
-    ["recycleBin","SELECT COUNT(*) n FROM recycle_bin"],
-    ["systemEvents","SELECT COUNT(*) n FROM system_events"],
-    ["dutyOverrides","SELECT COUNT(*) n FROM duty_overrides WHERE override_date>=?"],
-    ["academicPeriods","SELECT COUNT(*) n FROM academic_periods"],
-    ["pushSubscriptions","SELECT COUNT(*) n FROM push_subscriptions WHERE enabled=1"]
+  const countSpecs = [
+    ["users",db.prepare("SELECT COUNT(*) n FROM users")],
+    ["classrooms",db.prepare("SELECT COUNT(*) n FROM classrooms")],
+    ["areas",db.prepare("SELECT COUNT(*) n FROM areas")],
+    ["assignments",db.prepare("SELECT COUNT(*) n FROM assignments")],
+    ["inspections",db.prepare("SELECT COUNT(*) n FROM inspections")],
+    ["auditLogs",db.prepare("SELECT COUNT(*) n FROM audit_log")],
+    ["activeSessions",db.prepare("SELECT COUNT(*) n FROM sessions WHERE expires_at>?").bind(Date.now())],
+    ["photos",db.prepare("SELECT COUNT(*) n FROM inspections WHERE photo_links_json IS NOT NULL AND photo_links_json<>'[]'")],
+    ["recycleBin",db.prepare("SELECT COUNT(*) n FROM recycle_bin WHERE expires_at>=?").bind(Date.now())],
+    ["systemEvents",db.prepare("SELECT COUNT(*) n FROM system_events")],
+    ["dutyOverrides",db.prepare("SELECT COUNT(*) n FROM duty_overrides WHERE override_date>=?").bind(thaiDay())],
+    ["academicPeriods",db.prepare("SELECT COUNT(*) n FROM academic_periods")],
+    ["pushSubscriptions",db.prepare("SELECT COUNT(*) n FROM push_subscriptions WHERE enabled=1")]
   ];
+  const [countResults,settingsRows,lastInspection,lastAudit,monitor]=await Promise.all([
+    db.batch(countSpecs.map(x=>x[1])),
+    all(db,"SELECT key,value FROM settings WHERE key IN ('last_backup_at','last_backup_file_id','last_auto_backup_day','last_restore_at') ORDER BY key"),
+    db.prepare("SELECT inspection_date,status,updated_at FROM inspections ORDER BY updated_at DESC LIMIT 1").first(),
+    db.prepare("SELECT timestamp,action,actor_name FROM audit_log ORDER BY timestamp DESC LIMIT 1").first(),
+    db.prepare(`SELECT
+      SUM(CASE WHEN event_type='error' THEN 1 ELSE 0 END) errors,
+      SUM(CASE WHEN event_type='slow' THEN 1 ELSE 0 END) slow,
+      SUM(CASE WHEN event_type='security' THEN 1 ELSE 0 END) security
+      FROM system_events WHERE timestamp>=?`).bind(new Date(Date.now()-24*3600000).toISOString()).first()
+  ]);
   const counts={};
-  for(const [key,sql] of countSql){
-    let row;
-    if(key==="activeSessions")row=await db.prepare(sql).bind(Date.now()).first();
-    else if(key==="dutyOverrides")row=await db.prepare(sql).bind(thaiDay()).first();
-    else row=await db.prepare(sql).first();
-    counts[key]=Number(row?.n||0);
-  }
-
-  const settingsRows=await all(db,"SELECT key,value FROM settings WHERE key IN ('last_backup_at','last_backup_file_id','last_auto_backup_day','last_restore_at') ORDER BY key");
+  countSpecs.forEach((x,idx)=>{counts[x[0]]=Number(countResults[idx]?.results?.[0]?.n||0);});
   const settings=Object.fromEntries(settingsRows.map(x=>[x.key,x.value]));
-  const lastInspection=await db.prepare("SELECT inspection_date,status,updated_at FROM inspections ORDER BY updated_at DESC LIMIT 1").first();
-  const lastAudit=await db.prepare("SELECT timestamp,action,actor_name FROM audit_log ORDER BY timestamp DESC LIMIT 1").first();
 
-  let drive={configured:!!(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY),ok:false,message:"ยังไม่ได้ตั้งค่า Drive Gateway"};
-  if(drive.configured){
-    const timeout15 = () => new Promise((_,reject)=>setTimeout(()=>reject(Error("TIMEOUT")),15000));
-    try{
-      try{
-        const ping=await Promise.race([gasDrive(env,"ping",{}),timeout15()]);
-        drive={configured:true,ok:!!ping?.ok,message:"เชื่อมต่อได้",service:String(ping?.service||"RSD Clean Drive Gateway")};
-      }catch(firstErr){
-        if(String(firstErr?.message||firstErr).includes("ไม่พบ Drive API")){
-          const res=await Promise.race([
-            fetch(env.GAS_DRIVE_URL,{method:"GET",redirect:"follow",headers:{"Cache-Control":"no-cache"}}),
-            timeout15()
-          ]);
-          const raw=await res.text();
-          let body={};try{body=JSON.parse(raw);}catch{}
-          drive={configured:true,ok:res.ok&&body?.ok===true,message:res.ok?(body?.ok===true?"เชื่อมต่อได้":"Gateway ตอบกลับไม่สมบูรณ์"):"HTTP "+res.status,service:String(body?.service||"")};
-        }else{
-          throw firstErr;
-        }
-      }
-    }catch(e){
-      drive={configured:true,ok:false,message:e?.message==="TIMEOUT"?"เชื่อมต่อเกิน 15 วินาที":String(e?.message||e)};
-    }
-  }
-
+  const driveConfigured=!!(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY);
+  const drive={configured:driveConfigured,ok:null,message:driveConfigured?"ตรวจแยกแบบไม่บล็อกหน้า":"ยังไม่ได้ตั้งค่า Drive Gateway"};
   const warnings=[];
-  if(!drive.ok) warnings.push("Google Drive Gateway: "+drive.message);
   const lastBackup=String(settings.last_backup_at||"");
   if(!lastBackup){
     warnings.push("ยังไม่พบประวัติ Backup");
@@ -851,12 +857,6 @@ async function systemStatus(env,u){
   if(counts.areas>0&&counts.assignments===0) warnings.push("มีพื้นที่แล้วแต่ยังไม่มีการมอบหมายเวร");
   if(counts.academicPeriods===0) warnings.push("ยังไม่ได้กำหนดปีการศึกษา/ภาคเรียน");
   if(counts.pushSubscriptions>0&&!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK)) warnings.push("มี Push Subscription แต่ยังตั้งค่า VAPID ไม่ครบ");
-  const since24=new Date(Date.now()-24*3600000).toISOString();
-  const monitor=await db.prepare(`SELECT
-    SUM(CASE WHEN event_type='error' THEN 1 ELSE 0 END) errors,
-    SUM(CASE WHEN event_type='slow' THEN 1 ELSE 0 END) slow,
-    SUM(CASE WHEN event_type='security' THEN 1 ELSE 0 END) security
-    FROM system_events WHERE timestamp>=?`).bind(since24).first();
   if(Number(monitor?.errors||0)>0)warnings.push("พบ System Error ใน 24 ชั่วโมงล่าสุด "+Number(monitor.errors)+" รายการ");
 
   return{
@@ -963,71 +963,73 @@ async function purgeTrash(env,u,p){
 
 async function notifications(env,u,skipEnsure=false){
   const today=thaiDay(),cacheKey=String(u.role||"")+"|"+String(u.user_id||"")+"|"+today,cached=notificationCache.get(cacheKey);
-  if(cached&&Date.now()-cached.at<15000)return cached.data;
+  if(cached&&Date.now()-cached.at<30000)return cached.data;
   const db=env.DB,items=[],cfg=await getAppSettings(db),month=today.slice(0,7),monthStart=month+"-01",last30=shiftDate(today,-29);
   const add=(type,title,message,action="",count=0)=>items.push({type,title,message,action,count});
 
   if(u.role==="Inspector"){
     if(!skipEnsure)await ensureToday(env);
-    const row=await db.prepare(`SELECT COUNT(*) total,
-      SUM(CASE WHEN i.status IN ('ตรวจแล้ว','งดตรวจ') THEN 1 ELSE 0 END) resolved,
-      SUM(CASE WHEN i.status='รอตรวจ' THEN 1 ELSE 0 END) pending
-      FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id
-      WHERE i.inspection_date=? AND ii.user_id=?`).bind(today,u.user_id).first();
-    const total=Number(row?.total||0),resolved=Number(row?.resolved||0),pending=Number(row?.pending||0);
-    if(pending) add("warning","งานตรวจยังไม่ครบ","วันนี้เหลือ "+pending+" พื้นที่จากทั้งหมด "+total+" พื้นที่","tasks",pending);
-    else if(total) add("success","งานวันนี้ครบแล้ว","จัดการครบ "+resolved+" พื้นที่แล้ว","tasks",0);
-    else add("info","ไม่มีงานตรวจวันนี้","อาจเป็นวันหยุดหรือยังไม่ได้มอบหมายงาน","tasks",0);
-
-    const returned=await all(db,"SELECT inspection_id,meta_json FROM inspections WHERE inspection_date>=? ORDER BY updated_at DESC LIMIT 200",shiftDate(today,-7));
-    const mineReturned=returned.filter(i=>String(metaOf(i).approvalStatus||"")==="ส่งกลับแก้ไข" && Array.isArray(metaOf(i).inspectorIds) && metaOf(i).inspectorIds.map(String).includes(String(u.user_id)));
-    if(mineReturned.length)add("warning","มีผลตรวจถูกส่งกลับแก้ไข",mineReturned.length+" รายการ กรุณาตรวจสอบหมายเหตุผู้รับรอง","tasks",mineReturned.length);
-
     await ensureDutyOverridesTable(db);
-    const sub=await db.prepare("SELECT COUNT(*) n FROM duty_overrides WHERE override_date=? AND substitute_user_id=?").bind(today,u.user_id).first();
+    const [row,returned,sub]=await Promise.all([
+      db.prepare(`SELECT COUNT(*) total,
+        SUM(CASE WHEN i.status IN ('ตรวจแล้ว','งดตรวจ') THEN 1 ELSE 0 END) resolved,
+        SUM(CASE WHEN i.status='รอตรวจ' THEN 1 ELSE 0 END) pending
+        FROM inspections i JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id
+        WHERE i.inspection_date=? AND ii.user_id=?`).bind(today,u.user_id).first(),
+      db.prepare(`SELECT COUNT(*) n FROM inspections i
+        JOIN inspection_inspectors ii ON ii.inspection_id=i.inspection_id
+        WHERE i.inspection_date>=? AND ii.user_id=?
+          AND COALESCE(json_extract(i.meta_json,'$.approvalStatus'),'')='ส่งกลับแก้ไข'`).bind(shiftDate(today,-7),u.user_id).first(),
+      db.prepare("SELECT COUNT(*) n FROM duty_overrides WHERE override_date=? AND substitute_user_id=?").bind(today,u.user_id).first()
+    ]);
+    const total=Number(row?.total||0),resolved=Number(row?.resolved||0),pending=Number(row?.pending||0),returnedCount=Number(returned?.n||0);
+    if(pending)add("warning","งานตรวจยังไม่ครบ","วันนี้เหลือ "+pending+" พื้นที่จากทั้งหมด "+total+" พื้นที่","tasks",pending);
+    else if(total)add("success","งานวันนี้ครบแล้ว","จัดการครบ "+resolved+" พื้นที่แล้ว","tasks",0);
+    else add("info","ไม่มีงานตรวจวันนี้","อาจเป็นวันหยุดหรือยังไม่ได้มอบหมายงาน","tasks",0);
+    if(returnedCount)add("warning","มีผลตรวจถูกส่งกลับแก้ไข",returnedCount+" รายการ กรุณาตรวจสอบหมายเหตุผู้รับรอง","tasks",returnedCount);
     if(Number(sub?.n||0)>0)add("info","วันนี้มีเวรทดแทน","ได้รับมอบหมายแทน "+Number(sub.n)+" พื้นที่","tasks",0);
     const nowTime=new Intl.DateTimeFormat("en-GB",{timeZone:TZ,hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date());
     if(pending&&nowTime>=cfg.inspectionEnd)add("warning","เลยเวลาตรวจที่กำหนดแล้ว","ยังเหลือ "+pending+" พื้นที่ที่ไม่ได้ดำเนินการ","tasks",pending);
     else if(pending&&nowTime>=shiftClock(cfg.inspectionEnd,-60))add("warning","ใกล้หมดเวลาตรวจ","ยังเหลือ "+pending+" พื้นที่ก่อน "+cfg.inspectionEnd+" น.","tasks",pending);
   }else if(u.role==="Admin"||u.role==="Supervisor"){
     if(!skipEnsure)await ensureToday(env);
-    const row=await db.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('ตรวจแล้ว','งดตรวจ') THEN 1 ELSE 0 END) resolved,SUM(CASE WHEN status='รอตรวจ' THEN 1 ELSE 0 END) pending FROM inspections WHERE inspection_date=?").bind(today).first();
+    const approvedSql=cfg.approvalEnabled
+      ? "AND COALESCE(json_extract(meta_json,'$.approvalStatus'),'') IN ('','รับรองแล้ว')"
+      : "";
+    const promises=[
+      db.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('ตรวจแล้ว','งดตรวจ') THEN 1 ELSE 0 END) resolved,SUM(CASE WHEN status='รอตรวจ' THEN 1 ELSE 0 END) pending FROM inspections WHERE inspection_date=?").bind(today).first(),
+      db.prepare(`SELECT COUNT(*) n FROM (SELECT area_id FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว' AND score=1 ${approvedSql} GROUP BY area_id HAVING COUNT(*)>=3)`).bind(last30,today).first(),
+      db.prepare(`SELECT COUNT(*) n FROM (SELECT COALESCE(json_extract(meta_json,'$.classId'),'') class_id FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว' AND score=1 ${approvedSql} GROUP BY class_id HAVING COUNT(*)>?)`).bind(monthStart,today,Number(cfg.certificateBronzeMax||5)).first(),
+      db.prepare("SELECT COUNT(*) n FROM areas a WHERE NOT EXISTS(SELECT 1 FROM assignments x WHERE x.area_id=a.area_id)").first(),
+      db.prepare("SELECT value FROM settings WHERE key='last_backup_at'").first()
+    ];
+    if(cfg.approvalEnabled)promises.push(db.prepare("SELECT COUNT(*) n FROM inspections WHERE inspection_date>=? AND COALESCE(json_extract(meta_json,'$.approvalStatus'),'')='รอรับรอง'").bind(shiftDate(today,-30)).first());
+    if(u.role==="Admin")promises.push(db.prepare("SELECT COUNT(*) n FROM recycle_bin WHERE expires_at>=?").bind(Date.now()).first());
+    const rs=await Promise.all(promises);
+    const row=rs[0],repeatAreas=Number(rs[1]?.n||0),risky=Number(rs[2]?.n||0),unassigned=Number(rs[3]?.n||0),last=String(rs[4]?.value||"");
+    let at=5;
+    const waiting=cfg.approvalEnabled?Number(rs[at++]?.n||0):0;
+    const trash=u.role==="Admin"?Number(rs[at++]?.n||0):0;
     const total=Number(row?.total||0),pending=Number(row?.pending||0);
     if(pending)add("warning","มีงานตรวจค้าง","วันนี้ยังเหลือ "+pending+" งานจาก "+total+" พื้นที่","reports",pending);
-
-    if(cfg.approvalEnabled){
-      const reviewRows=await all(db,"SELECT meta_json FROM inspections WHERE inspection_date>=? ORDER BY updated_at DESC LIMIT 500",shiftDate(today,-30));
-      const waiting=reviewRows.filter(x=>String(metaOf(x).approvalStatus||"")==="รอรับรอง").length;
-      if(waiting)add("warning","มีผลตรวจรอรับรอง",waiting+" รายการรอการตรวจสอบ","review",waiting);
-    }
-
-    const improveRows=await all(db,"SELECT area_id,score,meta_json FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว'",last30,today);
-    const areaCounts={},classCounts={};
-    for(const i of improveRows){
-      if(!approvedForScoring(i,cfg)||Number(i.score)!==1)continue;
-      const m=metaOf(i);areaCounts[m.areaName||i.area_id]=(areaCounts[m.areaName||i.area_id]||0)+1;classCounts[m.classId||""]=(classCounts[m.classId||""]||0)+1;
-    }
-    const repeatAreas=Object.entries(areaCounts).filter(([,n])=>n>=3);
-    if(repeatAreas.length)add("warning","พื้นที่ได้ปรับปรุงซ้ำ",repeatAreas.length+" พื้นที่มีผลปรับปรุงตั้งแต่ 3 ครั้งใน 30 วัน","history",repeatAreas.length);
-
-    const monthRows=await all(db,"SELECT score,meta_json FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว'",monthStart,today);
-    const risk={};
-    for(const i of monthRows){if(approvedForScoring(i,cfg)&&Number(i.score)===1){const m=metaOf(i);risk[m.classId||""]=(risk[m.classId||""]||0)+1;}}
-    const risky=Object.values(risk).filter(n=>n>cfg.certificateBronzeMax).length;
+    if(waiting)add("warning","มีผลตรวจรอรับรอง",waiting+" รายการรอการตรวจสอบ","review",waiting);
+    if(repeatAreas)add("warning","พื้นที่ได้ปรับปรุงซ้ำ",repeatAreas+" พื้นที่มีผลปรับปรุงตั้งแต่ 3 ครั้งใน 30 วัน","history",repeatAreas);
     if(risky)add("warning","ห้องเสี่ยงไม่ได้รับเกียรติบัตร",risky+" ห้องมีผลปรับปรุงเกิน "+cfg.certificateBronzeMax+" ครั้งในเดือนนี้","reports",risky);
-
-    const unassigned=await db.prepare("SELECT COUNT(*) n FROM areas a WHERE NOT EXISTS(SELECT 1 FROM assignments x WHERE x.area_id=a.area_id)").first();
-    if(Number(unassigned?.n||0)>0)add("warning","พื้นที่ยังไม่มีผู้ตรวจ",Number(unassigned.n)+" พื้นที่ยังไม่มีการมอบหมาย","admin",Number(unassigned.n));
-    const b=await db.prepare("SELECT value FROM settings WHERE key='last_backup_at'").first(),last=String(b?.value||"");
+    if(unassigned)add("warning","พื้นที่ยังไม่มีผู้ตรวจ",unassigned+" พื้นที่ยังไม่มีการมอบหมาย","admin",unassigned);
     if(!last)add("warning","ยังไม่มี Backup","ควรสำรองข้อมูลระบบ","admin",1);
     else if(Date.now()-new Date(last).getTime()>48*3600000)add("warning","Backup เกิน 48 ชั่วโมง","ควรตรวจสอบระบบสำรองข้อมูล","admin",1);
-    if(u.role==="Admin"){await cleanRecycle(db);const trash=await db.prepare("SELECT COUNT(*) n FROM recycle_bin").first();if(Number(trash?.n||0)>0)add("info","มีข้อมูลในถังขยะ",Number(trash.n)+" รายการจะถูกลบถาวรตามระยะเวลาที่ตั้งไว้","admin",Number(trash.n));}
+    if(trash)add("info","มีข้อมูลในถังขยะ",trash+" รายการจะถูกลบถาวรตามระยะเวลาที่ตั้งไว้","admin",trash);
   }else if(u.role==="Teacher"){
-    const rows=await all(db,"SELECT score,inspection_date,meta_json FROM inspections WHERE inspection_date>=? AND status='ตรวจแล้ว' ORDER BY inspection_date DESC",last30);
-    const mine=rows.filter(x=>String(metaOf(x).classId||"")===String(u.linked_classroom_id)&&approvedForScoring(x,cfg)),improve=mine.filter(x=>Number(x.score)===1);
-    if(improve.length)add("warning","มีผลประเมินที่ควรติดตาม","พบ "+improve.length+" ผลตรวจระดับปรับปรุงใน 30 วัน","teacher",improve.length);
+    const approvedSql=cfg.approvalEnabled?"AND COALESCE(json_extract(meta_json,'$.approvalStatus'),'') IN ('','รับรองแล้ว')":"";
+    const [thirty,monthlyRow]=await Promise.all([
+      db.prepare(`SELECT COUNT(*) n FROM inspections WHERE inspection_date>=? AND status='ตรวจแล้ว' AND score=1
+        AND json_extract(meta_json,'$.classId')=? ${approvedSql}`).bind(last30,u.linked_classroom_id).first(),
+      db.prepare(`SELECT COUNT(*) n FROM inspections WHERE inspection_date>=? AND inspection_date<=? AND status='ตรวจแล้ว' AND score=1
+        AND json_extract(meta_json,'$.classId')=? ${approvedSql}`).bind(monthStart,today,u.linked_classroom_id).first()
+    ]);
+    const improve=Number(thirty?.n||0),monthImprove=Number(monthlyRow?.n||0);
+    if(improve)add("warning","มีผลประเมินที่ควรติดตาม","พบ "+improve+" ผลตรวจระดับปรับปรุงใน 30 วัน","teacher",improve);
     else add("success","สถานะห้องเรียน","ยังไม่พบผลระดับปรับปรุงใน 30 วันล่าสุด","teacher",0);
-    const monthImprove=mine.filter(x=>x.inspection_date>=monthStart&&Number(x.score)===1).length;
     if(monthImprove>cfg.certificateBronzeMax)add("warning","เกินเกณฑ์เกียรติบัตรเดือนนี้","มีผลปรับปรุง "+monthImprove+" ครั้ง","history",1);
     else if(monthImprove>=cfg.certificateSilverMax+1)add("info","ติดตามเกณฑ์เกียรติบัตร","เดือนนี้มีผลปรับปรุง "+monthImprove+" ครั้ง","history",0);
   }
@@ -1264,6 +1266,7 @@ async function certificateData(env,u,p){
 }
 
 async function getAppSettings(db){
+  if(appSettingsCache.value&&Date.now()-appSettingsCache.at<60000)return appSettingsCache.value;
   const r=await db.prepare("SELECT value FROM settings WHERE key='app_config_json'").first();
   const parsed=parseJson(r?.value,{});
   const cfg={...DEFAULT_APP_SETTINGS,...(parsed&&typeof parsed==="object"?parsed:{})};
@@ -1276,11 +1279,13 @@ async function getAppSettings(db){
   cfg.inspectionEnd=/^\d{2}:\d{2}$/.test(String(cfg.inspectionEnd))?String(cfg.inspectionEnd):DEFAULT_APP_SETTINGS.inspectionEnd;
   cfg.approvalEnabled=cfg.approvalEnabled===true;
   cfg.offlineEnabled=cfg.offlineEnabled!==false;
+  cfg.photoEvidenceEnabled=cfg.photoEvidenceEnabled===true;
   cfg.recycleDays=Math.min(180,Math.max(1,Number(cfg.recycleDays||30)));
   cfg.certificateSilverMax=Math.min(20,Math.max(0,Number(cfg.certificateSilverMax||3)));
   cfg.certificateBronzeMax=Math.min(30,Math.max(cfg.certificateSilverMax,Number(cfg.certificateBronzeMax||5)));
   cfg.skipReasons=Array.isArray(cfg.skipReasons)?cfg.skipReasons.map(x=>String(x).trim()).filter(Boolean).slice(0,20):DEFAULT_APP_SETTINGS.skipReasons;
   if(!cfg.skipReasons.length)cfg.skipReasons=[...DEFAULT_APP_SETTINGS.skipReasons];
+  appSettingsCache={value:cfg,at:Date.now()};
   return cfg;
 }
 async function appSettings(env,u){
@@ -1304,6 +1309,7 @@ async function saveAppSettings(env,u,p){
     inspectionEnd:/^\d{2}:\d{2}$/.test(String(x.inspectionEnd||""))?String(x.inspectionEnd):old.inspectionEnd,
     approvalEnabled:x.approvalEnabled===true,
     offlineEnabled:x.offlineEnabled!==false,
+    photoEvidenceEnabled:x.photoEvidenceEnabled===true,
     recycleDays:Math.min(180,Math.max(1,Number(x.recycleDays||old.recycleDays||30))),
     certificateSilverMax:Math.min(20,Math.max(0,Number(x.certificateSilverMax??old.certificateSilverMax))),
     certificateBronzeMax:Math.min(30,Math.max(Number(x.certificateSilverMax??old.certificateSilverMax),Number(x.certificateBronzeMax??old.certificateBronzeMax))),
@@ -1313,6 +1319,7 @@ async function saveAppSettings(env,u,p){
   assert(cfg.schoolName,"ชื่อโรงเรียนห้ามว่าง");
   if(!cfg.skipReasons.length)cfg.skipReasons=[...DEFAULT_APP_SETTINGS.skipReasons];
   await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('app_config_json',?)").bind(JSON.stringify(cfg)).run();
+  appSettingsCache={value:cfg,at:Date.now()};
   return cfg;
 }
 async function ensureDutyOverridesTable(db){
@@ -1671,6 +1678,7 @@ async function bulkCreate(env,u,p){ role(u,["Admin"]); const r=await bulkPlan(en
   await db.batch(stmts); await invalidateToday(env); return {saved:true,count:r.prepared.length}; }
 
 async function uploadStart(env,u,p,request){
+  const cfg=await getAppSettings(env.DB);assert(cfg.photoEvidenceEnabled,"ระบบปิดการแนบรูปหลักฐานเพื่อเพิ่มความเร็ว");
   const i=await ownedTask(env,u,p.id); const mime=String(p.mime||""), size=Number(p.size), origin=String(p.origin||new URL(request.url).origin);
   assert(["image/jpeg","image/png","image/webp"].includes(mime),"รองรับ JPG PNG WebP"); assert(Number.isInteger(size)&&size>0&&size<=MAX_IMAGE,"รูปภาพต้องไม่เกิน 100 MB");
   assert(env.GAS_DRIVE_URL&&env.DRIVE_GATEWAY_KEY,"ยังไม่ได้ตั้งค่า Google Drive gateway");
@@ -1758,8 +1766,8 @@ async function monthly(env,allIns,month){ const cfg=await getAppSettings(env.DB)
 async function dashboard(env,u,d){
   if(d===thaiDay())await ensureToday(env);
   const cfg=await getAppSettings(env.DB),start=shiftDate(d,-29);
-  const [{ins},areas]=await Promise.all([
-    inspectionBundleRange(env.DB,start,d),
+  const [ins,areas]=await Promise.all([
+    all(env.DB,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",start,d),
     env.DB.prepare("SELECT COUNT(*) n FROM areas").first()
   ]);
   const ad=activeDates(ins),isHoliday=d<thaiDay()&&!ad.has(d);
@@ -1863,7 +1871,29 @@ async function executiveDashboard(env,u,p={}){
     weekSeries,monthSeries,leaders:leaderboard(last30,cfg).slice(0,5),watchAreas,watchClasses,settings:cfg,updatedAt:nowIso()
   };
 }
-async function teacher(env,u){ role(u,["Teacher"]); await ensureToday(env); const {ins}=await inspectionBundle(env.DB),ad=activeDates(ins); const filtered=ins.filter(i=>metaOf(i).classId===u.linked_classroom_id&&(i.inspection_date===thaiDay()||ad.has(i.inspection_date))).sort((a,b)=>b.inspection_date.localeCompare(a.inspection_date)).slice(0,200); return{inspections:await Promise.all(filtered.map(i=>displayOne(env.DB,i))),rewards:(await all(env.DB,"SELECT * FROM rewards_log WHERE reference_id=?",u.linked_classroom_id)).map(rewardRow),monthly:(await monthly(env,ins,thaiDay().slice(0,7))).filter(r=>r.id===u.linked_classroom_id)}; }
+async function teacher(env,u){
+  role(u,["Teacher"]);await ensureToday(env);
+  const db=env.DB,today=thaiDay(),month=today.slice(0,7),monthStart=month+"-01",monthEnd=monthLastDay(month)<today?monthLastDay(month):today;
+  const [filtered,monthIns,rewards]=await Promise.all([
+    all(db,`SELECT * FROM inspections
+      WHERE json_extract(meta_json,'$.classId')=?
+        AND (inspection_date=? OR status IN ('ตรวจแล้ว','งดตรวจ'))
+      ORDER BY inspection_date DESC,updated_at DESC LIMIT 200`,u.linked_classroom_id,today),
+    all(db,"SELECT * FROM inspections WHERE inspection_date>=? AND inspection_date<=? ORDER BY inspection_date,inspection_id",monthStart,monthEnd),
+    all(db,"SELECT * FROM rewards_log WHERE reference_id=? ORDER BY timestamp",u.linked_classroom_id)
+  ]);
+  let teams=[];
+  if(filtered.length){
+    const ids=filtered.map(x=>x.inspection_id),marks=ids.map(()=>"?").join(",");
+    teams=await all(db,`SELECT inspection_id,user_id,user_name FROM inspection_inspectors WHERE inspection_id IN (${marks}) ORDER BY inspection_id,user_name`,...ids);
+  }
+  const map=new Map();teams.forEach(x=>{if(!map.has(x.inspection_id))map.set(x.inspection_id,[]);map.get(x.inspection_id).push(x);});
+  return{
+    inspections:filtered.map(i=>inspectionDisplay(i,map.get(i.inspection_id)||[])),
+    rewards:rewards.map(rewardRow),
+    monthly:(await monthly(env,monthIns,month)).filter(r=>r.id===u.linked_classroom_id)
+  };
+}
 async function dailyReport(env,u,date){
   role(u,["Admin","Supervisor","Inspector"]);
   assert(date<=thaiDay(),"เลือกวันที่ในอนาคตไม่ได้");
