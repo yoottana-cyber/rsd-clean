@@ -492,7 +492,7 @@ const adminTables = {
       "</b></div></div>" +
       '<div class="assignment-toolbar area-first-toolbar"><div class="search-box assignment-search"><i data-lucide="search"></i><input id="assignment-area-search" type="search" placeholder="ค้นหาพื้นที่ / ห้องเรียน / ผู้ตรวจ…"></div>' +
       '<label class="assignment-filter-check"><input id="assignment-only-unassigned" type="checkbox"> เฉพาะพื้นที่ยังว่าง</label>' +
-      '<label class="assignment-filter-check"><input id="assignment-only-assigned" type="checkbox"> เฉพาะพื้นที่มีเวร</label><button type="button" class="btn secondary assignment-delete-tools" id="assignment-delete-tools">🗑 ลบเวรเร็ว</button></div>' +
+      '<label class="assignment-filter-check"><input id="assignment-only-assigned" type="checkbox"> เฉพาะพื้นที่มีเวร</label><button type="button" class="btn secondary" id="assignment-copy-days">⧉ คัดลอกไปวันอื่น</button><button type="button" class="btn assignment-copy-all" id="assignment-copy-all">⚡ ใช้เวรนี้ทุกวัน</button><button type="button" class="btn secondary assignment-delete-tools" id="assignment-delete-tools">🗑 ลบเวรเร็ว</button></div>' +
       '<div class="assignment-area-meta"><span>วัน<b>' +
       esc(dayMeta[1]) +
       '</b></span><span>กำลังแสดง <b id="assignment-visible-count">' +
@@ -554,6 +554,8 @@ const adminTables = {
     document.querySelectorAll(".assignment-clear-area").forEach((b) => {
       b.onclick = () => clearAreaDuty(b.dataset.area, selectedDay);
     });
+    $("assignment-copy-days").onclick = () => assignmentCopyDaysModal(selectedDay);
+    $("assignment-copy-all").onclick = () => assignmentCopyAllDays(selectedDay);
     $("assignment-delete-tools").onclick = () => assignmentDeleteToolsModal(selectedDay);
     document.querySelectorAll(".assignment-remove-day").forEach((b) => {
       b.onclick = (e) => {
@@ -674,6 +676,89 @@ const adminTables = {
     sync();
   }
 
+
+
+  async function assignmentCopyAllDays(sourceDay) {
+    const n=Number(sourceDay),
+      dayName=dutyDayOptions.find(d=>d[0]===n)?.[1]||String(n),
+      sourceRows=S.master.Assignments.filter(a=>dutyDaysArray(a.Days).includes(n)),
+      targets=[1,2,3,4,5].filter(d=>d!==n);
+    if(!sourceRows.length)return error(new Error("วัน"+dayName+"ยังไม่มีเวรให้คัดลอก"));
+    const ok=await Swal.fire({
+      icon:"question",
+      title:"ใช้เวรวัน"+dayName+"เป็นเวรทุกวัน?",
+      html:"จะทำให้วันอื่น จ.–ศ. มีผู้ตรวจและพื้นที่ <b>เหมือนวัน"+esc(dayName)+"</b><br><span class='muted'>เวรเดิมของวันปลายทางจะถูกแทนที่ แต่เวรวัน"+esc(dayName)+"จะไม่เปลี่ยน</span>",
+      showCancelButton:true,
+      confirmButtonText:"ใช้เวรนี้ทุกวัน",
+      cancelButtonText:"ยกเลิก"
+    });
+    if(!ok.isConfirmed)return;
+    busy(true,"กำลังคัดลอกเวรไปทุกวัน…");
+    try{
+      const r=await rpc("copyDutyAssignments",{sourceDay:n,targetDays:targets});
+      S.master=await rpc("master",{},true);
+      toast("ตั้งเวรเหมือนวัน"+dayName+"ครบ จ.–ศ. แล้ว");
+      assignmentContent();
+    }catch(e){error(e);}finally{busy(false);}
+  }
+
+  function assignmentCopyDaysModal(sourceDay) {
+    const n=Number(sourceDay),
+      dayName=dutyDayOptions.find(d=>d[0]===n)?.[1]||String(n),
+      sourceRows=S.master.Assignments.filter(a=>dutyDaysArray(a.Days).includes(n));
+    if(!sourceRows.length)return error(new Error("วัน"+dayName+"ยังไม่มีเวรให้คัดลอก"));
+
+    const checks=dutyDayOptions
+      .filter(([d])=>d!==n)
+      .map(([d,full])=>'<label class="copy-duty-day"><input type="checkbox" name="targetDay" value="'+d+'"><span><b>'+esc(full)+'</b><small>แทนที่ด้วยเวรวัน'+esc(dayName)+'</small></span></label>')
+      .join("");
+
+    openModal(
+      "คัดลอกเวรวัน"+dayName,
+      '<form id="copy-duty-form">'+
+        '<div class="copy-duty-source"><b>ต้นแบบ: วัน'+esc(dayName)+'</b><span>'+sourceRows.length+' รายการเวร</span></div>'+
+        '<p class="muted mt-3 mb-2">เลือกวันปลายทางที่ต้องการให้มีเวรเหมือนวัน'+esc(dayName)+'</p>'+
+        '<div class="copy-duty-days">'+checks+'</div>'+
+        '<div class="copy-duty-note">วันปลายทางที่เลือกจะถูก <b>แทนที่</b> ให้เหมือนต้นแบบทั้งหมด เพื่อไม่ให้เกิดเวรเก่าปะปน</div>'+
+        '<div class="flex gap-2 mt-4"><button type="button" class="btn secondary" id="copy-duty-select-all">เลือกวันทั้งหมด</button><button class="btn" id="copy-duty-save" disabled>คัดลอกเวร</button></div>'+
+      '</form>'
+    );
+
+    const form=$("copy-duty-form"),
+      save=$("copy-duty-save"),
+      boxes=[...form.querySelectorAll('input[name="targetDay"]')];
+    const sync=()=>{
+      const count=boxes.filter(x=>x.checked).length;
+      save.disabled=!count;
+      save.textContent=count?"คัดลอกไป "+count+" วัน":"คัดลอกเวร";
+    };
+    boxes.forEach(x=>x.onchange=sync);
+    $("copy-duty-select-all").onclick=()=>{boxes.forEach(x=>x.checked=true);sync();};
+    form.onsubmit=async e=>{
+      e.preventDefault();
+      const targetDays=boxes.filter(x=>x.checked).map(x=>Number(x.value));
+      if(!targetDays.length)return;
+      const labels=targetDays.map(d=>dutyDayOptions.find(x=>x[0]===d)?.[2]||d).join(" ");
+      const ok=await Swal.fire({
+        icon:"warning",
+        title:"ยืนยันคัดลอกเวร?",
+        html:"เวรวัน"+esc(dayName)+"จะถูกใช้แทนเวรเดิมของ <b>"+esc(labels)+"</b>",
+        showCancelButton:true,
+        confirmButtonText:"คัดลอกและแทนที่",
+        cancelButtonText:"ยกเลิก"
+      });
+      if(!ok.isConfirmed)return;
+      busy(true,"กำลังคัดลอกเวร…");
+      try{
+        await rpc("copyDutyAssignments",{sourceDay:n,targetDays});
+        S.master=await rpc("master",{},true);
+        closeModal();
+        toast("คัดลอกเวรเรียบร้อย");
+        assignmentContent();
+      }catch(e){error(e);}finally{busy(false);}
+    };
+    sync();
+  }
 
   async function refreshAssignmentsAfterRemoval(message) {
     S.master = await rpc("master", {}, true);

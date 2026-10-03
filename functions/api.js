@@ -309,6 +309,7 @@ async function dispatch(env, action, p, token, request) {
     assign: async () => assign(env,u,p),
     setAssignmentDays: async () => setAssignmentDays(env,u,p),
     removeDutyAssignments: async () => removeDutyAssignments(env,u,p),
+    copyDutyAssignments: async () => copyDutyAssignments(env,u,p),
     saveInspection: async () => saveInspection(env,u,p),
     uploadStart: async () => uploadStart(env,u,p,request),
     photo: async () => photo(env,u,p),
@@ -422,7 +423,7 @@ async function auth(env, token) {
 function role(u, allowed) { assert(u && allowed.includes(u.role),"ไม่มีสิทธิ์ใช้งาน"); }
 async function all(db,sql,...args) { const r=await db.prepare(sql).bind(...args).all(); return r.results || []; }
 
-const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate"]);
+const AUDIT_ACTIONS = new Set(["saveMaster","bulkCreate","deleteMaster","assign","setAssignmentDays","removeDutyAssignments","copyDutyAssignments","saveInspection","password","holidays","backupExport","backupNow","restoreBackup","restoreTrash","purgeTrash","logoutSession","logoutOtherSessions","saveAppSettings","saveDutyOverride","deleteDutyOverride","reviewInspection","setInspectionException","saveAcademicPeriod","deleteAcademicPeriod","savePushSubscription","deletePushSubscription","sendPushReminder","sendPushTest","adminEditInspection","saveCertificateTemplate","deleteCertificateTemplate"]);
 
 async function ensureAuditTable(db){
   if(auditReady)return;
@@ -454,6 +455,7 @@ function auditMeta(action,p,result){
   if(action==="assign")return{entityType:"Assignments",entityId:"",details:{userIds:(p.userIds||[]).map(String).slice(0,100),areaIds:(p.areaIds||[]).map(String).slice(0,100),days:p.days||[],added:Number(result?.added||0),merged:Number(result?.merged||0)}};
   if(action==="setAssignmentDays")return{entityType:"Assignments",entityId:String(p.id||""),details:{days:p.days||[]}};
   if(action==="removeDutyAssignments")return{entityType:"Assignments",entityId:"bulk",details:{mode:String(p.mode||""),day:Number(p.day||0),userId:String(p.userId||""),areaIds:(p.areaIds||[]).map(String).slice(0,100),changed:Number(result?.changed||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
+  if(action==="copyDutyAssignments")return{entityType:"Assignments",entityId:"copy",details:{sourceDay:Number(p.sourceDay||0),targetDays:(p.targetDays||[]).map(Number).slice(0,5),sourceCount:Number(result?.sourceCount||0),updated:Number(result?.updated||0),removed:Number(result?.removed||0)}};
   if(action==="saveInspection")return{entityType:"Inspections",entityId:String(p.id||""),details:{status:String(p.status||""),score:Number(p.score||0),photoChanged:!!p.uploadTicket||p.removePhoto===true}};
   if(action==="holidays")return{entityType:"Holidays",entityId:"",details:{count:Array.isArray(p.dates)?p.dates.length:0}};
   if(action==="password")return{entityType:"Users",entityId:"self",details:{passwordChanged:true}};
@@ -1910,6 +1912,62 @@ async function removeDutyAssignments(env,u,p){
   await invalidateToday(env);
   await ensureToday(env);
   return{changed:targets.length,updated,removed};
+}
+
+
+async function copyDutyAssignments(env,u,p){
+  role(u,["Admin"]);
+  const db=env.DB,m=await masterData(db),sourceDay=Number(p.sourceDay),
+    targets=[...new Set((Array.isArray(p.targetDays)?p.targetDays:[]).map(Number))]
+      .filter(n=>Number.isInteger(n)&&n>=1&&n<=5&&n!==sourceDay)
+      .sort();
+  assert(Number.isInteger(sourceDay)&&sourceDay>=1&&sourceDay<=5,"วันต้นทางไม่ถูกต้อง");
+  assert(targets.length,"เลือกวันปลายทางอย่างน้อย 1 วัน");
+
+  const source=m.Assignments.filter(a=>dutyDays(a.Days).includes(sourceDay));
+  assert(source.length,"วันต้นทางยังไม่มีเวรให้คัดลอก");
+  const sourcePairs=new Set(source.map(a=>String(a.UserID)+"|"+String(a.AreaID))),
+    targetSet=new Set(targets),
+    deletedAt=nowIso();
+  await cleanRecycle(db);
+  const cfg=await getAppSettings(db),
+    expiresAt=Date.now()+Number(cfg.recycleDays||30)*24*3600000,
+    stmts=[];
+  let updated=0,removed=0;
+
+  for(const a of m.Assignments){
+    const pair=String(a.UserID)+"|"+String(a.AreaID),
+      before=dutyDays(a.Days),
+      next=before.filter(n=>!targetSet.has(n));
+    if(sourcePairs.has(pair)){
+      for(const d of targets) if(!next.includes(d)) next.push(d);
+    }
+    next.sort((x,y)=>x-y);
+    const beforeText=before.join(","),nextText=next.join(",");
+    if(beforeText===nextText)continue;
+
+    if(next.length){
+      stmts.push(
+        db.prepare("UPDATE assignments SET days=?,updated_at=? WHERE assignment_id=?")
+          .bind(nextText,deletedAt,String(a.AssignmentID))
+      );
+      updated++;
+    }else{
+      stmts.push(
+        db.prepare("INSERT INTO recycle_bin(recycle_id,deleted_at,deleted_by_user_id,deleted_by_name,entity_type,entity_id,label,snapshot_json,expires_at) VALUES(?,?,?,?,?,?,?,?,?)")
+          .bind(uuid(),deletedAt,String(u.user_id||""),String(u.full_name||""),"Assignments",String(a.AssignmentID),recycleLabel("Assignments",a),JSON.stringify(a),expiresAt)
+      );
+      stmts.push(
+        db.prepare("DELETE FROM assignments WHERE assignment_id=?").bind(String(a.AssignmentID))
+      );
+      removed++;
+    }
+  }
+
+  if(stmts.length)await runDbBatches(db,stmts,40);
+  await invalidateToday(env);
+  await ensureToday(env);
+  return{sourceCount:source.length,targetDays:targets,updated,removed};
 }
 
 async function password(env,u,p){ const c=parseJson(u.password,{}); assert(equalLoose(c.hash,await hmac(env,text(p.oldProof,200))),"รหัสผ่านเดิมไม่ถูกต้อง"); const pass=await credentialJson(env,p.credential); await env.DB.prepare("UPDATE users SET password=?,updated_at=? WHERE user_id=?").bind(pass,nowIso(),u.user_id).run(); await env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(u.user_id).run(); return true; }

@@ -1844,3 +1844,21 @@ tbody tr:hover td{background:#fbfefe}
   .assignment-delete-tools{margin-left:0;width:100%}
   .quick-delete-area-list{grid-template-columns:1fr}
 }
+
+
+/* assignment-copy-duty-v1 */
+.assignment-copy-all{white-space:nowrap}
+.copy-duty-source{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #cfe8ed;background:#f2fbfc;border-radius:13px;padding:11px 12px}
+.copy-duty-source b{color:#15556a}.copy-duty-source span{font-size:11px;color:#62808b}
+.copy-duty-days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.copy-duty-day{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;align-items:center;border:1px solid #dce9ed;border-radius:12px;padding:10px;background:#fff;cursor:pointer}
+.copy-duty-day:hover{border-color:#9bcfd8;background:#f8fcfd}
+.copy-duty-day input{width:17px;height:17px;accent-color:#0891b2}
+.copy-duty-day>span{display:flex;flex-direction:column}
+.copy-duty-day b{font-size:12px;color:#294c58}.copy-duty-day small{font-size:10px;color:#7c9098}
+.copy-duty-note{margin-top:12px;padding:10px 11px;border-radius:11px;background:#fff8e7;color:#8a5b0c;font-size:11px}
+@media(max-width:700px){
+  .assignment-copy-all{width:100%}
+  #assignment-copy-days{width:100%}
+  .copy-duty-days{grid-template-columns:1fr}
+}
