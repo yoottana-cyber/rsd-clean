@@ -306,7 +306,9 @@ async function adminDeleteInspectionModal(row,onDeleted){
   const ask=await Swal.fire({
     icon:"warning",
     title:"ย้ายผลตรวจไปถังขยะ?",
-    html:"<b>"+esc(row.ClassName||"—")+" · "+esc(row.AreaName||"—")+"</b><br>"+esc(coverageDateText(row.Date))+"<br><br><span class='muted'>กู้คืนได้จากถังขยะภายใน 30 วัน</span>",
+    html:"<b>"+esc(row.ClassName||"—")+" · "+esc(row.AreaName||"—")+"</b><br>"+esc(coverageDateText(row.Date))+
+      "<div class='warn mt-3' style='text-align:left'><b>โปรดตรวจสอบก่อนลบ</b><br>การลบผลตรวจนี้อาจทำให้ <b>รายงาน อันดับ และเกียรติบัตรของเดือนนั้นเปลี่ยนแปลง</b> เพราะระบบจะคำนวณใหม่จากผลตรวจที่ยังอยู่</div>"+
+      "<div class='muted mt-3'>รายการจะย้ายไปถังขยะและกู้คืนได้ภายใน 30 วัน</div>",
     input:"textarea",
     inputLabel:"เหตุผลการลบ",
     inputPlaceholder:"เช่น บันทึกซ้ำ / ตรวจผิดพื้นที่ / เป็นข้อมูลทดลอง",
