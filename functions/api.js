@@ -1155,12 +1155,15 @@ async function sendPushToUsers(env,userIds){
 async function sendPushReminder(env,u,p){
   role(u,["Admin","Supervisor"]);const db=env.DB,date=validateDate(p.date||thaiDay());
   assert(date===thaiDay(),"Push เตือนงานค้างรองรับเฉพาะวันนี้");
+  const lockKey="last_push_reminder_at",lastRow=await db.prepare("SELECT value FROM settings WHERE key=?").bind(lockKey).first(),lastMs=new Date(String(lastRow?.value||"")).getTime();
+  assert(!Number.isFinite(lastMs)||Date.now()-lastMs>=120000,"เพิ่งส่ง Push เตือนไป กรุณารอประมาณ 2 นาที");
   await ensureToday(env);
   const ids=(await all(db,`SELECT DISTINCT ii.user_id FROM inspection_inspectors ii
     JOIN inspections i ON i.inspection_id=ii.inspection_id
     WHERE i.inspection_date=? AND i.status='รอตรวจ'`,date)).map(x=>x.user_id);
   const result=await sendPushToUsers(env,ids);
   assert(result.configured,"ยังไม่ได้ตั้งค่า VAPID สำหรับ Web Push");
+  if(result.sent>0)await db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind(lockKey,nowIso()).run();
   return{...result,inspectors:ids.length};
 }
 async function sendPushTest(env,u){
