@@ -783,9 +783,18 @@ async function certificateTemplateModal(){
         '<label>ฟอนต์<select data-cert-field="'+k+'" data-cert-prop="font">'+certificateFontOptions(v.font)+'</select></label>'+
       '</div>';
     }).join("");
+    let legacyOptimizationNote="";
+    if(cfg.hasImage&&!cfg.optimized&&image){
+      try{
+        const blob=await (await fetch(image)).blob(),
+          legacyFile=new File([blob],"certificate-template-current."+(String(blob.type).includes("png")?"png":"jpg"),{type:blob.type||cfg.mime||"image/jpeg"});
+        selectedFile=await certificateOptimizeTemplateFile(legacyFile);
+        legacyOptimizationNote="แม่แบบเดิมพร้อม Optimize → Working Copy "+certificateFileSizeText(selectedFile.size)+" · กดบันทึกเพื่อใช้งานแบบเร็ว";
+      }catch(e){console.warn("legacy certificate optimize",e);}
+    }
     const optimizationStatus=cfg.optimized&&cfg.workingSize
       ? "Working Copy "+certificateFileSizeText(cfg.workingSize)+(cfg.originalSize?" · ต้นฉบับ "+certificateFileSizeText(cfg.originalSize):"")
-      : "";
+      : legacyOptimizationNote;
     box.innerHTML=
       '<div class="warn mb-4"><b>แบบที่แนะนำ:</b> อัปโหลดเฉพาะภาพพื้นหลัง A4 แนวนอน เช่น กรอบ ลวดลาย โลโก้ และลายเซ็น ส่วนข้อความทั้งหมดสามารถเพิ่มและจัดตำแหน่งจากเว็บได้</div>'+
       '<div class="ops-template-layout">'+
@@ -963,9 +972,9 @@ async function certificateTemplateModal(){
     renderCustomControls();renderPreview();
 
     $("cert-template-save").onclick=async()=>{
-      busy(true,selectedFile?"กำลังบันทึกต้นฉบับและ Working Copy…":"กำลังบันทึกแม่แบบ…");
+      busy(true,selectedFile?(selectedOriginalFile?"กำลังบันทึกต้นฉบับและ Working Copy…":"กำลังอัปเกรดแม่แบบเดิมเป็น Working Copy…"):"กำลังบันทึกแม่แบบ…");
       try{
-        if(selectedFile&&selectedOriginalFile&&(!uploadTicket||!originalUploadTicket)){
+        if(selectedFile&&(!uploadTicket||(selectedOriginalFile&&!originalUploadTicket))){
           const jobs=[];
           if(!uploadTicket)jobs.push(certificateUploadTemplateFile(selectedFile,"working").then(t=>{uploadTicket=t;}));
           if(!originalUploadTicket)jobs.push(certificateUploadTemplateFile(selectedOriginalFile,"original").then(t=>{originalUploadTicket=t;}));
