@@ -31,6 +31,7 @@ const admin=read("web/admin.js");
 const editor=read("web/map-editor.js");
 const enh=read("web/map-enhancements.js");
 const inspector=read("web/inspector.js");
+const coverage=read("web/coverage.js");
 const ops=read("web/operations.js");
 const index=read("web/index.html");
 const sw=read("web/sw.js");
@@ -40,6 +41,9 @@ const checks=[
   [api.includes('role(u,["Admin","Supervisor","Inspector","Teacher"])'),"map read roles include all required viewers"],
   [api.includes("async function saveAreaMapReferenceChunk")&&api.includes("async function finalizeAreaMapReferenceUpload")&&api.includes("async function areaMapReference"),"chunked shared map reference API exists"],
   [api.includes("i.status===\"รอตรวจ\"&&!byArea.has(i.area_id)"),"stale pending duty cleanup exists"],
+  [api.includes("function dutyWeekday")&&api.includes("/[^1-7]+/")&&api.includes("saturdayDutyEnabled")&&api.includes("sundayDutyEnabled"),"weekend duties are configurable"],
+  [admin.includes("activeDutyDayOptions")&&admin.includes('[6, "เสาร์", "ส."]')&&admin.includes('[7, "อาทิตย์", "อา."]'),"assignment UI supports enabled weekend tabs"],
+  [coverage.includes('name="saturdayDutyEnabled"')&&coverage.includes('name="sundayDutyEnabled"'),"system settings expose weekend duty switches"],
   [api.includes("function currentInspectionLabels")&&api.includes("async function currentInspectionNameMaps")&&api.includes("AreaName:label.AreaName")&&api.includes("พื้นที่:label.AreaName"),"historical views resolve current master names"],
   [api.includes("async function deleteInspection")&&api.includes('"Inspections",id,recycleLabel("Inspections",snapshot)')&&api.includes('type==="Inspections"'),"recoverable inspection deletion exists"],
   [api.includes('assert(String(row.inspection_date)<thaiDay()')&&api.includes('["ตรวจแล้ว","งดตรวจ"].includes'),"inspection deletion is limited to completed historical records"],
