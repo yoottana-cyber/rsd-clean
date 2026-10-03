@@ -45,6 +45,7 @@ const checks=[
   [enh.includes("map-vertex-handle")&&enh.includes("map-vertex-add")&&enh.includes("map-vertex-delete"),"polygon vertex editing exists"],
   [enh.includes("function rsdEnsureMapReference")&&enh.includes("AREA_MAP_REFERENCE_VERSION_KEY"),"shared reference version cache exists"],
   [enh.includes("chunkSize=60000")&&enh.includes("saveAreaMapReferenceChunk")&&enh.includes("finalizeAreaMapReferenceUpload"),"shared reference upload stays below API payload limit"],
+  [!api.slice(api.indexOf("async function saveAreaMapReferenceChunk"),api.indexOf("async function mapStatus")).match(/\\b(?:LIKE|GLOB)\\b/),"reference chunk queries avoid LIKE/GLOB"],
   [!editor.includes('rpc("saveAreaMapReference"')&&!enh.includes('rpc("saveAreaMapReference"'),"no monolithic reference-image upload remains"],
   [enh.includes("navigator.share")&&enh.includes("ClipboardItem"),"share/copy image exists"],
   [enh.includes("jspdf")&&enh.includes("rsdMapExportPdf"),"PDF export exists"],
