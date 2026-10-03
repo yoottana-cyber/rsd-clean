@@ -395,6 +395,44 @@
     if(!window.jsQR&&!window.Html5Qrcode&&!("BarcodeDetector" in window))throw Error("โหลดตัวอ่าน QR ไม่สำเร็จ");
   };
 
+  async function ensureRouteModules(route){
+    const plans={
+      executive:[["/admin.js",()=>typeof renderExecutiveDashboard==="function"]],
+      reports:[["/admin.js",()=>typeof renderReports==="function"]],
+      daily:[["/admin.js",()=>typeof renderDailyReport==="function"]],
+      review:[["/coverage.js",()=>typeof renderReviewQueue==="function"]],
+      history:[["/coverage.js",()=>typeof renderHistoryHub==="function"]],
+      exports:[["/coverage.js",()=>typeof renderExportCenter==="function"]],
+      periods:[["/operations.js",()=>typeof renderAcademicPeriods==="function"]],
+      certificates:[["/operations.js",()=>typeof renderCertificateCenter==="function"]],
+      control:[
+        ["/coverage.js",()=>typeof dutyOverrideModal==="function"],
+        ["/operations.js",()=>typeof renderDailyControl==="function"],
+        ["/map-editor.js",()=>typeof areaMapReferencePrefs==="function"],
+        ["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]
+      ],
+      tasks:[
+        ["/map-editor.js",()=>typeof areaMapReferencePrefs==="function"],
+        ["/inspector.js",()=>typeof renderTasks==="function"],
+        ["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]
+      ],
+      teacher:[
+        ["/map-editor.js",()=>typeof areaMapReferencePrefs==="function"],
+        ["/inspector.js",()=>typeof renderTeacher==="function"],
+        ["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]
+      ],
+      admin:[
+        ["/admin.js",()=>typeof renderAdmin==="function"],
+        ["/coverage.js",()=>typeof appSettingsModal==="function"],
+        ["/operations.js",()=>typeof importExcelModal==="function"],
+        ["/map-editor.js",()=>typeof areaMapReferencePrefs==="function"],
+        ["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]
+      ]
+    };
+    for(const [src,test] of (plans[route]||[]))await loadScriptOnce(src,test);
+  }
+  window.rsdEnsureRouteModules=ensureRouteModules;
+
   function icons() {
     if (window.lucide) lucide.createIcons();
   }
@@ -845,6 +883,7 @@
     nav();
     $("nav").classList.remove("open");
     try {
+      await ensureRouteModules(p);
       if(["dashboard","executive","reports","history"].includes(p))await window.rsdEnsureChart();
       if (p === "login") renderLogin();
       else if (p === "dashboard") await renderDashboard(seq);
