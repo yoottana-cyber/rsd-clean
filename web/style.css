@@ -2006,3 +2006,10 @@ tbody tr:hover td{background:#fbfefe}
   font:600 13px "Kanit",sans-serif;fill:#475569;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none;
 }
 .inspector-map-decor,.teacher-map-decor{pointer-events:none}
+
+
+/* desktop-map-preserve-v1 */
+@media (min-width:901px){
+  .rsd-map-view-controls{display:none!important}
+  #area-map-fit,#area-map-pan{display:none!important}
+}
