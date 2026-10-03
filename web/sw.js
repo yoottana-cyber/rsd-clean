@@ -61,3 +61,35 @@ self.addEventListener("fetch",event=>{
     })
   );
 });
+
+
+self.addEventListener("push",event=>{
+  const title="RSD Clean";
+  const options={
+    body:"มีรายการใหม่ที่ต้องตรวจสอบใน RSD Clean",
+    icon:"/icon-192.png",
+    badge:"/icon-192.png",
+    tag:"rsd-clean-update",
+    renotify:true,
+    data:{url:"/#home"}
+  };
+  event.waitUntil(self.registration.showNotification(title,options));
+});
+
+self.addEventListener("notificationclick",event=>{
+  event.notification.close();
+  const url=event.notification?.data?.url||"/#home";
+  event.waitUntil((async()=>{
+    const list=await clients.matchAll({type:"window",includeUncontrolled:true});
+    for(const client of list){
+      try{
+        if("focus" in client){
+          await client.focus();
+          if("navigate" in client)await client.navigate(url);
+          return;
+        }
+      }catch(e){}
+    }
+    if(clients.openWindow)return clients.openWindow(url);
+  })());
+});
