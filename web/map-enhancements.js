@@ -116,6 +116,20 @@ areaMapStatusLegend=function(){
   return rows.filter(x=>x[2]>0).map(x=>'<span class="area-map-legend-item"><i style="background:'+x[0]+'"></i>'+x[1]+' <b>'+x[2]+'</b></span>').join("");
 };
 
+async function rsdUploadMapReferenceData(dataUrl,silent=true){
+  const data=String(dataUrl||"");
+  if(!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data))throw Error("รูปภาพอ้างอิงไม่ถูกต้อง");
+  const chunkSize=60000,total=Math.ceil(data.length/chunkSize);
+  if(total<1||total>60)throw Error("ภาพอ้างอิงมีขนาดใหญ่เกินไป");
+  const uploadId=(crypto.randomUUID?crypto.randomUUID():(Date.now()+"-"+Math.random().toString(36).slice(2))).replace(/[^A-Za-z0-9-]/g,"");
+  for(let i=0;i<total;i++){
+    const chunk=data.slice(i*chunkSize,(i+1)*chunkSize);
+    await rpc("saveAreaMapReferenceChunk",{uploadId,index:i,total,chunk},true);
+  }
+  return rpc("finalizeAreaMapReferenceUpload",{uploadId,total},silent);
+}
+window.rsdUploadMapReferenceData=rsdUploadMapReferenceData;
+
 async function rsdEnsureMapReference(meta){
   const serverVersion=String(meta?.ReferenceVersion||"");
   const hasReference=!!meta?.HasReference;
@@ -125,7 +139,7 @@ async function rsdEnsureMapReference(meta){
   if(!hasReference){
     if(S.user?.Role==="Admin"&&localData&&!localVersion){
       try{
-        const saved=await rpc("saveAreaMapReference",{dataUrl:localData},true);
+        const saved=await rsdUploadMapReferenceData(localData,true);
         areaMapLocalSet(AREA_MAP_REFERENCE_VERSION_KEY,String(saved?.ReferenceVersion||""));
         return localData;
       }catch(e){}
