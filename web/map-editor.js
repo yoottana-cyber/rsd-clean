@@ -229,7 +229,8 @@ async function areaMapReferenceFileSelected(file){
   busy(true,"กำลังบันทึกภาพอ้างอิงกลาง…");
   try{
     const dataUrl=await areaMapCompressReference(file);
-    const saved=await rpc("saveAreaMapReference",{dataUrl});
+    if(typeof window.rsdUploadMapReferenceData!=="function")throw Error("ตัวอัปโหลดภาพยังไม่พร้อม กรุณารีเฟรชหน้าเว็บ");
+    const saved=await window.rsdUploadMapReferenceData(dataUrl,true);
     areaMapState.referenceDataUrl=dataUrl;
     areaMapState.referenceVisible=true;
     areaMapLocalSet(AREA_MAP_REFERENCE_KEY,dataUrl);
