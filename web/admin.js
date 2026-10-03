@@ -1524,7 +1524,7 @@ const adminTables = {
     const status=execMapStatus(item),inspectors=(item?.Inspectors||[]).map(v=>v.Name).filter(Boolean).join(", ")||"—";
     box.innerHTML='<div class="exec-map-detail-head"><span style="background:'+status.color+'"></span><div><b>'+esc(shape.AreaName||item?.AreaName||"พื้นที่")+'</b><small>'+esc(shape.ClassName||item?.ClassName||"—")+'</small></div></div>'+
       '<div class="exec-map-detail-status"><b>'+esc(status.label)+'</b><span>'+esc(executiveMapPack?.daily?.date||"")+'</span></div>'+
-      (item?'<div class="exec-map-detail-grid"><div><span>ผู้ตรวจ</span><b>'+esc(inspectors)+'</b></div><div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div><div><span>การรับรอง</span><b>'+esc(item.ApprovalStatus||"—")+'</b></div>'+(item.Notes?'<div class="wide"><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+'</div>':'<div class="exec-map-no-duty">ไม่มีงานตรวจในวันที่อ้างอิง</div>');
+      (item?.InspectionID?'<div class="exec-map-detail-grid"><div><span>ผู้ตรวจ</span><b>'+esc(inspectors)+'</b></div><div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div><div><span>การรับรอง</span><b>'+esc(item.ApprovalStatus||"—")+'</b></div>'+(item.Notes?'<div class="wide"><span>หมายเหตุ</span><b>'+esc(item.Notes)+'</b></div>':"")+'</div>':'<div class="exec-map-no-duty">ไม่มีงานตรวจในวันที่อ้างอิง</div>');
     icons();
   }
   function wireExecMap(date){
