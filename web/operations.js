@@ -53,9 +53,11 @@ async function loadDailyControl(seq=S.seq){
   opControlData=d;
   const s=d.summary||{},cfg=d.settings||S.config||{},period=d.period?.Label||"ยังไม่ได้กำหนดภาคเรียน";
   const workItems=(d.items||[]).filter(x=>x.InspectionID);
+  const heroTitle=d.isHoliday?"วันหยุด":s.pending?"ยังมีงานรอตรวจ "+s.pending+" พื้นที่":"ดำเนินการครบแล้ว";
+  const heroDesc=d.isHoliday?(d.holidayReason||"ไม่มีการตรวจในวันดังกล่าว"):period+" · เวลาตรวจ "+(cfg.inspectionStart||"—")+"–"+(cfg.inspectionEnd||"—")+" น.";
   $("control-content").innerHTML=
     '<section class="ops-control-hero">'+
-      '<div><span>สถานะประจำวันที่ '+esc(opDateText(d.date))+'</span><h2>'+(s.pending?"ยังมีงานรอตรวจ "+s.pending+" พื้นที่":"ดำเนินการครบแล้ว")+'</h2><p>'+esc(period)+' · เวลาตรวจ '+esc(cfg.inspectionStart||"—")+'–'+esc(cfg.inspectionEnd||"—")+' น.</p></div>'+
+      '<div><span>สถานะประจำวันที่ '+esc(opDateText(d.date))+'</span><h2>'+esc(heroTitle)+'</h2><p>'+esc(heroDesc)+'</p></div>'+
       '<div class="ops-control-progress"><b>'+Number(s.resolved??(s.done+s.skipped))+' / '+s.total+'</b><span>ดำเนินการแล้ว</span></div>'+
     '</section>'+
     '<div class="exec-kpi-grid">'+
@@ -240,7 +242,7 @@ function opControlMapRenderDetail(){
   box.innerHTML=
     '<div class="ops-map-detail-head"><span style="background:'+status.color+'"></span><div><b>'+esc(shape?.AreaName||area?.AreaName||item?.AreaName||"พื้นที่")+'</b><small>'+esc(item?.ClassName||shape?.ClassName||opControlMapClass(area))+'</small></div></div>'+
     '<div class="ops-map-detail-status"><b>'+esc(status.label)+'</b><span>'+esc(opDateText(opControlData?.date||thaiDay()))+'</span></div>'+
-    (item?'<div class="ops-map-detail-grid">'+
+    (item?.InspectionID?'<div class="ops-map-detail-grid">'+
       '<div><span>ผู้ตรวจ</span><b>'+esc(inspectors)+'</b></div>'+
       '<div><span>คะแนน</span><b>'+(item.Status==="ตรวจแล้ว"?esc(String(item.Score||"—"))+" · "+esc(item.Rating||status.label):"—")+'</b></div>'+
       '<div><span>การรับรอง</span><b>'+esc(item.ApprovalStatus||"—")+'</b></div>'+
