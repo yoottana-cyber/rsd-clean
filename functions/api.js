@@ -1259,7 +1259,8 @@ async function dailyControl(env,u,p){
     return{
       InspectionID:i.inspection_id,Date:i.inspection_date,AreaID:i.area_id,AreaName:m.areaName||"—",ClassName:m.className||"—",
       Status:i.status,Score:Number(i.score||0),Rating:i.rating||"",Notes:i.note||"",SkipReason:m.skipReason||"",
-      ApprovalStatus:m.approvalStatus||"",CompletedBy:m.completedByName||i.completed_by_name||"",CompletedAt:m.completedAt||i.completed_at||"",
+      ApprovalStatus:m.approvalStatus||"",CompletedBy:m.completedByName||i.completed_by_name||"",CompletedAt:m.completedAt||i.completed_at||"",Version:Number(i.version||0),
+      AdminEditedBy:String(m.adminEditedByName||""),AdminEditedAt:String(m.adminEditedAt||""),AdminEditReason:String(m.adminEditReason||""),
       Inspectors:team.map(x=>({UserID:x.user_id,Name:x.user_name})),
       HasSubstitute:ovs.length>0,
       Substitutes:ovs.map(x=>({ReplaceName:x.replace_name||"",SubstituteName:x.substitute_name||"",Reason:x.reason||""})),
