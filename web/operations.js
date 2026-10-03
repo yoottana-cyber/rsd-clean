@@ -300,12 +300,12 @@ function customCertificateHtml(row,d){
   const t=d.template||{},fields=t.fields||{},values=certificateVariableValues(row,d),image=d.templateImage||opCertificateTemplateImage;
   const overlays=Object.entries(values).map(([key,value])=>{
     const f=fields[key];if(!f||f.visible===false||!value)return "";
-    return '<div class="ops-cert-variable" style="left:'+Number(f.x||50)+'%;top:'+Number(f.y||50)+'%;font-size:'+Number(f.size||20)+'px;color:'+esc(f.color||"#17334b")+';font-weight:'+Number(f.weight||400)+'">'+esc(value)+'</div>';
+    return '<div class="ops-cert-variable" style="left:'+Number(f.x||50)+'%;top:'+Number(f.y||50)+'%;font-size:'+Number(f.size||20)+'px;color:'+esc(f.color||"#17334b")+';font-weight:'+Number(f.weight||400)+';font-family:'+certificateFontCss(f.font)+'">'+esc(value)+'</div>';
   }).join("");
   const custom=(t.textBlocks||[]).map(b=>{
     if(!b||b.visible===false||!String(b.text||"").trim())return "";
     const value=certificateResolveText(b.text,values);
-    return '<div class="ops-cert-variable ops-cert-static" style="left:'+Number(b.x||50)+'%;top:'+Number(b.y||50)+'%;font-size:'+Number(b.size||20)+'px;color:'+esc(b.color||"#17334b")+';font-weight:'+Number(b.weight||400)+'">'+esc(value)+'</div>';
+    return '<div class="ops-cert-variable ops-cert-static" style="left:'+Number(b.x||50)+'%;top:'+Number(b.y||50)+'%;font-size:'+Number(b.size||20)+'px;color:'+esc(b.color||"#17334b")+';font-weight:'+Number(b.weight||400)+';font-family:'+certificateFontCss(b.font)+'">'+esc(value)+'</div>';
   }).join("");
   return '<section class="ops-certificate-sheet ops-certificate-custom">'+
     '<img class="ops-cert-template-bg" src="'+esc(image)+'" alt="">'+overlays+custom+
@@ -389,11 +389,11 @@ function certTemplateDefaults(){
   return{
     enabled:true,
     fields:{
-      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700},
-      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700},
-      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500},
-      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400},
-      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400}
+      className:{visible:true,x:50,y:49,size:42,color:"#17334b",weight:700,font:"Sarabun"},
+      medal:{visible:true,x:50,y:63,size:34,color:"#9a7620",weight:700,font:"Sarabun"},
+      month:{visible:true,x:50,y:75,size:20,color:"#526b78",weight:500,font:"Sarabun"},
+      period:{visible:true,x:50,y:82,size:18,color:"#607380",weight:400,font:"Sarabun"},
+      issueDate:{visible:false,x:50,y:89,size:16,color:"#607380",weight:400,font:"Sarabun"}
     },
     textBlocks:[]
   };
@@ -401,8 +401,17 @@ function certTemplateDefaults(){
 function certTemplateSampleValues(){
   return{className:"มัธยมศึกษาปีที่ 3/3",medal:"เหรียญทอง",month:"ตุลาคม 2569",period:"ภาคเรียนที่ 2 ปีการศึกษา 2569",issueDate:"31 ตุลาคม 2569"};
 }
-function certCustomBlock(textValue="",y=50,size=22,color="#17334b",weight=400){
-  return{id:"custom-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),text:textValue,visible:true,x:50,y,size,color,weight};
+function certCustomBlock(textValue="",y=50,size=22,color="#17334b",weight=400,font="Sarabun"){
+  return{id:"custom-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),text:textValue,visible:true,x:50,y,size,color,weight,font};
+}
+function certificateFontCss(font){
+  return String(font)==="Kanit" ? '"Kanit",sans-serif' : '"TH Sarabun New","Sarabun",sans-serif';
+}
+function certificateFontOptions(current){
+  return [
+    ["Sarabun","TH Sarabun New / Sarabun"],
+    ["Kanit","Kanit"]
+  ].map(([v,label])=>'<option value="'+v+'" '+(String(current||"Sarabun")===v?"selected":"")+'>'+label+'</option>').join("");
 }
 async function certificateTemplateModal(){
   if(S.user?.Role!=="Admin")return;
@@ -430,6 +439,7 @@ async function certificateTemplateModal(){
         '<label>ขนาด<input type="number" min="10" max="96" value="'+v.size+'" data-cert-field="'+k+'" data-cert-prop="size"></label>'+
         '<label>สี<input type="color" value="'+esc(v.color)+'" data-cert-field="'+k+'" data-cert-prop="color"></label>'+
         '<label>น้ำหนัก<select data-cert-field="'+k+'" data-cert-prop="weight">'+[400,500,600,700].map(w=>'<option value="'+w+'" '+(Number(v.weight)===w?"selected":"")+'>'+w+'</option>').join("")+'</select></label>'+
+        '<label>ฟอนต์<select data-cert-field="'+k+'" data-cert-prop="font">'+certificateFontOptions(v.font)+'</select></label>'+
       '</div>';
     }).join("");
     box.innerHTML=
@@ -491,6 +501,7 @@ async function certificateTemplateModal(){
             '<label>ขนาด<input type="number" min="10" max="96" value="'+v.size+'" data-custom-id="'+esc(v.id)+'" data-custom-prop="size"></label>'+
             '<label>สี<input type="color" value="'+esc(v.color)+'" data-custom-id="'+esc(v.id)+'" data-custom-prop="color"></label>'+
             '<label>น้ำหนัก<select data-custom-id="'+esc(v.id)+'" data-custom-prop="weight">'+[400,500,600,700].map(w=>'<option value="'+w+'" '+(Number(v.weight)===w?"selected":"")+'>'+w+'</option>').join("")+'</select></label>'+
+            '<label>ฟอนต์<select data-custom-id="'+esc(v.id)+'" data-custom-prop="font">'+certificateFontOptions(v.font)+'</select></label>'+
           '</div>'+
         '</div>'
       ).join(""):'<div class="empty">ยังไม่มีข้อความกำหนดเอง</div>';
@@ -498,7 +509,7 @@ async function certificateTemplateModal(){
         el.oninput=()=>{
           const v=findCustom(el.dataset.customId);if(!v)return;
           const p=el.dataset.customProp;
-          v[p]=p==="visible"?el.checked:(p==="text"||p==="color"?el.value:Number(el.value));
+          v[p]=p==="visible"?el.checked:(p==="text"||p==="color"||p==="font"?el.value:Number(el.value));
           renderPreview();
         };
       });
@@ -530,11 +541,11 @@ async function certificateTemplateModal(){
       const overlay=$("cert-template-overlays");if(!overlay)return;
       const autoHtml=Object.entries(sample).map(([k,value])=>{
         const v=state.fields[k];if(!v?.visible)return "";
-        return '<div class="ops-template-drag" data-kind="field" data-id="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(value)+'</div>';
+        return '<div class="ops-template-drag" data-kind="field" data-id="'+k+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+';font-family:'+certificateFontCss(v.font)+'">'+esc(value)+'</div>';
       }).join("");
       const customHtml=state.textBlocks.map(v=>{
         if(v.visible===false||!String(v.text||"").trim())return "";
-        return '<div class="ops-template-drag ops-template-drag-custom" data-kind="custom" data-id="'+esc(v.id)+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+'">'+esc(certificateResolveText(v.text,sample))+'</div>';
+        return '<div class="ops-template-drag ops-template-drag-custom" data-kind="custom" data-id="'+esc(v.id)+'" style="left:'+v.x+'%;top:'+v.y+'%;font-size:'+(Number(v.size||20)/11.22)+'cqw;color:'+esc(v.color)+';font-weight:'+v.weight+';font-family:'+certificateFontCss(v.font)+'">'+esc(certificateResolveText(v.text,sample))+'</div>';
       }).join("");
       overlay.innerHTML=autoHtml+customHtml;
       wireDrag();
@@ -543,7 +554,7 @@ async function certificateTemplateModal(){
     box.querySelectorAll("[data-cert-field]").forEach(el=>{
       el.oninput=()=>{
         const k=el.dataset.certField,p=el.dataset.certProp;
-        state.fields[k][p]=p==="visible"?el.checked:p==="color"?el.value:Number(el.value);
+        state.fields[k][p]=p==="visible"?el.checked:(p==="color"||p==="font"?el.value:Number(el.value));
         renderPreview();
       };
     });
@@ -557,12 +568,12 @@ async function certificateTemplateModal(){
         return Swal.fire({icon:"info",title:"มีข้อความกำหนดเองอยู่แล้ว",text:"ลบข้อความเดิมก่อน หากต้องการใช้ชุดข้อความตัวอย่าง"});
       }
       state.textBlocks=[
-        certCustomBlock("โรงเรียนรัษฎา อำเภอรัษฎา จังหวัดตรัง",28,24,"#4b84b8",600),
-        certCustomBlock("ขอมอบเกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า",37,20,"#111827",400),
-        certCustomBlock("นักเรียนระดับชั้น {className}",48,32,"#4b84b8",700),
-        certCustomBlock("ได้ดูแลเขตพื้นที่ของห้องเรียนอยู่ในระดับ {medal}",58,21,"#111827",400),
-        certCustomBlock("ประจำเดือน {month} · {period}",65,18,"#111827",400),
-        certCustomBlock("ให้ไว้ ณ วันที่ {issueDate}",72,16,"#111827",400)
+        certCustomBlock("โรงเรียนรัษฎา อำเภอรัษฎา จังหวัดตรัง",31,34,"#4c86b7",700,"Sarabun"),
+        certCustomBlock("ขอมอบเกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า",39,24,"#111827",500,"Sarabun"),
+        certCustomBlock("นักเรียนระดับชั้น {className}",53,38,"#4c86b7",700,"Sarabun"),
+        certCustomBlock("ได้ดูแลเขตพื้นที่ของห้องเรียนอยู่ในระดับ {medal}",65,25,"#111827",500,"Sarabun"),
+        certCustomBlock("ประจำเดือน {month}",72,23,"#111827",500,"Sarabun"),
+        certCustomBlock("ให้ไว้ ณ วันที่ {issueDate}",78,20,"#111827",500,"Sarabun")
       ];
       Object.keys(state.fields).forEach(k=>state.fields[k].visible=false);
       box.querySelectorAll("[data-cert-field]").forEach(el=>{if(el.dataset.certProp==="visible")el.checked=false;});
