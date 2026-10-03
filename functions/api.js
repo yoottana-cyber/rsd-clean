@@ -776,6 +776,8 @@ async function systemStatus(env,u){
   await ensureRecycleTable(db);
   await ensureSystemEventsTable(db);
   await ensureDutyOverridesTable(db);
+  await ensureAcademicPeriodsTable(db);
+  await ensurePushSubscriptionsTable(db);
 
   const countSql = [
     ["users","SELECT COUNT(*) n FROM users"],
