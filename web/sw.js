@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-50";
+const CACHE="rsd-clean-v2-shell-51";
 const SHELL=[
   "/",
   "/index.html",
@@ -27,7 +27,7 @@ self.addEventListener("message",event=>{
 self.addEventListener("activate",event=>{
   event.waitUntil(
     caches.keys()
-      .then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))
+      .then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&k!=="rsd-certificate-template-v1").map(k=>caches.delete(k))))
       .then(()=>self.clients.claim())
   );
 });
