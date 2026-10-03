@@ -364,6 +364,37 @@
       customClass: { popup: "center-notification" },
     });
   }
+  const scriptLoads=new Map();
+  function loadScriptOnce(src,test){
+    if(test&&test())return Promise.resolve();
+    if(scriptLoads.has(src))return scriptLoads.get(src);
+    const p=new Promise((resolve,reject)=>{
+      const old=[...document.scripts].find(x=>x.src===src);
+      if(old){
+        if(test&&test())return resolve();
+        old.addEventListener("load",resolve,{once:true});
+        old.addEventListener("error",()=>reject(Error("โหลดไลบรารีไม่สำเร็จ")),{once:true});
+        return;
+      }
+      const sc=document.createElement("script");
+      sc.src=src;sc.async=true;sc.defer=true;
+      sc.onload=resolve;
+      sc.onerror=()=>reject(Error("โหลดไลบรารีไม่สำเร็จ"));
+      document.head.appendChild(sc);
+    }).catch(e=>{scriptLoads.delete(src);throw e;});
+    scriptLoads.set(src,p);return p;
+  }
+  window.rsdLoadScript=loadScriptOnce;
+  window.rsdEnsureChart=()=>loadScriptOnce("https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js",()=>!!window.Chart);
+  window.rsdEnsureQrCode=()=>loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js",()=>!!window.QRCode);
+  window.rsdEnsureQrScanner=async()=>{
+    const jobs=[];
+    if(!window.jsQR)jobs.push(loadScriptOnce("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js",()=>!!window.jsQR).catch(()=>null));
+    if(!window.Html5Qrcode)jobs.push(loadScriptOnce("https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js",()=>!!window.Html5Qrcode).catch(()=>null));
+    await Promise.all(jobs);
+    if(!window.jsQR&&!window.Html5Qrcode&&!("BarcodeDetector" in window))throw Error("โหลดตัวอ่าน QR ไม่สำเร็จ");
+  };
+
   function icons() {
     if (window.lucide) lucide.createIcons();
   }
@@ -812,6 +843,7 @@
     nav();
     $("nav").classList.remove("open");
     try {
+      if(["dashboard","executive","reports","history"].includes(p))await window.rsdEnsureChart();
       if (p === "login") renderLogin();
       else if (p === "dashboard") await renderDashboard(seq);
       else if (p === "executive") await renderExecutiveDashboard(seq);
