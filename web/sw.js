@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-53";
+const CACHE="rsd-clean-v2-shell-54";
 const RUNTIME="rsd-clean-v2-runtime-1";
 const CERT_CACHE="rsd-certificate-template-v1";
 const SHELL=[
@@ -12,7 +12,6 @@ const SHELL=[
   "/icon-512.png"
 ];
 const TRUSTED_RUNTIME_ORIGINS=new Set([
-  "https://cdn.tailwindcss.com",
   "https://cdn.jsdelivr.net",
   "https://unpkg.com",
   "https://cdnjs.cloudflare.com",
