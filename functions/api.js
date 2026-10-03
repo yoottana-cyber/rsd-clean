@@ -300,6 +300,7 @@ async function dispatch(env, action, p, token, request) {
     qrAdmin: async () => qrAdmin(env,u,p),
     master: async () => master(env,u),
     areaMapLayout: async () => areaMapLayout(env,u),
+    mapStatus: async () => mapStatus(env,u,p),
     saveAreaMapLayout: async () => saveAreaMapLayout(env,u,p),
     report: async () => report(env,u,validateDate(p.start),validateDate(p.end)),
     dailyReport: async () => dailyReport(env,u,validateDate(p.date || thaiDay())),
@@ -1825,11 +1826,68 @@ async function ensureAreaMapTable(db){
 function areaMapShapeRow(r){
   return {ShapeID:String(r.shape_id),AreaID:String(r.area_id),AreaName:String(r.area_name||""),ClassName:String(r.class_name||""),ResponsibleClassroomID:String(r.responsible_classroom_id||""),ShapeType:String(r.shape_type||"rect"),X:Number(r.x||0),Y:Number(r.y||0),Width:Number(r.width||0),Height:Number(r.height||0),Points:parseJson(r.points_json,[]),FillColor:String(r.fill_color||"#38bdf8"),Locked:Number(r.locked||0)===1,SortOrder:Number(r.sort_order||0)};
 }
+const MAP_STATUS_META={
+  holiday:{label:"วันหยุด",color:"#cbd5e1"},
+  no_assignment:{label:"ไม่มีเวร",color:"#94a3b8"},
+  no_inspector:{label:"ยังไม่มีผู้ตรวจ",color:"#a78bfa"},
+  pending:{label:"รอตรวจ",color:"#facc15"},
+  excellent:{label:"ยอดเยี่ยม",color:"#22c55e"},
+  medium:{label:"ปานกลาง",color:"#f59e0b"},
+  improve:{label:"ปรับปรุง",color:"#ef4444"},
+  skipped:{label:"งดตรวจ",color:"#64748b"},
+  done:{label:"ตรวจแล้ว",color:"#14b8a6"},
+  other_area:{label:"พื้นที่อื่น",color:"#cbd5e1"}
+};
+function mapStatusMeta(key,label=""){const x=MAP_STATUS_META[key]||MAP_STATUS_META.done;return{key,label:label||x.label,color:x.color};}
+function mapStatusFromInspection(i,teamCount=0){
+  if(!i)return mapStatusMeta("no_assignment");
+  if(!teamCount)return mapStatusMeta("no_inspector");
+  if(String(i.status)==="งดตรวจ")return mapStatusMeta("skipped");
+  if(String(i.status)==="รอตรวจ")return mapStatusMeta("pending");
+  if(String(i.status)==="ตรวจแล้ว"){
+    const score=Number(i.score||0);
+    if(score===3)return mapStatusMeta("excellent",String(i.rating||"ยอดเยี่ยม"));
+    if(score===2)return mapStatusMeta("medium",String(i.rating||"ปานกลาง"));
+    if(score===1)return mapStatusMeta("improve",String(i.rating||"ปรับปรุง"));
+    return mapStatusMeta("done",String(i.rating||"ตรวจแล้ว"));
+  }
+  return mapStatusMeta("done",String(i.status||"ตรวจแล้ว"));
+}
 async function areaMapLayout(env,u){
   role(u,["Admin","Supervisor","Inspector","Teacher"]);
   await ensureAreaMapTable(env.DB);
   return {canvas:{width:1600,height:1000},shapes:(await all(env.DB,"SELECT s.*,a.area_name,a.responsible_classroom_id,c.class_name FROM area_map_shapes s LEFT JOIN areas a ON a.area_id=s.area_id LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY s.sort_order,s.shape_id")).map(areaMapShapeRow)};
+}async function mapStatus(env,u,p){
+  role(u,["Admin","Supervisor","Inspector","Teacher"]);
+  const db=env.DB,date=validateDate(p.date||thaiDay()),today=thaiDay();
+  if(date===today)await ensureToday(env);
+  const [layout,areas,rows,teams,calendarSchoolDay]=await Promise.all([
+    areaMapLayout(env,u),
+    all(db,"SELECT a.area_id,a.area_name,a.responsible_classroom_id,c.class_name FROM areas a LEFT JOIN classrooms c ON c.classroom_id=a.responsible_classroom_id ORDER BY a.area_name"),
+    all(db,"SELECT * FROM inspections WHERE inspection_date=? ORDER BY inspection_id",date),
+    all(db,"SELECT ii.inspection_id,ii.user_id,ii.user_name FROM inspection_inspectors ii JOIN inspections i ON i.inspection_id=ii.inspection_id WHERE i.inspection_date=? ORDER BY ii.inspection_id,ii.user_name",date),
+    schoolDay(env,date)
+  ]);
+  const teamMap=new Map();
+  teams.forEach(x=>{const id=String(x.inspection_id);if(!teamMap.has(id))teamMap.set(id,[]);teamMap.get(id).push(x);});
+  const rowMap=new Map(rows.map(x=>[String(x.area_id),x]));
+  const resolved=rows.filter(x=>x.status==="ตรวจแล้ว"||x.status==="งดตรวจ").length;
+  const noActualInspectionHoliday=date<today&&resolved===0;
+  const isHoliday=!calendarSchoolDay||noActualInspectionHoliday;
+  const holidayReason=!calendarSchoolDay?"วันหยุดตามปฏิทิน":noActualInspectionHoliday?"ไม่มีการตรวจในวันดังกล่าว":"";
+  const items=areas.map(a=>{
+    const i=rowMap.get(String(a.area_id)),team=i?(teamMap.get(String(i.inspection_id))||[]):[];
+    const inScope=u.role==="Teacher"?String(a.responsible_classroom_id)===String(u.linked_classroom_id||""):u.role==="Inspector"?team.some(x=>String(x.user_id)===String(u.user_id)):true;
+    const st=!inScope?mapStatusMeta("other_area"):isHoliday?mapStatusMeta("holiday"):mapStatusFromInspection(i,team.length);
+    const m=i?metaOf(i):{};
+    return{AreaID:String(a.area_id),AreaName:String(a.area_name||"—"),ResponsibleClassroomID:String(a.responsible_classroom_id||""),ClassName:String(a.class_name||"—"),InScope:inScope,StatusKey:st.key,StatusLabel:st.label,StatusColor:st.color,InspectionID:String(i?.inspection_id||""),Status:String(i?.status||""),Score:Number(i?.score||0),Rating:String(i?.rating||""),Notes:String(i?.note||""),SkipReason:String(m.skipReason||""),ApprovalStatus:String(m.approvalStatus||""),CompletedBy:String(m.completedByName||i?.completed_by_name||""),CompletedAt:String(m.completedAt||i?.completed_at||""),Inspectors:team.map(x=>({UserID:String(x.user_id),Name:String(x.user_name||"")}))};
+  });
+  const visible=items.filter(x=>x.InScope),summary={total:visible.length};
+  ["holiday","no_assignment","no_inspector","pending","excellent","medium","improve","skipped","done"].forEach(k=>summary[k]=visible.filter(x=>x.StatusKey===k).length);
+  summary.completed=summary.excellent+summary.medium+summary.improve+summary.done;
+  return{date,isHoliday,holidayReason,canvas:layout.canvas,shapes:layout.shapes,items,summary,updatedAt:nowIso()};
 }
+
 async function saveAreaMapLayout(env,u,p){
   role(u,["Admin"]);
   const db=env.DB; await ensureAreaMapTable(db);
