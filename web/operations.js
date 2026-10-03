@@ -293,14 +293,22 @@ function certificateVariableValues(row,d){
     issueDate:certIssueDateText(d)
   };
 }
+function certificateResolveText(text,values){
+  return String(text||"").replace(/\{(className|medal|month|period|issueDate)\}/g,(m,k)=>String(values?.[k]||""));
+}
 function customCertificateHtml(row,d){
   const t=d.template||{},fields=t.fields||{},values=certificateVariableValues(row,d),image=d.templateImage||opCertificateTemplateImage;
   const overlays=Object.entries(values).map(([key,value])=>{
     const f=fields[key];if(!f||f.visible===false||!value)return "";
     return '<div class="ops-cert-variable" style="left:'+Number(f.x||50)+'%;top:'+Number(f.y||50)+'%;font-size:'+Number(f.size||20)+'px;color:'+esc(f.color||"#17334b")+';font-weight:'+Number(f.weight||400)+'">'+esc(value)+'</div>';
   }).join("");
+  const custom=(t.textBlocks||[]).map(b=>{
+    if(!b||b.visible===false||!String(b.text||"").trim())return "";
+    const value=certificateResolveText(b.text,values);
+    return '<div class="ops-cert-variable ops-cert-static" style="left:'+Number(b.x||50)+'%;top:'+Number(b.y||50)+'%;font-size:'+Number(b.size||20)+'px;color:'+esc(b.color||"#17334b")+';font-weight:'+Number(b.weight||400)+'">'+esc(value)+'</div>';
+  }).join("");
   return '<section class="ops-certificate-sheet ops-certificate-custom">'+
-    '<img class="ops-cert-template-bg" src="'+esc(image)+'" alt="">'+overlays+
+    '<img class="ops-cert-template-bg" src="'+esc(image)+'" alt="">'+overlays+custom+
   '</section>';
 }
 function certificateHtml(row,d){
