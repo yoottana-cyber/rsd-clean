@@ -640,13 +640,17 @@ const adminTables = {
       'table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px}thead{display:table-header-group}th,td{border:1px solid #aebfc5;padding:5px 5px;vertical-align:top;overflow-wrap:anywhere}th{background:#eaf6f8;text-align:center;font-size:9px}tr{break-inside:avoid;page-break-inside:avoid}.center{text-align:center}.no{width:5%}.area{width:19%}.room{width:11%}.day{width:13%}'+
       'footer{margin-top:8px;display:flex;justify-content:space-between;gap:10px;font-size:9px;color:#7b8d94}'+
       '@media print{.toolbar{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
-      '</style></head><body><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button><button onclick="window.close()">ปิด</button></div>'+
+      '</style></head><body><div class="toolbar"><button id="assignment-print-page" type="button">พิมพ์ / บันทึกเป็น PDF</button><button id="assignment-close-page" type="button">ปิด</button></div>'+
       '<header><h1>ตารางเวรตรวจความสะอาดและเขตพื้นที่ประจำสัปดาห์</h1><h2>โรงเรียนรัษฎา</h2><div class="meta">RSD Clean · '+esc(dayNames.join(" · "))+' · พื้นที่ทั้งหมด '+rows.length+' พื้นที่</div></header>'+
       '<table><thead><tr><th class="no">ลำดับ</th><th class="area">พื้นที่</th><th class="room">ห้องรับผิดชอบ</th>'+dayNames.map(n=>'<th class="day">'+esc(n)+'</th>').join("")+'</tr></thead><tbody>'+body+'</tbody></table>'+
       '<footer><span>ระบบ RSD Clean · โรงเรียนรัษฎา</span><span>จัดทำเมื่อ '+esc(generated)+' น.</span></footer></body></html>';
     win.document.open();
     win.document.write(html);
     win.document.close();
+    const printBtn=win.document.getElementById("assignment-print-page"),
+      closeBtn=win.document.getElementById("assignment-close-page");
+    if(printBtn)printBtn.addEventListener("click",()=>{win.focus();win.print();});
+    if(closeBtn)closeBtn.addEventListener("click",()=>win.close());
     setTimeout(()=>{try{win.focus();win.print();}catch(e){}},450);
   }
 
