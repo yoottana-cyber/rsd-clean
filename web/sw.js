@@ -1,4 +1,4 @@
-const CACHE="rsd-clean-v2-shell-55";
+const CACHE="rsd-clean-v2-shell-56";
 const RUNTIME="rsd-clean-v2-runtime-1";
 const CERT_CACHE="rsd-certificate-template-v1";
 const SHELL=[
@@ -15,8 +15,6 @@ const TRUSTED_RUNTIME_ORIGINS=new Set([
   "https://cdn.jsdelivr.net",
   "https://unpkg.com",
   "https://cdnjs.cloudflare.com",
-  "https://fonts.googleapis.com",
-  "https://fonts.gstatic.com"
 ]);
 
 self.addEventListener("install",event=>{
