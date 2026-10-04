@@ -224,7 +224,7 @@ const adminTables = {
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fontsource-kanit@4.0.0/thai.css">' +
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fontsource-kanit@4.0.0/latin.css"><style>' +
         '@page{size:A4;margin:12mm}*{box-sizing:border-box}html,body,button{font-family:"Kanit",Tahoma,sans-serif!important}body{color:#17324a;margin:0}.toolbar{position:sticky;top:0;background:white;padding:8px 0 14px;border-bottom:1px solid #ddd;margin-bottom:12px}.toolbar button{font:inherit;padding:9px 16px;border:0;border-radius:9px;background:#0891b2;color:white;cursor:pointer}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10mm}.card{border:1.5px solid #cde8ec;border-radius:16px;padding:10mm;text-align:center;break-inside:avoid;min-height:122mm;display:flex;flex-direction:column;align-items:center;justify-content:center}.brand{font-weight:700;color:#087e96;font-size:18px}.area{font-weight:700;font-size:22px;margin:10px 0 3px}.class{font-size:15px;color:#567}.hint{font-size:13px;color:#456;margin-top:9px}.qr{width:68mm;height:68mm;object-fit:contain}.code{font-size:10px;color:#9aa;margin-top:7px}@media print{.toolbar{display:none}.grid{gap:8mm}.card{min-height:125mm}}@media(max-width:700px){.grid{grid-template-columns:1fr}}' +
-        '</style></head><body><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button></div><div class="grid">' +
+        '</style></head><body><div class="toolbar"><button id="print-qr-page" type="button">พิมพ์ / บันทึกเป็น PDF</button></div><div class="grid">' +
         cards
           .map(
             (q) =>
@@ -243,6 +243,12 @@ const adminTables = {
       win.document.open();
       win.document.write(html);
       win.document.close();
+      const printButton=win.document.getElementById("print-qr-page");
+      if(printButton)printButton.addEventListener("click",async()=>{
+        try{if(win.document.fonts?.ready)await win.document.fonts.ready;}catch(e){}
+        win.focus();
+        win.print();
+      });
     } catch (e) {
       win.close();
       error(e);
@@ -634,13 +640,17 @@ const adminTables = {
       'table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px}thead{display:table-header-group}th,td{border:1px solid #aebfc5;padding:5px 5px;vertical-align:top;overflow-wrap:anywhere}th{background:#eaf6f8;text-align:center;font-size:9px}tr{break-inside:avoid;page-break-inside:avoid}.center{text-align:center}.no{width:5%}.area{width:19%}.room{width:11%}.day{width:13%}'+
       'footer{margin-top:8px;display:flex;justify-content:space-between;gap:10px;font-size:9px;color:#7b8d94}'+
       '@media print{.toolbar{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
-      '</style></head><body><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button><button onclick="window.close()">ปิด</button></div>'+
+      '</style></head><body><div class="toolbar"><button id="assignment-print-page" type="button">พิมพ์ / บันทึกเป็น PDF</button><button id="assignment-close-page" type="button">ปิด</button></div>'+
       '<header><h1>ตารางเวรตรวจความสะอาดและเขตพื้นที่ประจำสัปดาห์</h1><h2>โรงเรียนรัษฎา</h2><div class="meta">RSD Clean · '+esc(dayNames.join(" · "))+' · พื้นที่ทั้งหมด '+rows.length+' พื้นที่</div></header>'+
       '<table><thead><tr><th class="no">ลำดับ</th><th class="area">พื้นที่</th><th class="room">ห้องรับผิดชอบ</th>'+dayNames.map(n=>'<th class="day">'+esc(n)+'</th>').join("")+'</tr></thead><tbody>'+body+'</tbody></table>'+
       '<footer><span>ระบบ RSD Clean · โรงเรียนรัษฎา</span><span>จัดทำเมื่อ '+esc(generated)+' น.</span></footer></body></html>';
     win.document.open();
     win.document.write(html);
     win.document.close();
+    const printBtn=win.document.getElementById("assignment-print-page"),
+      closeBtn=win.document.getElementById("assignment-close-page");
+    if(printBtn)printBtn.addEventListener("click",()=>{win.focus();win.print();});
+    if(closeBtn)closeBtn.addEventListener("click",()=>win.close());
     setTimeout(()=>{try{win.focus();win.print();}catch(e){}},450);
   }
 
