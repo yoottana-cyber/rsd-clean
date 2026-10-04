@@ -85,6 +85,8 @@ const checks=[
   [core.includes("async function ensureRouteModules(route)")&&core.includes('["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]'),"feature modules are lazy-loaded by route"],
   [!index.includes("cdn.tailwindcss.com")&&read("web/style.css").includes("Minimal utility layer"),"production UI uses local utility CSS instead of Tailwind browser CDN"],
   [!index.includes("fonts.googleapis.com")&&!read("web/style.css").includes("fonts.googleapis.com")&&index.includes("fontsource-kanit@4.0.0")&&index.includes("fontsource-sarabun@4.0.0"),"app fonts use Fontsource instead of Google Fonts"],
+  [admin.includes('fontsource-kanit@4.0.0/thai.css')&&admin.includes('html,body,button{font-family:"Kanit"')&&!admin.includes('font-family:Arial,"Noto Sans Thai"'),"QR display and print pages use Kanit"],
+  [read("web/style.css").includes('.qr-panel,.qr-scan-panel{text-align:center;font-family:"Kanit"'),"QR modal and scanner explicitly inherit Kanit"],
   [read("web/_headers").includes("style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net data:"),"CSP permits Fontsource styles and font files"],
   [read("web/_headers").includes("https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com"),"CSP permits trusted CDN source-map connections"],
   [index.includes('<script src="/core.js"></script>')&&!index.includes('<script src="/admin.js"></script>')&&!index.includes('<script src="/operations.js"></script>'),"startup HTML loads only the core app bundle"],
