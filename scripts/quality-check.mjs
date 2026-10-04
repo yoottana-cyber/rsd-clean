@@ -84,6 +84,8 @@ const checks=[
   [admin.includes('rpc("mapStatus"'),"executive dashboard uses centralized map status"],
   [core.includes("async function ensureRouteModules(route)")&&core.includes('["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]'),"feature modules are lazy-loaded by route"],
   [!index.includes("cdn.tailwindcss.com")&&read("web/style.css").includes("Minimal utility layer"),"production UI uses local utility CSS instead of Tailwind browser CDN"],
+  [!index.includes("fonts.googleapis.com")&&!read("web/style.css").includes("fonts.googleapis.com")&&index.includes("fontsource-kanit@4.0.0")&&index.includes("fontsource-sarabun@4.0.0"),"app fonts use Fontsource instead of Google Fonts"],
+  [read("web/_headers").includes("style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net data:"),"CSP permits Fontsource styles and font files"],
   [read("web/_headers").includes("https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com"),"CSP permits trusted CDN source-map connections"],
   [index.includes('<script src="/core.js"></script>')&&!index.includes('<script src="/admin.js"></script>')&&!index.includes('<script src="/operations.js"></script>'),"startup HTML loads only the core app bundle"],
   [sw.includes("TRUSTED_RUNTIME_ORIGINS")&&sw.includes("staleWhileRevalidate(RUNTIME,req)"),"trusted CDN and font dependencies have runtime offline cache"],
