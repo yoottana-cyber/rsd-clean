@@ -211,7 +211,7 @@ const adminTables = {
       error(new Error("เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up แล้วลองใหม่"));
       return;
     }
-    win.document.write('<!doctype html><meta charset="utf-8"><title>กำลังเตรียม QR…</title><p style="font-family:sans-serif;padding:24px">กำลังเตรียม QR Code…</p>');
+    win.document.write('<!doctype html><html lang="th"><head><meta charset="utf-8"><title>กำลังเตรียม QR…</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fontsource-kanit@4.0.0/thai.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fontsource-kanit@4.0.0/latin.css"></head><body><p style="font-family:Kanit,Tahoma,sans-serif;padding:24px">กำลังเตรียม QR Code…</p></body></html>');
     busy(true, "กำลังเตรียม QR Code สำหรับพิมพ์…");
     try {
       await window.rsdEnsureQrCode();
@@ -220,8 +220,10 @@ const adminTables = {
       if (!rows.length) throw Error("ยังไม่มีเขตพื้นที่");
       const cards = rows.map((q) => ({ ...q, image: makeQrDataUrl(q.url, 360) }));
       const html =
-        '<!doctype html><html lang="th"><head><meta charset="utf-8"><title>QR จุดตรวจ RSD Clean</title><style>' +
-        '@page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,"Noto Sans Thai",sans-serif;color:#17324a;margin:0}.toolbar{position:sticky;top:0;background:white;padding:8px 0 14px;border-bottom:1px solid #ddd;margin-bottom:12px}.toolbar button{font:inherit;padding:9px 16px;border:0;border-radius:9px;background:#0891b2;color:white;cursor:pointer}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10mm}.card{border:1.5px solid #cde8ec;border-radius:16px;padding:10mm;text-align:center;break-inside:avoid;min-height:122mm;display:flex;flex-direction:column;align-items:center;justify-content:center}.brand{font-weight:700;color:#087e96;font-size:18px}.area{font-weight:700;font-size:22px;margin:10px 0 3px}.class{font-size:15px;color:#567}.hint{font-size:13px;color:#456;margin-top:9px}.qr{width:68mm;height:68mm;object-fit:contain}.code{font-size:10px;color:#9aa;margin-top:7px}@media print{.toolbar{display:none}.grid{gap:8mm}.card{min-height:125mm}}@media(max-width:700px){.grid{grid-template-columns:1fr}}' +
+        '<!doctype html><html lang="th"><head><meta charset="utf-8"><title>QR จุดตรวจ RSD Clean</title>' +
+        '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fontsource-kanit@4.0.0/thai.css">' +
+        '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fontsource-kanit@4.0.0/latin.css"><style>' +
+        '@page{size:A4;margin:12mm}*{box-sizing:border-box}html,body,button{font-family:"Kanit",Tahoma,sans-serif!important}body{color:#17324a;margin:0}.toolbar{position:sticky;top:0;background:white;padding:8px 0 14px;border-bottom:1px solid #ddd;margin-bottom:12px}.toolbar button{font:inherit;padding:9px 16px;border:0;border-radius:9px;background:#0891b2;color:white;cursor:pointer}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10mm}.card{border:1.5px solid #cde8ec;border-radius:16px;padding:10mm;text-align:center;break-inside:avoid;min-height:122mm;display:flex;flex-direction:column;align-items:center;justify-content:center}.brand{font-weight:700;color:#087e96;font-size:18px}.area{font-weight:700;font-size:22px;margin:10px 0 3px}.class{font-size:15px;color:#567}.hint{font-size:13px;color:#456;margin-top:9px}.qr{width:68mm;height:68mm;object-fit:contain}.code{font-size:10px;color:#9aa;margin-top:7px}@media print{.toolbar{display:none}.grid{gap:8mm}.card{min-height:125mm}}@media(max-width:700px){.grid{grid-template-columns:1fr}}' +
         '</style></head><body><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button></div><div class="grid">' +
         cards
           .map(
