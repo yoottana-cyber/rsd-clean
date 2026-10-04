@@ -14,6 +14,8 @@ const adminTables = {
   let adminTab = "Users",
     reportData = null,
     dailyReportData = null,
+    dailyReportLogoCache = new Map(),
+    dailyReportImageCache = { key: "", blob: null, promise: null },
     executivePeriodId = "",
     executiveMapPack = null,
     executiveMapSelected = "";
@@ -1311,15 +1313,23 @@ const adminTables = {
     });
   }
   async function loadDailyLogo(preferred=""){
-    const urls=[preferred,"/school-logo","https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"].filter(Boolean);
-    for(const url of urls){
-      try{
-        const res=await fetch(url,{mode:"cors",cache:"force-cache"});
-        if(!res.ok)continue;
-        return await blobImage(await res.blob());
-      }catch(e){}
-    }
-    return null;
+    const key=String(preferred||"__default__");
+    if(dailyReportLogoCache.has(key))return await dailyReportLogoCache.get(key);
+    const promise=(async()=>{
+      const urls=[preferred,"/school-logo","https://www.ratsada.ac.th/learn/up/uploads/NOOK/LOGO.png","/icon-512.png"].filter(Boolean);
+      for(const url of urls){
+        try{
+          const res=await fetch(url,{mode:"cors",cache:"force-cache"});
+          if(!res.ok)continue;
+          return await blobImage(await res.blob());
+        }catch(e){}
+      }
+      return null;
+    })();
+    dailyReportLogoCache.set(key,promise);
+    const image=await promise;
+    if(!image)dailyReportLogoCache.delete(key);
+    return image;
   }
   function canvasRoundRect(ctx,x,y,w,h,r,fill){
     const rr=Math.min(r,w/2,h/2);
@@ -1338,15 +1348,58 @@ const adminTables = {
     if(line)lines.push(line);
     return lines.length?lines:[""];
   }
-  async function dailyReportCanvasBlob(d){
+  function dailyReportCanvasHeight(d,g,cfg){
+    const measure=document.createElement("canvas").getContext("2d");
+    let y=390;
+    if(d.isHoliday)return Math.max(650,y+230+42+50+70);
+    y+=178;
+    if(d.approvalPending)y+=78;
+    if(d.skipped)y+=78;
+    if(d.pending)y+=90;
+    const labels=cfg.scoreLabels||{"1":"ปรับปรุง","2":"ปานกลาง","3":"ยอดเยี่ยม"};
+    const sections=[
+      [labels["3"],g.excellent],
+      [labels["2"],g.medium],
+      [labels["1"],g.improve],
+      ["งดตรวจ",g.skipped],
+      ["รอตรวจ",g.pending]
+    ];
+    for(const [,rows] of sections){
+      if(!rows.length)continue;
+      y+=78;
+      for(const item of rows){
+        measure.font='600 22px "Kanit",sans-serif';
+        y+=canvasWrap(measure,dailyItemText(item,false),840).length*31;
+        if(item.Status==="งดตรวจ"&&String(item.SkipReason||"").trim()){
+          measure.font='400 19px "Kanit",sans-serif';
+          y+=canvasWrap(measure,"เหตุผล: "+String(item.SkipReason).trim(),805).length*27;
+        }
+        if(String(item.Notes||"").trim()){
+          measure.font='400 19px "Kanit",sans-serif';
+          y+=canvasWrap(measure,"หมายเหตุ: "+String(item.Notes).trim().replace(/\s+/g," "),805).length*27;
+        }
+        y+=15;
+      }
+      y+=16;
+    }
+    return Math.min(7000,Math.max(650,y+42+50+70));
+  }
+  function dailyReportImageKey(d){
+    const cfg=d.settings||{};
+    return [
+      d.date,d.updatedAt,d.done,d.scheduled,d.pending,d.skipped,d.approvalPending,
+      cfg.schoolName||"",cfg.schoolLogoUrl||"",cfg.reportFooter||"",
+      JSON.stringify(cfg.scoreLabels||{}),
+      (d.items||[]).map(x=>[x.InspectionID,x.Status,x.Score,x.Notes,x.SkipReason,x.AreaName,x.ClassName]).join("|")
+    ].join("::");
+  }
+  async function buildDailyReportCanvasBlob(d){
     await document.fonts?.ready?.catch?.(()=>{});
     const g=dailyGroups(d),cfg=d.settings||{};
-    const itemCount=(d.items||[]).length;
-    const noteCount=(d.items||[]).filter(x=>String(x.Notes||"").trim()).length;
-    const height=Math.max(1350,Math.min(7000,880+itemCount*76+noteCount*34+(d.isHoliday?0:260)));
+    const height=dailyReportCanvasHeight(d,g,cfg);
     const canvas=document.createElement("canvas");
     canvas.width=1080;canvas.height=height;
-    const ctx=canvas.getContext("2d");
+    const ctx=canvas.getContext("2d",{alpha:false});
     ctx.fillStyle="#eef8f7";ctx.fillRect(0,0,canvas.width,canvas.height);
     canvasRoundRect(ctx,42,42,996,height-84,34,"#ffffff");
 
@@ -1442,13 +1495,24 @@ const adminTables = {
     ctx.fillText(String(cfg.reportFooter||"ข้อมูลจากระบบ RSD Clean")+" · อัปเดต "+new Date(d.updatedAt).toLocaleTimeString("th-TH",{timeZone:"Asia/Bangkok"})+" น.",86,y);
     y+=50;
 
-    const finalHeight=Math.min(height,Math.max(650,y+70));
-    if(finalHeight===height){
-      return await new Promise(resolve=>canvas.toBlob(resolve,"image/png",0.95));
+    return await new Promise(resolve=>canvas.toBlob(resolve,"image/png"));
+  }
+  async function dailyReportCanvasBlob(d){
+    const key=dailyReportImageKey(d);
+    if(dailyReportImageCache.key===key){
+      if(dailyReportImageCache.blob)return dailyReportImageCache.blob;
+      if(dailyReportImageCache.promise)return await dailyReportImageCache.promise;
     }
-    const cropped=document.createElement("canvas");cropped.width=1080;cropped.height=finalHeight;
-    cropped.getContext("2d").drawImage(canvas,0,0,1080,finalHeight,0,0,1080,finalHeight);
-    return await new Promise(resolve=>cropped.toBlob(resolve,"image/png",0.95));
+    const promise=buildDailyReportCanvasBlob(d);
+    dailyReportImageCache={key,blob:null,promise};
+    try{
+      const blob=await promise;
+      if(dailyReportImageCache.key===key)dailyReportImageCache={key,blob,promise:null};
+      return blob;
+    }catch(e){
+      if(dailyReportImageCache.key===key)dailyReportImageCache={key:"",blob:null,promise:null};
+      throw e;
+    }
   }
   async function downloadDailyReportImage(){
     if(!dailyReportData)return;
@@ -1529,6 +1593,7 @@ const adminTables = {
       '</section>';
     $("daily-actions").classList.remove("hidden");
     icons();
+    setTimeout(()=>loadDailyLogo(cfg.schoolLogoUrl||"").catch(()=>null),0);
   }
   async function loadDailyReport(seq=S.seq){
     const date=$("daily-date")?.value;
