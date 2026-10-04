@@ -1,4 +1,5 @@
 let taskRows = [];
+let inspectorTaskNavCleanup = null;
   let inspectorMapLayout={shapes:[]};
   function inspectorTeamLabel(i) {
     const names = Array.isArray(i?.meta?.inspectorNames) ? i.meta.inspectorNames.filter(Boolean) : [];
@@ -55,8 +56,8 @@ let taskRows = [];
   }
   function inspectorTaskMapHtml(todayRows){
     const shapes=inspectorMapLayout?.shapes||[];
-    if(!shapes.length)return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
-    if(!todayRows.length)return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">วันนี้ไม่มีพื้นที่ที่ได้รับมอบหมาย</div></section>';
+    if(!shapes.length)return '<section class="card inspector-map-card mb-5" id="inspector-task-map"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">ยังไม่มีผังพื้นที่ในระบบ</div></section>';
+    if(!todayRows.length)return '<section class="card inspector-map-card mb-5" id="inspector-task-map"><div class="inspector-map-head"><div><span class="muted">ตำแหน่งงานวันนี้</span><h2>พื้นที่ของฉันบนผัง</h2></div></div><div class="inspector-map-empty">วันนี้ไม่มีพื้นที่ที่ได้รับมอบหมาย</div></section>';
 
     const byArea=new Map(todayRows.map(x=>[String(x.meta?.areaId||""),x])),
       counts={pending:0,excellent:0,medium:0,improve:0,skipped:0,offline:0};
@@ -81,7 +82,7 @@ let taskRows = [];
       ["#64748b","งดตรวจ",counts.skipped],["#8b5cf6","รอซิงก์",counts.offline]
     ].filter(x=>x[2]>0).map(x=>'<span><i style="background:'+x[0]+'"></i>'+esc(x[1])+' <b>'+x[2]+'</b></span>').join("");
 
-    return '<section class="card inspector-map-card mb-5"><div class="inspector-map-head"><div><span class="muted">แตะพื้นที่เพื่อไปยังงาน</span><h2>พื้นที่ของฉันบนผัง</h2></div><button class="btn small secondary" id="inspector-map-toggle" type="button">ซ่อนผัง</button></div>'+
+    return '<section class="card inspector-map-card mb-5" id="inspector-task-map"><div class="inspector-map-head"><div><span class="muted">แตะพื้นที่เพื่อไปยังงาน</span><h2>พื้นที่ของฉันบนผัง</h2></div><button class="btn small secondary" id="inspector-map-toggle" type="button">ซ่อนผัง</button></div>'+
       '<div class="inspector-map-legend">'+legend+'</div>'+
       '<div class="inspector-map-scroll" id="inspector-map-body"><svg viewBox="0 0 1600 1000" aria-label="ผังพื้นที่งานตรวจของฉัน"><rect width="1600" height="1000" fill="#fff"/>'+reference+body+'</svg></div></section>';
   }
@@ -103,6 +104,32 @@ let taskRows = [];
       el.onclick=go;
       el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}};
     });
+  }
+
+  function wireInspectorTaskQuickNav(){
+    if(inspectorTaskNavCleanup){inspectorTaskNavCleanup();inspectorTaskNavCleanup=null;}
+    const nav=$("task-float-nav"),topBtn=$("task-jump-top"),mapBtn=$("task-jump-map"),map=document.getElementById("inspector-task-map");
+    if(!nav||!topBtn)return;
+    let raf=0;
+    const sync=()=>{
+      raf=0;
+      const y=Math.max(0,window.scrollY||document.documentElement.scrollTop||0),active=S.route==="tasks";
+      const rect=map?.getBoundingClientRect(),nearMap=!!rect&&rect.bottom>90&&rect.top<(window.innerHeight-90),passedMap=!!rect&&rect.bottom<110;
+      topBtn.classList.toggle("show",active&&y>620);
+      if(mapBtn)mapBtn.classList.toggle("show",active&&!!map&&y>360&&passedMap&&!nearMap);
+      nav.classList.toggle("active",nav.querySelector(".task-float-action.show")!==null);
+    };
+    const requestSync=()=>{if(!raf)raf=requestAnimationFrame(sync);};
+    topBtn.onclick=()=>window.scrollTo({top:0,behavior:"smooth"});
+    if(mapBtn)mapBtn.onclick=()=>map?.scrollIntoView({behavior:"smooth",block:"start"});
+    window.addEventListener("scroll",requestSync,{passive:true});
+    window.addEventListener("resize",requestSync,{passive:true});
+    requestSync();
+    inspectorTaskNavCleanup=()=>{
+      window.removeEventListener("scroll",requestSync);
+      window.removeEventListener("resize",requestSync);
+      if(raf)cancelAnimationFrame(raf);
+    };
   }
 
   async function renderTasks(seq) {
@@ -225,6 +252,9 @@ let taskRows = [];
             )
             .join("")
         : '<div class="card empty">ไม่มีงานวันนี้ อาจเป็นวันหยุดหรือยังไม่ได้มอบหมายงาน</div>') +
+      '</div><div class="task-float-nav" id="task-float-nav" aria-label="ทางลัดหน้า งานตรวจของฉัน">'+
+      '<button class="task-float-action map" id="task-jump-map" type="button" aria-label="กลับไปยังแผนที่"><i data-lucide="map"></i><span>แผนที่</span></button>'+
+      '<button class="task-float-action top" id="task-jump-top" type="button" aria-label="กลับด้านบน"><i data-lucide="arrow-up"></i><span>ด้านบน</span></button>'+
       "</div>";
     const applyTaskFilter=()=>{
       const q=String($("task-search")?.value||"").trim().toLocaleLowerCase("th");
@@ -239,6 +269,7 @@ let taskRows = [];
     if($("task-status-filter")) $("task-status-filter").onchange=applyTaskFilter;
     icons();
     wireInspectorTaskMap();
+    wireInspectorTaskQuickNav();
     $("refresh-tasks").onclick = route;
     $("scan-qr").onclick = scanQrModal;
     if($("sync-now")) $("sync-now").onclick=()=>window.syncOfflineInspections?.(true);

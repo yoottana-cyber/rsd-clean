@@ -79,6 +79,8 @@ const checks=[
   [ops.includes('rpc("mapStatus"'),"daily control uses centralized map status"],
   [core.includes('rpc("mapStatus"'),"admin dashboard uses centralized map status"],
   [inspector.includes('rpc("mapStatus"'),"inspector/teacher maps use centralized map status"],
+  [inspector.includes("function wireInspectorTaskQuickNav")&&inspector.includes('id="task-jump-map"')&&inspector.includes('id="task-jump-top"'),"inspector task page has smart map/top quick navigation"],
+  [read("web/style.css").includes(".task-float-nav")&&read("web/style.css").includes("bottom:calc(91px + env(safe-area-inset-bottom))"),"inspector quick navigation clears the mobile bottom bar"],
   [admin.includes('rpc("mapStatus"'),"executive dashboard uses centralized map status"],
   [core.includes("async function ensureRouteModules(route)")&&core.includes('["/map-enhancements.js",()=>typeof window.rsdEnsureMapReference==="function"]'),"feature modules are lazy-loaded by route"],
   [!index.includes("cdn.tailwindcss.com")&&read("web/style.css").includes("Minimal utility layer"),"production UI uses local utility CSS instead of Tailwind browser CDN"],

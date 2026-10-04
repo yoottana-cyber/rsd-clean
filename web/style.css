@@ -1960,6 +1960,15 @@ tbody tr:hover td{background:#fbfefe}
 .inspector-map-shape>polygon,.inspector-map-shape>rect{stroke:#94a3b8;stroke-width:1.4;fill-opacity:.12;vector-effect:non-scaling-stroke}.inspector-map-shape.mine{cursor:pointer}.inspector-map-shape.mine>polygon,.inspector-map-shape.mine>rect{stroke:#315c69;stroke-width:3;fill-opacity:.62}.inspector-map-shape.mine:hover>polygon,.inspector-map-shape.mine:hover>rect,.inspector-map-shape.mine:focus>polygon,.inspector-map-shape.mine:focus>rect{fill-opacity:.82;stroke:#075985;stroke-width:5}.inspector-map-shape text{font:700 16px "Kanit",sans-serif;fill:#173943;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none}.inspector-map-shape .sub{font-size:11px;font-weight:500;fill:#415f68}
 .inspector-map-empty{min-height:120px;display:grid;place-items:center;text-align:center;background:#f7fafb;border-radius:10px;color:#778c95;font-size:10px}
 .task-map-focus{outline:3px solid #22b8cf!important;outline-offset:3px;box-shadow:0 0 0 6px rgba(34,184,207,.12),0 14px 34px rgba(34,184,207,.18)!important;transition:box-shadow .2s,outline .2s}
+.inspector-map-card{scroll-margin-top:86px}
+.task-float-nav{position:fixed;right:18px;bottom:22px;z-index:76;display:flex;flex-direction:column;align-items:flex-end;gap:9px;pointer-events:none}
+.task-float-action{min-height:44px;padding:0 14px;border:1px solid rgba(15,118,110,.16);border-radius:999px;background:rgba(255,255,255,.96);color:#315661;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:600 12px "Kanit",sans-serif;box-shadow:0 8px 24px rgba(22,48,71,.16);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;transform:translateY(10px) scale(.96);pointer-events:none;transition:opacity .18s ease,transform .18s ease,box-shadow .18s ease;cursor:pointer}
+.task-float-action svg{width:18px;height:18px;stroke-width:2.2}
+.task-float-action.show{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.task-float-action.show:hover{box-shadow:0 11px 30px rgba(22,48,71,.22);transform:translateY(-1px)}
+.task-float-action.map{background:#0f766e;color:#fff;border-color:#0f766e}
+.task-float-action.top{background:rgba(255,255,255,.97);color:#315661}
+@media(max-width:760px){.task-float-nav{right:12px;bottom:calc(91px + env(safe-area-inset-bottom))}.task-float-action{min-height:42px;padding:0 12px;font-size:11px;box-shadow:0 7px 22px rgba(22,48,71,.18)}}
 @media(max-width:700px){.inspector-map-head{align-items:flex-start}.inspector-map-scroll{max-height:390px;padding:5px}.inspector-map-scroll svg{min-width:660px}}
 
 
